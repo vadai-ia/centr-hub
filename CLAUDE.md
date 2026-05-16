@@ -139,7 +139,10 @@ Lo que NO requiere aprobación:
 Tokens server-side de proveedores externos (**Shopify access_token y Whaapy api_key**) se rotan cada 90 días. Procedimiento documentado en password manager de VADAI. Tokens viven cifrados en Supabase Vault, asociados a la organización. **Whaapy api_key entra de nuevo a este SOP** tras el Ajuste post-Discovery 2 #14 — la sincronización bidireccional de contactos requiere llamadas salientes desde código (crear/actualizar/asignar contactos vía API saliente). El iframe sigue usando sesión nativa del navegador para operación conversacional; la api_key cubre exclusivamente las APIs salientes server-side.
 
 **Backups:**
-Supabase Pro hace backups diarios automáticos. Recuperación manual desde el dashboard de Supabase si hace falta.
+Supabase Free NO incluye backups automáticos diarios. Backups manuales vía `pg_dump` quedan
+como responsabilidad operativa del operador antes de cambios estructurales mayores
+(migraciones de schema, cleanups de data). Si el proyecto se mueve a Supabase Pro en V2,
+los backups diarios automáticos pasan a ser cobertura nativa.
 
 **Monitoreo:**
 - Vercel reporta deploys y errors de frontend.
