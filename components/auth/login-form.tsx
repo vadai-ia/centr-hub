@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   signInWithPassword,
   signInWithMagicLink,
@@ -12,6 +12,23 @@ export function LoginForm() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [isPending, setIsPending] = useState(false);
+  // null = still checking hash; true = no hash found, render form
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    const hash = window.location.hash;
+    if (hash && new URLSearchParams(hash.substring(1)).get("access_token")) {
+      // Supabase sent auth tokens to /login instead of /auth/confirm.
+      // Preserve the hash and hand off to the handler that knows what to do.
+      window.location.replace("/auth/confirm" + hash);
+      return;
+    }
+    setReady(true);
+  }, []);
+
+  // Don't render the form until we've confirmed there's no hash to redirect.
+  // This prevents the login UI from flashing before the redirect fires.
+  if (!ready) return null;
 
   async function handlePasswordSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
