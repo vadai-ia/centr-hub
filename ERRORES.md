@@ -25,6 +25,17 @@ Cada entrada documenta UN bug o lección con la siguiente estructura:
 - **Workaround / fix:** se eliminó la cláusula `RETURNING ... INTO` del INSERT multi-fila. Los IDs de las etapas se recuperan inmediatamente después por nombre con `SELECT ... INTO ...`, que era la lógica funcional. La línea problemática era redundante.
 - **Lección:** cuando un INSERT inserta múltiples filas y la lógica posterior necesita los IDs, NO usar `RETURNING ... INTO variable_escalar`. Opciones válidas: (a) recuperar por columna única posterior con SELECT, (b) usar `RETURNING ... BULK COLLECT INTO array`, (c) hacer INSERTs uno por uno con su propio RETURNING. La opción (a) es legible y suficiente cuando ya hay un identificador único como `name + organization_id + funnel`.
 
+### Flujo de invitación incompleto — hash fragment vs PKCE en Supabase Auth
+
+- **Milestone donde se detectó:** M2 (fix post-entrega).
+- **Síntoma:** click en el email de invitación de Supabase redirigía al usuario a `/login` sin mostrar ninguna pantalla para definir contraseña. La activación de cuenta nunca se completaba.
+- **Causa raíz:** `app/auth/callback/route.ts` (Route Handler) sólo manejaba el flujo PKCE — tokens llegando como `?code=`. Supabase envía las invitaciones (y password recovery) en flujo implícito: los tokens llegan como `#access_token=...&refresh_token=...&type=invite` (hash fragment). Los hash fragments son **client-side only** — el servidor nunca los recibe. El Route Handler veía la request sin `?code=`, caía al catch-all, y redirigía a `/login?error=link_expired`.
+- **Workaround / fix:**
+  1. **Route Handler actualizado:** si no hay `?code=`, devuelve un HTML mínimo con `<script>window.location.replace('/auth/confirm'+window.location.hash)</script>`. El script ejecuta en el navegador y redirige a `/auth/confirm` preservando el hash fragment (que el servidor nunca habría visto). `window.location.replace` evita que `/auth/callback` quede en el historial del navegador.
+  2. **Nueva página `/auth/confirm`** (`app/(auth)/auth/confirm/page.tsx`): Client Component que parsea el hash en `useEffect`. Para `type=invite` o `type=recovery` renderiza un formulario para definir contraseña (validación mínima 8 caracteres + confirmación). Llama `supabase.auth.setSession()` con los tokens del hash y luego `supabase.auth.updateUser({ password })`. Para `type=magiclink`/`email` establece sesión y redirige al dashboard. Edge cases: hash vacío, error en hash, tokens expirados — todos muestran mensaje en español con link a `/login`.
+  3. **Middleware actualizado:** `/auth/confirm` agregado a `PUBLIC_ROUTES`.
+- **Lección:** Supabase Auth tiene **dos flujos distintos en Next.js App Router**: (a) **PKCE** (`?code=` → `exchangeCodeForSession` en Route Handler o Server Component) y (b) **Implícito** (`#access_token=` → sólo accesible client-side). Las invitaciones y password recovery de Supabase usan el flujo implícito con hash fragment. Un Route Handler nunca puede manejarlos directamente. La técnica correcta es servir desde el Route Handler un HTML mínimo que haga el redirect client-side con `window.location.replace`, preservando el hash. La nueva página `/auth/confirm` actúa como landing unificado para todos los flujos de hash.
+
 ### supabase-js 2.105 — Database type hand-written incompatible con shape estricta
 
 - **Milestone donde se detectó:** M1.
