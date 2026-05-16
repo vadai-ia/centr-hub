@@ -15,4 +15,9 @@ Cada entrada documenta UN ajuste pendiente con la siguiente estructura:
 
 ## Entradas
 
-_(Sin entradas aún — el archivo se popula durante M2-M10.)_
+### Landing diferenciado por rol al login (post-M2)
+
+- **Componente o pantalla:** `app/page.tsx` (redirect raíz tras autenticación).
+- **Issue detectado:** Tras login, todos los roles son redirigidos a `/pipeline`. La decisión operativa post-M2 es que cada rol abra en su pantalla de mayor valor inicial: vendedor → `/mi-dia`, admin / superadmin → `/dashboard`. Validar la hipótesis con Diego/Gina antes de implementar definitivo.
+- **Sub-sesión de F7 sugerida:** B (layout/dashboard).
+- **Severidad:** baja.
