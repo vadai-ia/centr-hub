@@ -98,8 +98,7 @@ begin
     (v_org_id, 'venta', 'En negociación',     4, '#FBBF24',  60.00, false, false, false, false),
     (v_org_id, 'venta', 'Esperando pago',     5, '#F97316',  85.00, false, false, false, false),
     (v_org_id, 'venta', 'Ganada',             6, '#10B981', 100.00, false, true,  false, false),
-    (v_org_id, 'venta', 'Perdida',            7, '#EF4444',   0.00, false, false, true,  true)
-  returning id into v_stage_lead_nuevo;   -- captura la primera (no la usamos directo)
+    (v_org_id, 'venta', 'Perdida',            7, '#EF4444',   0.00, false, false, true,  true);
 
   -- recuperar IDs explícitos por nombre para usarlos en seeds posteriores
   select id into v_stage_lead_nuevo

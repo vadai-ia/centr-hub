@@ -17,6 +17,14 @@ Cada entrada documenta UN bug o lección con la siguiente estructura:
 
 ## Entradas
 
+### RETURNING INTO variable escalar con INSERT multi-fila falla en PL/pgSQL
+
+- **Milestone donde se detectó:** M1.
+- **Síntoma:** función `bootstrap_organization` fallaba con `ERROR: P0003: query returned more than one row` en la línea del INSERT de 7 etapas Funnel Venta.
+- **Causa raíz:** `INSERT ... VALUES (multi-fila) RETURNING id INTO variable_escalar` es inválido en PL/pgSQL — una variable escalar solo puede recibir 1 fila. Para casos multi-fila se requiere `RETURNING ... BULK COLLECT INTO arr` o, como en este caso, eliminar la cláusula RETURNING si no se necesita.
+- **Workaround / fix:** se eliminó la cláusula `RETURNING ... INTO` del INSERT multi-fila. Los IDs de las etapas se recuperan inmediatamente después por nombre con `SELECT ... INTO ...`, que era la lógica funcional. La línea problemática era redundante.
+- **Lección:** cuando un INSERT inserta múltiples filas y la lógica posterior necesita los IDs, NO usar `RETURNING ... INTO variable_escalar`. Opciones válidas: (a) recuperar por columna única posterior con SELECT, (b) usar `RETURNING ... BULK COLLECT INTO array`, (c) hacer INSERTs uno por uno con su propio RETURNING. La opción (a) es legible y suficiente cuando ya hay un identificador único como `name + organization_id + funnel`.
+
 ### supabase-js 2.105 — Database type hand-written incompatible con shape estricta
 
 - **Milestone donde se detectó:** M1.
