@@ -222,6 +222,14 @@ La sincronización bidireccional crea riesgo de loops infinitos: la plataforma e
 - **M4:** webhooks Whaapy inbound + cliente outbound a Whaapy + defensa anti-bucle del lado Whaapy.
 - **M6:** UI de edición de contacto + reasignación admin + invocación del flujo de propagación (no implementa el cliente outbound directamente — usa los clientes M3/M4 ya construidos).
 
+## Deuda técnica aceptada
+
+Warnings de Supabase Security Advisor documentados aquí como deuda aceptada. No requieren acción en milestones actuales.
+
+**`citext` en el schema `public`:** Supabase recomienda instalar extensiones en un schema dedicado (ej. `extensions`) para aislarlas de `public`. Mover `citext` requeriría una migración destructiva de todos los tipos y columnas que la usan (tag_mappings.normalized_tag, organizations.slug, etc.), arriesgando ruptura de RLS y datos. **Deuda aceptada para MVP** — si en V2 hay un requerimiento de seguridad que lo justifique, se evalúa la migración completa.
+
+**Leaked Password Protection:** Supabase Security Advisor reporta que esta protección está deshabilitada. Es una feature de **Supabase Pro** — compara passwords contra listas de credenciales filtradas (HaveIBeenPwned). No disponible en Free tier. **No hay acción posible en código** — cuando el proyecto suba a Pro, activar en Dashboard > Auth > Security.
+
 ## Para Claude Code: cuando estás trabajando en un milestone
 
 1. Lee este `CLAUDE.md` primero.
