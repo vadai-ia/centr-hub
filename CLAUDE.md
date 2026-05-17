@@ -230,6 +230,8 @@ Warnings de Supabase Security Advisor documentados aquí como deuda aceptada. No
 
 **Leaked Password Protection:** Supabase Security Advisor reporta que esta protección está deshabilitada. Es una feature de **Supabase Pro** — compara passwords contra listas de credenciales filtradas (HaveIBeenPwned). No disponible en Free tier. **No hay acción posible en código** — cuando el proyecto suba a Pro, activar en Dashboard > Auth > Security.
 
+**`is_member_of(uuid)` callable by anon/authenticated:** Supabase Security Advisor seguirá reportando que esta función SECURITY DEFINER es invocable por roles `anon` y `authenticated`. Esto es **intencional y necesario**: la función se usa en RLS policies (`organizations`, `memberships`, todas las tablas tenant). Si los roles autenticados no tienen EXECUTE, cualquier query bajo RLS falla con "permission denied for function". Alternativas evaluadas (SECURITY INVOKER, mover a schema privado) son invasivas y aportan poco — la función solo retorna boolean y consulta tablas con RLS propio. **Warning conscientemente ignorado** — registrado aquí para que aparezca en review futuro como decisión arquitectónica, no oversight.
+
 ## Para Claude Code: cuando estás trabajando en un milestone
 
 1. Lee este `CLAUDE.md` primero.
