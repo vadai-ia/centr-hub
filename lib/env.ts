@@ -8,6 +8,13 @@
  *     INNGEST, WHAAPY, SHOPIFY). NUNCA importar desde código
  *     que ejecute en el browser — el bundler lo prohíbe vía
  *     marker `import "server-only"`.
+ *
+ * Variables con entrada diferida por milestone:
+ *   - SHOPIFY_WEBHOOK_SECRET  → se configura en M3 (Custom App Shopify)
+ *   - WHAAPY_API_KEY          → se configura en M3-M4
+ *   Ambas se validan en startup solo como "string o ausente" (vacío permitido).
+ *   El error descriptivo se lanza en runtime a través de los helpers
+ *   getShopifyWebhookSecret() y getWhaapyApiKey() cuando se intenta usarlas.
  */
 import { z } from "zod";
 
@@ -22,8 +29,9 @@ const serverSchema = clientSchema.extend({
   INNGEST_SIGNING_KEY: z.string().min(1).optional(),
   UPSTASH_REDIS_REST_URL: z.string().url().optional(),
   UPSTASH_REDIS_REST_TOKEN: z.string().min(1).optional(),
-  SHOPIFY_WEBHOOK_SECRET: z.string().min(1).optional(),
-  WHAAPY_API_KEY: z.string().min(1).optional(),
+  // Requeridas desde M3 — vacío permitido antes de ese milestone
+  SHOPIFY_WEBHOOK_SECRET: z.string().optional(),
+  WHAAPY_API_KEY: z.string().optional(),
 });
 
 function parseClient() {
@@ -65,4 +73,31 @@ export function getServerEnv(): ServerEnv {
   if (serverEnvCache) return serverEnvCache;
   serverEnvCache = parseServer();
   return serverEnvCache;
+}
+
+/**
+ * Accessors de uso tardío para variables que entran en M3+.
+ * Llamar solo desde código de M3+ (webhooks Shopify, workers Whaapy).
+ * Lanzar aquí da un error claro con contexto de milestone.
+ */
+export function getShopifyWebhookSecret(): string {
+  const val = getServerEnv().SHOPIFY_WEBHOOK_SECRET;
+  if (!val) {
+    throw new Error(
+      "SHOPIFY_WEBHOOK_SECRET no configurado. " +
+        "Requerida desde M3 — agregar al crear la Custom App de Shopify.",
+    );
+  }
+  return val;
+}
+
+export function getWhaapyApiKey(): string {
+  const val = getServerEnv().WHAAPY_API_KEY;
+  if (!val) {
+    throw new Error(
+      "WHAAPY_API_KEY no configurado. " +
+        "Requerida desde M3-M4 — agregar al obtener el api_key de Whaapy.",
+    );
+  }
+  return val;
 }
