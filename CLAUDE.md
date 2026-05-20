@@ -45,16 +45,20 @@ La doctrina v5 sólo asumía `SHOPIFY_WEBHOOK_SECRET`. El flujo nuevo requiere t
 
 Las tres están en `.env.local` (local) y deben estar en Vercel env (producción). Repo público — nunca commitear `.env.local`.
 
-### Scopes protegidos de Shopify pendientes de aprobación formal
+### Scopes protegidos de Shopify — Custom Apps tienen acceso automático
 
-La app en Dev Dashboard solicita los scopes definidos en M0. **Dos categorías requieren aprobación formal de Shopify que no se concedió todavía** (mayo 2026):
+La app de Centr Hub en el Shopify Dev Dashboard es una **Custom App** (instalada por organización vía flujo OAuth, no publicada en el Shopify App Store). Para esta categoría, los scopes protegidos están **operativos automáticamente al instalar la app** — el consentimiento del merchant se otorga al aprobar los scopes durante la instalación. No hay trámite externo:
 
-- **`read_customers`, `write_customers`** — requieren completar el **Protected Customer Data Form** en Partner Dashboard. Hasta aprobación: queries a customers en tienda en plan de paga (Centr está en plan **Grow**) **retornan arrays vacíos** aunque la API responda 200 OK. M3 compila y funciona contra tiendas dev, pero la sincronización real de contactos contra la tienda de Centr no opera hasta aprobación.
-- **`read_all_orders`** — requiere request manual en Partner Dashboard con justificación de uso. Hasta aprobación: la API limita lectura de orders a los **últimos 60 días**. Bloquea el backfill completo de M11 (la sección "Alcance del backfill inicial" más abajo asume scope concedido).
+- **`read_customers`, `write_customers`** — pertenecen a Protected Customer Data Levels 1 y 2. Custom Apps tienen acceso automático a ambos niveles. **No hay Protected Customer Data Form que llenar.**
+- **`read_all_orders`** — mismo modelo. En Custom Apps este scope se aprueba en la instalación. **No requiere request manual en Partner Dashboard.**
 
-**Estado en mayo 2026: ambos forms enviados, pendiente respuesta de Shopify.** M3 puede arrancar contra tienda de desarrollo (no aplica restricción) o avanzar con scope público de orders + customers vacíos, dejando sincronización real para cuando bajen las aprobaciones. M11 directamente no puede ejecutar backfill completo hasta que `read_all_orders` esté aprobado.
+**Diferencia con apps públicas del App Store:** los formularios de Protected Customer Data y el request manual de `read_all_orders` aplican **únicamente a apps publicadas en el Shopify App Store** (distribución masiva). Centr Hub no entra en esa categoría — es una integración 1-a-1 por organización en el modelo SaaS multi-tenant. Ver entrada en `ERRORES.md` ("Protected Customer Data malinterpretado") para el malentendido inicial y la regla general.
 
-Para Claude Code en M3: **no asumir que customers en producción están disponibles**. Si la query de customers devuelve vacío en una tienda Grow+ real, **no es bug** — es restricción de scopes. Loguear y continuar.
+**Implicación operativa para M3 y M11:**
+
+- Una vez que Centr instala la app en su tienda y aprueba los scopes solicitados, todos están vigentes.
+- Si la query de customers o orders devuelve vacío en producción, **es bug** — investigar token mal obtenido, scope omitido en la lista solicitada, o rechazo silencioso en la instalación. NO asumir restricción regulatoria.
+- M11 puede ejecutar el backfill completo desde apertura de la tienda Shopify sin bloqueo externo.
 
 ### Whaapy: scopes elegidos al generar la API key
 
@@ -219,7 +223,7 @@ Documentados aquí porque no son hechos confirmados con prueba mecánica, sino i
 
 **Centr Hub backfilea TODO el histórico desde apertura de la tienda Shopify** (Discovery 2 respuesta 2.0). NO es rango parametrizable de "últimos N meses". El scope `read_all_orders` solicitado en M0 es esencial — sin él, Shopify limita a últimos 60 días.
 
-**Estado en mayo 2026:** la aprobación formal de `read_all_orders` por parte de Shopify sigue pendiente (request enviado en Partner Dashboard). M11 NO puede ejecutar el backfill completo hasta que la aprobación baje. Detalle en sección "Setup post-M2" arriba.
+**Sobre la aprobación de `read_all_orders`:** en Custom Apps (modelo Centr Hub) este scope se aprueba en la instalación, sin trámite externo. Ver "Setup post-M2" arriba para detalle del modelo y la entrada en `ERRORES.md` sobre el malentendido inicial.
 
 **Expectativa operativa para M11:** la ejecución del backfill puede tardar **varias horas** según volumen real de Centr (apertura hace varios años). Bulk Operations de Shopify procesa async — el operador lanza la operación, espera al callback de completado, y procesa el archivo de resultados por chunks vía Inngest.
 
