@@ -16,7 +16,63 @@ Las versiones exactas viven en `package.json`. No actualizar versiones de depend
 
 **Tokens server-side en Supabase Vault:** Shopify access_token Y Whaapy api_key, ambos cifrados por organización. Whaapy api_key vuelve a Vault tras el Ajuste post-Discovery 2 #14 (sincronización bidireccional de contactos requiere llamadas salientes server-side a Whaapy — crear/actualizar/asignar contactos). El iframe de la pestaña Whaapy sigue usando sesión nativa del navegador para operación conversacional; la api_key cubre exclusivamente APIs salientes server-side.
 
+**El flujo de obtención del Shopify access_token cambió tras 1-ene-2026 y la doctrina v5 no lo refleja.** Ver sección "Setup post-M2" más abajo para Client ID/Secret, client_credentials grant, scopes pendientes de aprobación y scopes elegidos de la api_key de Whaapy.
+
 Stack documentado en detalle en Sección 3.1 de la doctrina (`CENTR-DOCTRINE-v5.md`).
+
+## Setup post-M2: flujo nuevo de Shopify (Dev Dashboard) y scopes de Whaapy
+
+Documentado durante el setup de credenciales reales tras cerrar M2 (mayo 2026). Sustituye/extiende lo que asume la doctrina v5 (Secciones 3.1 y 3.6) en los puntos donde el flujo cambió. La doctrina v5 queda inmutable; esta sección es el delta operativo y prevalece sobre la doctrina donde haya conflicto.
+
+### Shopify: Custom Apps clásicas no existen tras 1-ene-2026
+
+La doctrina v5 (Sección 3.6, "Custom App por tenant con Admin GraphQL API v2026-04") asume el flujo previo donde el merchant creaba una Custom App en `admin.shopify.com` y obtenía un Admin API access token directamente. **Ese flujo fue retirado por Shopify el 1 de enero de 2026.** Tras esa fecha, toda integración pasa por el **Shopify Dev Dashboard** (`partners.shopify.com` → app creada por VADAI, instalada en cada tienda).
+
+Implicaciones operativas:
+
+- **Credenciales entregadas por Shopify cambian.** Antes: un único `access_token` del Custom App. Ahora: par **Client ID + Client Secret** de la app del Dev Dashboard. El `access_token` por tienda se obtiene en runtime con un intercambio **client_credentials grant** contra Shopify.
+- **Webhook signing secret = Client Secret.** En el flujo nuevo, Shopify firma los webhooks con el mismo Client Secret. No hay un valor separado para webhooks — se reusa el mismo string.
+- **Lo que vive en Vault por organización** ahora son tres valores: `client_id`, `client_secret`, y el `access_token` derivado (cacheado con refresh cuando expire). El SOP de rotación 90 días aplica al Client Secret; el access_token rota por contrato del grant.
+- **Para M3:** el cliente outbound de Shopify Admin API debe obtener access_token vía client_credentials grant antes de la primera llamada (o tomarlo del cache en Vault si está vigente). HMAC de webhooks: verificar contra Client Secret. La doctrina dice "access_token de la Custom App cifrado en Vault" — sigue siendo correcto en intención (token cifrado por org), sólo cambia cómo se obtiene.
+
+### Variables nuevas en `.env.local`
+
+La doctrina v5 sólo asumía `SHOPIFY_WEBHOOK_SECRET`. El flujo nuevo requiere tres variables (todas server-side, ninguna `NEXT_PUBLIC_`):
+
+- `SHOPIFY_API_KEY` — Client ID de la app en Dev Dashboard.
+- `SHOPIFY_API_SECRET` — Client Secret de la app.
+- `SHOPIFY_WEBHOOK_SECRET` — **mismo valor que `SHOPIFY_API_SECRET`** en este flujo. Se mantiene como variable separada por claridad de uso (HMAC verification vs cliente API) y futuro-proofing por si Shopify vuelve a separarlos.
+
+Las tres están en `.env.local` (local) y deben estar en Vercel env (producción). Repo público — nunca commitear `.env.local`.
+
+### Scopes protegidos de Shopify pendientes de aprobación formal
+
+La app en Dev Dashboard solicita los scopes definidos en M0. **Dos categorías requieren aprobación formal de Shopify que no se concedió todavía** (mayo 2026):
+
+- **`read_customers`, `write_customers`** — requieren completar el **Protected Customer Data Form** en Partner Dashboard. Hasta aprobación: queries a customers en tienda en plan de paga (Centr está en plan **Grow**) **retornan arrays vacíos** aunque la API responda 200 OK. M3 compila y funciona contra tiendas dev, pero la sincronización real de contactos contra la tienda de Centr no opera hasta aprobación.
+- **`read_all_orders`** — requiere request manual en Partner Dashboard con justificación de uso. Hasta aprobación: la API limita lectura de orders a los **últimos 60 días**. Bloquea el backfill completo de M11 (la sección "Alcance del backfill inicial" más abajo asume scope concedido).
+
+**Estado en mayo 2026: ambos forms enviados, pendiente respuesta de Shopify.** M3 puede arrancar contra tienda de desarrollo (no aplica restricción) o avanzar con scope público de orders + customers vacíos, dejando sincronización real para cuando bajen las aprobaciones. M11 directamente no puede ejecutar backfill completo hasta que `read_all_orders` esté aprobado.
+
+Para Claude Code en M3: **no asumir que customers en producción están disponibles**. Si la query de customers devuelve vacío en una tienda Grow+ real, **no es bug** — es restricción de scopes. Loguear y continuar.
+
+### Whaapy: scopes elegidos al generar la API key
+
+Whaapy expone una matriz de scopes al crear la api_key. La doctrina v5 (Sección 3.6) describe el uso conceptual (crear/actualizar/asignar contactos, leer conversaciones para el iframe contextual) pero no fija scopes específicos. **Scopes activados en mayo 2026 para la api_key server-side**:
+
+- `contacts:*` — crear, leer, actualizar contactos. Núcleo del Ajuste post-Discovery 2 #14.
+- `conversations:read`, `conversations:write` — lectura para audit/contexto; write para acciones server-side cuando se requiera.
+- `team:*` — leer/gestionar la lista de agentes humanos (necesario para mapeo `whaapy_agent_id` ↔ vendedor de la plataforma).
+- `funnels:*` — leer/operar funnels (referencia operativa de Whaapy, mapeable a etapas si V2 lo requiere).
+- `agent:write` — **latente, no se usa en MVP**. En Whaapy `agent` se refiere al **AI agent** automático, no a asesores humanos. Se marcó por si V2 introduce flujos automatizados; M3/M4/M6 no lo invocan.
+
+**Scopes NO marcados** (decisión consciente para minimizar superficie):
+
+- `messages` — la plataforma no envía mensajes server-side. El envío vive en el iframe (sesión nativa del navegador del vendedor). Si V2 introduce mensajería programática (campañas, follow-ups automáticos), se activa entonces.
+- `templates`, `broadcasts` — mismo razonamiento que `messages`.
+- `media` — la plataforma no descarga ni sube media. Los archivos viven en Whaapy y se ven vía iframe.
+
+Si un milestone futuro requiere alguno de los scopes no marcados, **regenerar la api_key con scopes ampliados y rotar en Vault** — no asumir que está disponible.
 
 ## Skills aplicables y cuándo invocarlas
 
@@ -136,7 +192,9 @@ Lo que NO requiere aprobación:
 ## SOPs operativos
 
 **Rotación de secretos:**
-Tokens server-side de proveedores externos (**Shopify access_token y Whaapy api_key**) se rotan cada 90 días. Procedimiento documentado en password manager de VADAI. Tokens viven cifrados en Supabase Vault, asociados a la organización. **Whaapy api_key entra de nuevo a este SOP** tras el Ajuste post-Discovery 2 #14 — la sincronización bidireccional de contactos requiere llamadas salientes desde código (crear/actualizar/asignar contactos vía API saliente). El iframe sigue usando sesión nativa del navegador para operación conversacional; la api_key cubre exclusivamente las APIs salientes server-side.
+Tokens server-side de proveedores externos (**Shopify y Whaapy api_key**) se rotan cada 90 días. Procedimiento documentado en password manager de VADAI. Credenciales viven cifradas en Supabase Vault, asociadas a la organización. **Whaapy api_key entra de nuevo a este SOP** tras el Ajuste post-Discovery 2 #14 — la sincronización bidireccional de contactos requiere llamadas salientes desde código (crear/actualizar/asignar contactos vía API saliente). El iframe sigue usando sesión nativa del navegador para operación conversacional; la api_key cubre exclusivamente las APIs salientes server-side.
+
+**Para Shopify en el flujo nuevo (post 1-ene-2026):** lo que se rota cada 90 días es el **Client Secret** (regenerable desde Dev Dashboard). El `access_token` per-tienda rota por contrato del client_credentials grant, no manualmente. Ver sección "Setup post-M2" arriba.
 
 **Backups:**
 Supabase Free NO incluye backups automáticos diarios. Backups manuales vía `pg_dump` quedan
@@ -160,6 +218,8 @@ Documentados aquí porque no son hechos confirmados con prueba mecánica, sino i
 ## Alcance del backfill inicial
 
 **Centr Hub backfilea TODO el histórico desde apertura de la tienda Shopify** (Discovery 2 respuesta 2.0). NO es rango parametrizable de "últimos N meses". El scope `read_all_orders` solicitado en M0 es esencial — sin él, Shopify limita a últimos 60 días.
+
+**Estado en mayo 2026:** la aprobación formal de `read_all_orders` por parte de Shopify sigue pendiente (request enviado en Partner Dashboard). M11 NO puede ejecutar el backfill completo hasta que la aprobación baje. Detalle en sección "Setup post-M2" arriba.
 
 **Expectativa operativa para M11:** la ejecución del backfill puede tardar **varias horas** según volumen real de Centr (apertura hace varios años). Bulk Operations de Shopify procesa async — el operador lanza la operación, espera al callback de completado, y procesa el archivo de resultados por chunks vía Inngest.
 
