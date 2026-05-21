@@ -201,6 +201,28 @@ Documentados en Sección 3.2 de la doctrina (`CENTR-DOCTRINE-v5.md`). Resumen:
 
 Funnel Post-venta queda intacto (6 etapas). Todas las etapas son editables por el admin desde M7 (nombre, orden, color, flags, probabilidad inicial). Lo único estructural no eliminable: cada Funnel Venta debe tener al menos una etapa inicial, una ganada y una perdida.
 
+**Cancelación de oportunidades — modelo independiente de etapa (migración 0014, M3):**
+
+Una oportunidad cancelada NO es lo mismo que una oportunidad perdida. "Perdida" es una transición real del pipeline (vendedor compitió y perdió contra precio/competencia/ghosting → requiere motivo, impacta win rate). "Cancelada" es un side-flag administrativo (Draft Order borrado por error, duplicado, prueba, o auto-borrado de Shopify tras 1 año → NO impacta win rate, NO requiere motivo).
+
+Modelo en BD: `opportunities.cancelled_at` + `cancellation_source` + `cancellation_note` (columnas agregadas por migración 0014). `cancelled_at IS NULL` = activa. La etapa se PRESERVA al cancelar (auditoría: "esta opp estaba en X etapa cuando se canceló"). NO se inserta entrada en `opportunity_stage_history` al cancelar — no hubo cambio de etapa.
+
+**Disparadores de cancelación cubiertos hoy (M3):**
+- Webhook `draft_orders/delete` → worker marca `cancellation_source = 'shopify_draft_deleted'`.
+
+**Disparadores futuros (no implementados todavía):**
+- Acción manual del admin desde M6 detalle → `cancellation_source = 'admin_manual'`.
+- Limpieza automática del sistema (ej. opp huérfana detectada por job) → `cancellation_source = 'system_other'`.
+
+**Reglas obligatorias para queries de M5/M6/M10:**
+- **M5 (kanban del pipeline):** debe usar `listOpportunities(...)` SIN `includeCancelled` ni `onlyCancelled` — el default excluye canceladas. Una opp cancelada NUNCA debe aparecer como card en el kanban activo.
+- **M6 (detalle de contacto — lista de oportunidades del contacto):** mismo default. Si el detalle quiere mostrar "ver canceladas históricas" como sub-vista explícita, pasar `onlyCancelled: true`.
+- **M10 (dashboard — win rate):** denominador debe ser `Ganadas + Perdidas` SIN incluir canceladas. Si el query usa `listOpportunities` o equivalente, NO pasar `includeCancelled`. Si la consulta es SQL directa, agregar `cancelled_at IS NULL`.
+- **M10 (revenue):** revenue viene de `orders` (R5), no de opportunities. La cancelación de opportunity NO afecta revenue — la orden asociada (si existe) sigue contando. Esto es correcto operativamente: si una opp se canceló pero su orden ya estaba paid, el revenue ya entró.
+- **Reportes de auditoría / admin debugging:** pueden usar `includeCancelled: true` o `onlyCancelled: true` según necesidad. Documentar explícitamente en cada query por qué se incluye o se filtra.
+
+**Razón operativa:** sin esta separación, métricas de win rate del vendedor quedan contaminadas por cancelaciones administrativas que no son culpa ni mérito del vendedor. El vendedor que tiene muchas Draft Orders auto-borradas por Shopify (porque trabaja oportunidades de ciclo largo > 1 año) recibiría pérdidas falsas; el admin que limpia DOs duplicados generaría pérdidas falsas masivas. Ver entrada en `ERRORES.md` ("Cancelado ≠ Perdido").
+
 **Trigger F1→F2 atómico (M7):**
 - Solo desde webhook `orders/paid`, NO desde movimiento manual.
 - Operación atómica con rollback completo si falla cualquier paso.

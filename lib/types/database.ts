@@ -160,6 +160,12 @@ export interface OpportunityRow {
   updated_at: ISODateString;
   won_at: ISODateString | null;
   invoice_sent_at: ISODateString | null;
+  // Cancelación administrativa (0014). cancelled_at IS NULL → activa.
+  // cancellation_source: 'shopify_draft_deleted' | 'admin_manual' |
+  //                      'system_other' (string libre, extensible).
+  cancelled_at: ISODateString | null;
+  cancellation_source: string | null;
+  cancellation_note: string | null;
 }
 
 export interface OpportunityLineItemRow {

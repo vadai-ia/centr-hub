@@ -16,7 +16,11 @@ type Row = Record<string, unknown>;
 interface BuilderState {
   table: string;
   action: "select" | "insert" | "update" | "delete" | "upsert";
-  filters: Array<{ field: string; op: "eq" | "in" | "is" | "or"; value: unknown }>;
+  filters: Array<{
+    field: string;
+    op: "eq" | "in" | "is" | "or" | "not_is";
+    value: unknown;
+  }>;
   payload?: unknown;
   conflictTarget?: string;
 }
@@ -72,6 +76,13 @@ export class FakeSupabase {
       },
       is(field: string, value: unknown) {
         state.filters.push({ field, op: "is", value });
+        return builder;
+      },
+      not(field: string, op: string, value: unknown) {
+        // Soporte mínimo: not("col", "is", null) → col IS NOT NULL.
+        if (op === "is") {
+          state.filters.push({ field, op: "not_is", value });
+        }
         return builder;
       },
       or(expr: string) {
@@ -164,6 +175,7 @@ export class FakeSupabase {
           if (!arr.includes(row[f.field])) return false;
         }
         if (f.op === "is" && row[f.field] !== f.value) return false;
+        if (f.op === "not_is" && row[f.field] === f.value) return false;
         // op "or" no se aplica filtrado preciso en este fake
       }
       return true;

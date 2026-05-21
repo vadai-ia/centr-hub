@@ -31,6 +31,13 @@ export async function getOpportunityById(id: UUID): Promise<OpportunityRow | nul
   return data ?? null;
 }
 
+/**
+ * Resuelve la oportunidad por Draft Order ID. Incluye canceladas
+ * intencionalmente — el UNIQUE constraint `(organization_id,
+ * shopify_draft_order_id)` garantiza ≤1 fila, y los workers de
+ * M3 necesitan poder encontrarla aunque esté cancelada (caso edge:
+ * Shopify reactiva un DO previamente borrado).
+ */
 export async function findOpportunityByDraftOrderId(
   draftOrderId: string,
 ): Promise<OpportunityRow | null> {
@@ -74,11 +81,29 @@ export async function updateOpportunity(
   return data;
 }
 
+/**
+ * Lista oportunidades del pipeline. Filtro de cancelación
+ * (cancelado ≠ perdido — Sección 3.3.4 + R5):
+ *   - default: solo ACTIVAS (cancelled_at IS NULL). Cubre kanban
+ *     (M5), detalle de contacto (M6), métricas operativas del
+ *     vendedor.
+ *   - `includeCancelled: true` → trae activas + canceladas. Útil
+ *     para vistas de auditoría que mezclan ambas.
+ *   - `onlyCancelled: true` → solo canceladas. Útil para vista
+ *     explícita "ver cancelaciones administrativas". Ignora
+ *     `includeCancelled` si se pasa.
+ *
+ * Las canceladas se EXCLUYEN del win rate por defecto — el
+ * dashboard de M10 debe usar el default (sin override) para que
+ * el denominador (Ganadas + Perdidas) no se contamine.
+ */
 export async function listOpportunities(opts: {
   funnel?: Funnel;
   stageId?: UUID;
   contactId?: UUID;
   assignedAdvisorId?: UUID | null;
+  includeCancelled?: boolean;
+  onlyCancelled?: boolean;
   limit?: number;
 } = {}): Promise<OpportunityRow[]> {
   const { supabase, organizationId } = getTenantScopedClient();
@@ -95,11 +120,50 @@ export async function listOpportunities(opts: {
     if (opts.assignedAdvisorId === null) query = query.is("assigned_advisor_id", null);
     else query = query.eq("assigned_advisor_id", opts.assignedAdvisorId);
   }
+
+  if (opts.onlyCancelled) {
+    query = query.not("cancelled_at", "is", null);
+  } else if (!opts.includeCancelled) {
+    query = query.is("cancelled_at", null);
+  }
+
   if (opts.limit) query = query.limit(opts.limit);
 
   const { data, error } = await query;
   if (error) throw error;
   return data ?? [];
+}
+
+/**
+ * Marca una oportunidad como cancelada sin transición de etapa.
+ * NO crea entrada en `opportunity_stage_history` — la cancelación
+ * es un side-flag, no un cambio de etapa.
+ *
+ * Idempotente: si la opp ya está cancelada, retorna la fila sin
+ * sobrescribir `cancelled_at` (preserva el primer timestamp).
+ */
+export async function cancelOpportunity(input: {
+  opportunityId: UUID;
+  source: string;
+  note?: string | null;
+  cancelledAt?: string;
+}): Promise<{ opportunity: OpportunityRow; alreadyCancelled: boolean }> {
+  const existing = await getOpportunityById(input.opportunityId);
+  if (!existing) {
+    throw new Error(`cancelOpportunity: opp ${input.opportunityId} no encontrada`);
+  }
+  if (existing.cancelled_at) {
+    return { opportunity: existing, alreadyCancelled: true };
+  }
+  const ts = input.cancelledAt ?? new Date().toISOString();
+  const updated = await updateOpportunity(input.opportunityId, {
+    cancelled_at: ts,
+    cancellation_source: input.source,
+    cancellation_note: input.note ?? null,
+    last_modified_at: ts,
+    last_modified_source: input.source.startsWith("shopify") ? "shopify" : "platform",
+  });
+  return { opportunity: updated, alreadyCancelled: false };
 }
 
 // ============================================================

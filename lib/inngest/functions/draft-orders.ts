@@ -17,6 +17,7 @@ import {
 } from "@/lib/db/contacts";
 import { listPipelineStages } from "@/lib/db/pipeline";
 import {
+  cancelOpportunity,
   createOpportunity,
   findOpportunityByDraftOrderId,
   recordStageChange,
@@ -207,6 +208,9 @@ function buildOpportunityInsertFromDraftOrder(args: {
     last_modified_source: "shopify",
     won_at: null,
     invoice_sent_at: null,
+    cancelled_at: null,
+    cancellation_source: null,
+    cancellation_note: null,
   };
 }
 
@@ -310,8 +314,27 @@ export const draftOrdersUpdate = inngest.createFunction(
 );
 
 // ============================================================
-// 3) draft_orders/delete  (Sección 3.3.4 — conservar histórico)
+// 3) draft_orders/delete
 // ============================================================
+// Cancelación administrativa — NO es pérdida comercial (R5).
+//
+// La oportunidad queda marcada con `cancelled_at` + `cancellation_source`
+// pero CONSERVA su etapa actual (auditoría: "esta opp estaba en X
+// etapa cuando se canceló"). NO se inserta entrada en
+// `opportunity_stage_history` porque no hubo cambio de etapa.
+//
+// Las queries del pipeline (M5/M6/M10) excluyen canceladas por
+// default — `listOpportunities()` filtra `cancelled_at IS NULL`
+// salvo opt-in explícito. Win rate del vendedor (Ganadas /
+// (Ganadas + Perdidas)) NO incluye canceladas en el denominador.
+//
+// Triggers de cancelación administrativa cubiertos por este worker:
+//   - Vendedor borra DO por error.
+//   - DO duplicado / de prueba.
+//   - Auto-borrado de Shopify tras 1 año de inactividad.
+//
+// Idempotencia: segundo webhook con mismo DO id no re-marca —
+// `cancelOpportunity` preserva el primer `cancelled_at`.
 
 export const draftOrdersDelete = inngest.createFunction(
   {
@@ -330,31 +353,15 @@ export const draftOrdersDelete = inngest.createFunction(
       const opp = await findOpportunityByDraftOrderId(String(shopifyId));
       if (!opp) return { discarded: true, reason: "not_local" };
 
-      const stages = await listPipelineStages("venta");
-      const lostStage = stages.find((s) => s.is_lost) ?? null;
-      if (!lostStage) {
-        throw new Error(
-          `draft_orders_delete: no se encontró etapa is_lost en Funnel Venta para mover oportunidad`,
-        );
-      }
-
-      const ts = new Date().toISOString();
-      const updated = await updateOpportunity(opp.id, {
-        stage_id: lostStage.id,
-        last_modified_at: ts,
-        last_modified_source: "shopify",
-        note:
-          (opp.note ? `${opp.note}\n` : "") +
-          `[Sistema] Draft Order eliminado en Shopify — oportunidad movida a Perdida (sin motivo manual).`,
-      });
-      await recordStageChange({
+      const result = await cancelOpportunity({
         opportunityId: opp.id,
-        fromStageId: opp.stage_id,
-        toStageId: lostStage.id,
-        changedByUserId: null,
-        context: "webhook",
+        source: "shopify_draft_deleted",
+        note: "[Sistema] Draft Order eliminado en Shopify — cancelación administrativa (no es pérdida comercial).",
       });
-      return { opportunityId: updated.id, movedTo: lostStage.id };
+      if (result.alreadyCancelled) {
+        return { opportunityId: opp.id, discarded: true, reason: "already_cancelled" };
+      }
+      return { opportunityId: result.opportunity.id, cancelled: true };
     });
   },
 );
