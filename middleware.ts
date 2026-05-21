@@ -50,7 +50,11 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
+  // Endpoints server-to-server (webhooks, Inngest) NO pasan por middleware:
+  // no cargan cookies de sesión Supabase y serían redirigidos a /login
+  // antes de llegar al handler. Otras rutas /api/* que sí requieren sesión
+  // (data del dashboard, server actions) siguen cubiertas.
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+    "/((?!api/webhooks|api/inngest|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
   ],
 };
