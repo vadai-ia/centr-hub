@@ -1,18 +1,32 @@
 # CENTR-DOCTRINE-v5.md
 
-**Versión:** 5.0
-**Fecha:** 13 de mayo, 2026
+**Versión:** 5.1
+**Fecha:** 21 de mayo, 2026
 **Cliente:** Centr (distribuidor oficial CENTR x HYROX México) + futura Rustr
 **Stack base:** Next.js 14.2.x + Supabase + Vercel free + Tailwind + shadcn/ui
 **Nombre tentativo de la plataforma:** Centr Hub
 **Decisión arquitectónica clave:** multi-tenant desde día 1
-**Documentos de origen:** `CENTR-RESEARCH-V6.md`, `CENTR-SHOPIFY-API-REFERENCE.md`, `VADAI-Playbook-v6.md`, respuestas Discovery 2 del cliente (mayo 2026), `AUDIT-REPORT.md` (auditoría crítica de v3, mayo 2026), repaso final del operador pre-M0 (mayo 2026)
+**Documentos de origen:** `CENTR-RESEARCH-V6.md`, `CENTR-SHOPIFY-API-REFERENCE.md`, `VADAI-Playbook-v6.md`, respuestas Discovery 2 del cliente (mayo 2026), `AUDIT-REPORT.md` (auditoría crítica de v3, mayo 2026), repaso final del operador pre-M0 (mayo 2026), revisión operativa post-M2 con datos reales del flujo GoHighLevel de Centr (mayo 2026)
 
 > **Propósito de este archivo:** contiene las Secciones 1 a 10 del Master Document v5 — la doctrina permanente del proyecto (visión, alcance, arquitectura, modelo de datos, integraciones, UX flows, identidad visual, roadmap, anexos vivos). Se adjunta al proyecto en Antigravity como contexto permanente durante toda la ejecución (M0 a M11).
 >
 > **Los prompts modulares (M0-M11, Sección 11) viven en archivo separado:** `CENTR-MILESTONES-v5.md`. El operador copia el prompt específico cuando inicia cada milestone — el archivo de milestones NO se adjunta al proyecto.
 >
-> **Cambios respecto a v4:** 3 ajustes finales pre-M0 aplicados — (1) **Ajuste post-Discovery 2 #14: sincronización bidireccional de contactos**, cambio estructural significativo que reformula el modelo de contactos (base maestra como fuente única de verdad, Shopify y Whaapy como espejos sincronizados), agrega R11 + O11, revierte parcialmente el Ajuste final 5 (Whaapy api_key vuelve a Vault porque ahora se usa para llamadas salientes), reescribe partes sustanciales de M3 y M4, modifica M6 y M11; (2) Ajuste de auditoría #8 segunda iteración (trigger de notificación incorrectamente representativo); (3) Ajuste de auditoría #17 (paréntesis aclaratorio sobre `/api/inngest` aplicado). Detalle completo en `MASTER-DOCUMENT-CHANGELOG.md` Parte V. El **v4 queda inmutable como referencia histórica** post-auditoría externa antes del repaso final del operador. **El v5 es el documento que entra a M0 — no habrá más iteración previa a la ejecución.**
+> **Cambios respecto a v5.0 (revisión operativa post-M2, 21 de mayo 2026):** cuatro cambios estructurales al modelo de contactos y pipeline aplicados tras revisar el flujo real de Centr en GoHighLevel y validar que el modelo v5.0 no reflejaba con suficiente fidelidad la operación comercial.
+>
+> 1. **Clasificación lead vs cliente en entidad Contacto** — derivación automática (no campo manual): un contacto es **lead** si vive solo en Whaapy (sin `shopify_customer_id`) y **cliente** si tiene identidad Shopify enlazada. No es estado editable; es propiedad derivada que la pestaña Contactos y filtros consumen para badge y para agrupación. Materialización concreta (columna calculada, vista, derivación in-app) queda delegada a Claude Code.
+>
+> 2. **Sincronización Shopify ↔ Whaapy ya NO es 100% bidireccional simétrica** — modelo asimétrico: creación Shopify → Whaapy es automática (customer nuevo en Shopify dispara creación en Whaapy si no existe contraparte); creación Whaapy → Shopify es **manual on-demand** vía botón "Crear contacto en Shopify" (modal con campos editables antes de invocar API saliente). Updates de campos cuando el contacto existe en ambos sistemas siguen siendo automáticos bidireccionales — la asimetría aplica únicamente al evento de creación. Razón: la mayoría de contactos que entran a Whaapy sin contraparte Shopify son leads que aún no han comprado; crear cada uno en Shopify automáticamente satura el customer base con leads no calificados.
+>
+> 3. **Pipeline Funnel Venta — 9 etapas (reemplaza las 7 de v5.0)** — refleja el proceso comercial real de Centr en GoHighLevel: Lead nuevo (inicial) → Contactado asesor → Contacto calificado → Reunión agendada → Diseño de espacios → Cotización (llegada automática desde Shopify Draft Order) → Seguimiento para cierre → Ganada (automática al recibir webhook `orders/paid`) → Perdida (requiere motivo). Funnel Post-venta queda intacto.
+>
+> 4. **Auto-creación de oportunidades — Modelo C2** — POST-backfill, dos disparadores crean automáticamente oportunidad en etapa "Lead nuevo" del Funnel Venta: (a) contacto nuevo entra a Whaapy por primera vez en la base maestra; (b) contacto existente vuelve a interactuar en Whaapy después de N días sin actividad (default N=30, configurable por el admin desde la pantalla de Reglas). Asesor de la oportunidad se hereda del `assigned_advisor_id` del contacto (asignación nativa Whaapy). Durante el backfill de M11 esta auto-creación está suprimida — el backfill no genera oportunidades sintéticas. El botón manual "Crear oportunidad nueva" en detalle de contacto sigue existiendo para casos especiales (lead capturado fuera de Whaapy, oportunidad adicional sobre contacto activo, etc.).
+>
+> **Implicaciones cruzadas que requirieron edición en cadena:** Sección 1 (resumen ejecutivo — espejos ya no son "bidireccionales simétricos"), Sección 2.1 (alcance MVP — pipeline 9 etapas, sincronización asimétrica, auto-creación C2, badge lead/cliente en pestaña Contactos), Sección 3.3.0 (navegación Contactos refleja tabla unificada con badge), Sección 3.3.3 (entidad Contacto incorpora derivación lead/cliente), Sección 3.3.4 (entidad Oportunidad documenta auto-creación C2), Sección 3.3.9 (seeds: 9 etapas pre-cargadas del Funnel Venta), Sección 3.3.10 (R3 excepción del match inicial ajustada a flujo asimétrico, nueva R12 sobre auto-creación), Sección 3.3.11 (O11 actualizada con asimetría documentada), Sección 3.6 (integraciones Shopify y Whaapy detallan el flujo asimétrico y el botón manual), Sección 4.2 (flujo operativo refleja sincronización asimétrica y auto-creación).
+>
+> **Decisiones de modelado que la doctrina delegaba a Claude Code (lead como flag vs columna calculada vs vista, materialización de auto-creación como regla del motor vs servicio dedicado, etc.) se mantienen delegadas** — esta versión documenta el modelo conceptual, no la mecánica concreta.
+>
+> **Cambios respecto a v4 (v5.0 original, 13 de mayo 2026 — referencia histórica):** 3 ajustes finales pre-M0 aplicados — (1) **Ajuste post-Discovery 2 #14: sincronización bidireccional de contactos**, cambio estructural significativo que reformula el modelo de contactos (base maestra como fuente única de verdad, Shopify y Whaapy como espejos sincronizados), agrega R11 + O11, revierte parcialmente el Ajuste final 5 (Whaapy api_key vuelve a Vault porque ahora se usa para llamadas salientes), reescribe partes sustanciales de M3 y M4, modifica M6 y M11; (2) Ajuste de auditoría #8 segunda iteración (trigger de notificación incorrectamente representativo); (3) Ajuste de auditoría #17 (paréntesis aclaratorio sobre `/api/inngest` aplicado). Detalle completo en `MASTER-DOCUMENT-CHANGELOG.md` Parte V. El **v4 queda inmutable como referencia histórica** post-auditoría externa antes del repaso final del operador. La revisión post-M2 (v5.1) refina el modelo de v5.0 con datos operativos reales — no es retrabajo de la doctrina sino convergencia a la realidad de Centr.
 
 ---
 
@@ -48,7 +62,7 @@ Centr Hub es un **CRM operativo multi-tenant** construido específicamente para 
 1. **Atribución de venta:** hoy el vendedor marca la oportunidad como ganada con el monto correcto en GHL para que cuente como suya. En Centr Hub, la atribución es automática vía tags de Shopify (parser de M3) — sin doble registro manual.
 2. **Reportes semanales de ventas por vendedor:** hoy se preparan a mano en Excel. En Centr Hub, los exporta el dashboard contextual (M10) con un click.
 3. **Reportes de comisiones:** hoy se calculan a mano en Excel desde los Excels semanales. En Centr Hub, el monto vendido por vendedor está en el dashboard; el cálculo de comisión (porcentaje sobre ese monto) queda implícito en la exportación o como columna calculada.
-4. **Edición unificada de contactos en tres sistemas** (Ajuste post-Discovery 2 #14): hoy Centr edita el mismo dato manualmente en Shopify, Whaapy y Excel (nombre, teléfono, dirección, etc.). En Centr Hub, la base maestra vive en la plataforma; Shopify y Whaapy son espejos sincronizados bidireccionales. El vendedor edita donde le sea conveniente y la sincronización propaga transparentemente a los otros dos sistemas.
+4. **Edición unificada de contactos en tres sistemas** (Ajuste post-Discovery 2 #14, refinado en v5.1): hoy Centr edita el mismo dato manualmente en Shopify, Whaapy y Excel (nombre, teléfono, dirección, etc.). En Centr Hub, la base maestra vive en la plataforma; Shopify y Whaapy son espejos sincronizados con **modelo asimétrico en creación** (Shopify → Whaapy automática; Whaapy → Shopify manual vía botón) y **simétrico en updates** (cambios de campos cuando el contacto existe en ambos sistemas se propagan automáticamente en ambas direcciones). El vendedor edita donde le sea conveniente y la sincronización propaga transparentemente.
 
 Esta sustitución total es **decisión confirmada por Centr en Discovery 2** (respuesta 1.1) + repaso final pre-M0 del operador (Ajuste #14). La capacitación inicial de vendedores y admin debe enfatizar estos cambios explícitamente.
 
@@ -99,17 +113,30 @@ Supabase Auth con Email/Password + Magic Link como fallback. Un usuario puede pe
 **2. Sincronización con Shopify**
 Custom App por tenant con Admin GraphQL API v2026-04. Webhooks consumidos: 3 de customers + 3 de draft_orders + 6 de orders (lista completa en Sección 3.6). HMAC-SHA256 verificado en cada webhook. Idempotencia con dedup. Procesamiento async. Last-write-wins a nivel registro. Backfill inicial vía Bulk Operations.
 
-**3. Sincronización bidireccional con Whaapy — contactos**
-La sincronización de contactos con Whaapy es **bidireccional** (Ajuste post-Discovery 2 #14). La base maestra de contactos vive en la plataforma; Shopify y Whaapy son espejos sincronizados. Webhooks consumidos: `contact.created`, `contact.updated`, `contact.deleted`, y el evento que Whaapy provea para asignación de asesor (la sesión de M4 decide cuál según docs actuales). **NO se sincronizan mensajes ni conversaciones** — el vendedor opera todas las conversaciones desde el iframe de Whaapy embebido en la plataforma (pestaña Whaapy), no necesita una vista nativa de mensajes.
+**3. Sincronización con Whaapy — contactos, con asimetría en creación**
+La sincronización de contactos con Whaapy es **asimétrica en creación, simétrica en updates** (Ajuste post-Discovery 2 #14 + revisión v5.1). La base maestra de contactos vive en la plataforma; Shopify y Whaapy son espejos sincronizados. Webhooks consumidos: `contact.created`, `contact.updated`, `contact.deleted`, y el evento que Whaapy provea para asignación de asesor (la sesión de M4 decide cuál según docs actuales). **NO se sincronizan mensajes ni conversaciones** — el vendedor opera todas las conversaciones desde el iframe de Whaapy embebido en la plataforma (pestaña Whaapy), no necesita una vista nativa de mensajes.
+
+**Direcciones de propagación:**
+- **Shopify → Whaapy (creación automática):** customer nuevo en Shopify dispara creación en Whaapy si no existe contraparte (vía teléfono normalizado).
+- **Whaapy → Shopify (creación manual on-demand):** un contacto nacido en Whaapy NO se crea automáticamente en Shopify. El vendedor o admin lo crea explícitamente desde el botón "Crear contacto en Shopify" (visible en detalle de oportunidad y detalle de contacto), que abre modal con campos editables antes de invocar la API saliente. Razón: la mayoría de contactos que entran a Whaapy sin contraparte Shopify son leads no calificados; crear cada uno automáticamente en Shopify satura el customer base.
+- **Updates de campos en contactos existentes en ambos sistemas:** propagación automática bidireccional (último cambio gana por campo — R3).
 
 **Llamadas salientes a Whaapy:** la plataforma invoca la API saliente de Whaapy para crear contactos cuando llegan customers nuevos de Shopify sin contraparte Whaapy, actualizar contactos con cambios propagados, y asignar contactos al `whaapy_agent_id` mapeado cuando el asesor cambia desde otra fuente. Whaapy api_key cifrado en Supabase Vault.
 
-**Razones del alcance:** la plataforma resuelve el dolor central de Centr de mantener el mismo dato en tres sistemas (Shopify, Whaapy, Excel). El vendedor edita donde le sea conveniente; la sincronización propaga transparentemente. LWW por campo con borrados intencionales propagados (R3 refinada). Defensa anti-bucle obligatoria desde el primer commit (R11).
+**Llamadas salientes a Shopify para creación de contacto:** disparadas exclusivamente desde el botón "Crear contacto en Shopify" en M6 (detalle de contacto u oportunidad). Si el match por teléfono normalizado encuentra customer Shopify existente, **no se duplica** — solo se enlaza la identidad faltante (`shopify_customer_id`) al maestro, con mensaje al vendedor indicando que el customer ya existía.
+
+**Razones del alcance:** la plataforma resuelve el dolor central de Centr de mantener el mismo dato en tres sistemas (Shopify, Whaapy, Excel). El vendedor edita donde le sea conveniente; la sincronización propaga transparentemente. LWW por campo con borrados intencionales propagados (R3 refinada). Defensa anti-bucle obligatoria desde el primer commit (R11). Auto-creación de oportunidades en Whaapy modulada por R12 (modelo C2).
 
 Identity matching contra contactos Shopify existentes por teléfono E.164 normalizado y email normalizado (lowercase + trim). No se descarga media — esos archivos viven en Whaapy y se ven a través del iframe.
 
 **4. Pipeline kanban dual**
-Toggle "Venta / Post-venta" en header. Funnel 1 con 7 etapas pre-cargadas, Funnel 2 con 6 etapas pre-cargadas, todas editables por admin. Drag-and-drop entre etapas con feedback optimista. Virtualización cuando una etapa supera 50 cards. Paginación server-side. Real-time selectivo de updates entre vendedores en la misma vista.
+Toggle "Venta / Post-venta" en header. Funnel 1 con **9 etapas pre-cargadas** (modelo refinado en v5.1 con base en el proceso real de Centr en GoHighLevel — ver 3.3.9), Funnel 2 con 6 etapas pre-cargadas, todas editables por admin. Drag-and-drop entre etapas con feedback optimista. Virtualización cuando una etapa supera 50 cards. Paginación server-side. Real-time selectivo de updates entre vendedores en la misma vista.
+
+**Auto-creación de oportunidades en "Lead nuevo" — Modelo C2** (v5.1): POST-backfill, dos disparadores crean oportunidad automática en la etapa inicial del Funnel Venta:
+- Contacto nuevo entra a Whaapy (primera vez que aparece en la base maestra).
+- Contacto existente vuelve a interactuar en Whaapy después de N días sin actividad (default N=30, configurable por el admin desde Reglas).
+
+El asesor de la oportunidad se hereda del `assigned_advisor_id` del contacto (asignación nativa Whaapy). Durante el backfill de M11 esta auto-creación se suprime. El botón manual "Crear oportunidad nueva" en detalle de contacto sigue existiendo para casos especiales (lead capturado fuera de Whaapy, oportunidad adicional sobre contacto activo, etc.). Reglas operativas concretas en R12.
 
 **5. Atribución automática de vendedor (parser de tags)**
 Servicio que lee `tags` de Customer/DraftOrder/Order, normaliza (lowercase + trim), consulta el mapeo configurado por el admin, y asigna el vendedor correspondiente cuando la tag está clasificada como `vendor`. Cada entidad mantiene su asignación independiente. Tags clasificadas como `informational` (la mayoría — `"FACTURADA"`, `"VIP"`, `"+30KG"`, etc.) se conservan en la entidad sin disparar atribución. Edge cases manejados explícitamente: múltiples tags clasificadas como `vendor` en misma entidad (anomalía con alerta in-app al admin), tag de vendedor mapeada a vendedor desactivado (asignación queda nula y log).
@@ -273,7 +300,7 @@ La estructura de pestañas que los milestones construyen incrementalmente.
 |---|---|---|
 | **Pipeline** | M5 | Toggle Venta/Post-venta. Drag-and-drop entre etapas |
 | **Mi Día** | M9 | Vista visual de pendientes priorizada (no lista plana) |
-| **Contactos** | M6 | **Vista consolidada Shopify + Whaapy.** Un registro por contacto con sus identidades enlazadas; los que existen en ambos sistemas se ven como un solo registro, los que existen solo en uno aparecen igual |
+| **Contactos** | M6 | **Tabla unificada leads + clientes con badge** (v5.1). Un registro por contacto con sus identidades enlazadas; los que existen en ambos sistemas se ven como un solo registro, los que existen solo en uno aparecen igual. Columnas: badge tipo (lead/cliente — derivado de presencia de `shopify_customer_id`), nombre, teléfono, email, asesor asignado, última actividad, top 2-3 tags. Filtros: toggle solo-leads/solo-clientes/todos, búsqueda por nombre/teléfono/email, filtro por asesor, filtro por sin-actividad-X-días. Orden default por última actividad descendente. El vendedor ve solo sus asignados; el admin ve todos. |
 | **Whaapy** | M6 | Iframe de Whaapy embebido en pestaña dedicada |
 | **Dashboard** | M10 | **Incluye exportación contextual.** Los reportes son la versión exportable del dashboard que el usuario está viendo (mismos filtros aplicados) — no hay pestaña separada de "Reportes" |
 
@@ -411,30 +438,42 @@ Entidad puente que materializa la pertenencia de un usuario a una organización,
 #### 3.3.3 Grupo B — Contactos e identidades
 
 **Contacto**
-Persona física a la que Centr vende. La entidad Contacto en la BD de la plataforma es la **base maestra de contactos — fuente única de verdad**. Shopify y Whaapy son sistemas externos espejados; la plataforma orquesta la sincronización bidireccional para que los tres sistemas (Shopify, Whaapy, base maestra) se mantengan consistentes (Ajuste post-Discovery 2 #14 — ver Observación O11 + Regla R11). Cada contacto maestro tiene columnas `shopify_customer_id` y `whaapy_contact_id` para enlazar las identidades externas; pueden estar ambas, solo una, o ninguna en casos transitorios (contacto recién creado en la plataforma antes de propagar).
+Persona física a la que Centr vende. La entidad Contacto en la BD de la plataforma es la **base maestra de contactos — fuente única de verdad**. Shopify y Whaapy son sistemas externos espejados; la plataforma orquesta la sincronización para que los tres sistemas (Shopify, Whaapy, base maestra) se mantengan consistentes (Ajuste post-Discovery 2 #14 + revisión v5.1 — ver Observación O11 + Reglas R11 y R12). Cada contacto maestro tiene columnas `shopify_customer_id` y `whaapy_contact_id` para enlazar las identidades externas; pueden estar ambas, solo una, o ninguna en casos transitorios (contacto recién creado en la plataforma antes de propagar).
 
-*Información relevante:* nombre completo, email normalizado (lowercase + trim), teléfono normalizado a E.164, dirección principal, nota interna, tags de Shopify conservadas como información (independiente del mapeo a asesor), estado del cliente según Shopify (habilitado/deshabilitado/etc.), asesor asignado, **identificadores externos: `shopify_customer_id` y `whaapy_contact_id`** (nullable cada uno), metadatos de last-write-wins **por campo** (timestamp y fuente — R3 aplicada al contact), flag `missing_phone` cuando el contacto llegó sin teléfono, flag de "borrado en Whaapy" y "borrado en Shopify" para auditoría, marca de anonimización ARCO si aplica.
+**Clasificación lead vs cliente (v5.1) — propiedad derivada, no campo manual.**
+Cada contacto pertenece a una de dos categorías derivadas automáticamente de las identidades externas enlazadas:
+- **Lead** — contacto sin `shopify_customer_id` (vive solo en Whaapy, o solo en la plataforma sin propagación todavía). Aún no ha comprado en Shopify.
+- **Cliente** — contacto con `shopify_customer_id` presente (tiene identidad Shopify enlazada, independiente de si ha hecho compras o solo es un customer registrado con `orders_count = 0`).
+
+Esta clasificación es **derivada en runtime**, no es estado editable ni columna escrita. Cuando un lead se enlaza con identidad Shopify (sea por match automático en sincronización entrante, por uso del botón "Crear contacto en Shopify", o por completar identidades durante backfill) pasa automáticamente a cliente sin operación adicional del usuario. La pestaña Contactos (M6) consume esta propiedad para badge visual y filtros (toggle solo-leads/solo-clientes/todos). **Decisión de modelado delegada a Claude Code en M1:** materializar como columna calculada (`type` = CASE WHEN shopify_customer_id IS NOT NULL THEN 'cliente' ELSE 'lead' END), vista derivada, o derivación in-app — cualquiera de las tres es válida; el principio operativo es el mismo: no se mantiene como flag editable que pueda divergir de la realidad de identidades.
+
+*Información relevante:* nombre completo, email normalizado (lowercase + trim), teléfono normalizado a E.164, dirección principal, nota interna, tags de Shopify conservadas como información (independiente del mapeo a asesor), estado del cliente según Shopify (habilitado/deshabilitado/etc.), asesor asignado, **identificadores externos: `shopify_customer_id` y `whaapy_contact_id`** (nullable cada uno), metadatos de last-write-wins **por campo** (timestamp y fuente — R3 aplicada al contact), flag `missing_phone` cuando el contacto llegó sin teléfono, flag de "borrado en Whaapy" y "borrado en Shopify" para auditoría, marca de anonimización ARCO si aplica, timestamp de última actividad en Whaapy (para evaluar R12 — re-actividad después de N días dispara auto-creación de oportunidad).
 
 *Relaciones:* un contacto puede tener identidades en Shopify, Whaapy, ambas, o ninguna (en casos transitorios). 0..N oportunidades, 0..N órdenes, 0..N tareas, 0..N notificaciones, 0..N actividades en su timeline.
 
 *Reglas de integridad:* el asesor asignado del contacto **se establece según el sistema que origina la asignación y se propaga al resto**:
 - **Asignación originada en Shopify** (vía tag de vendedor en `customers/*`): parser de M3 asigna al maestro; M3 propaga a Whaapy vía API saliente (asignación al `whaapy_agent_id` mapeado del vendedor).
-- **Asignación originada en Whaapy** (vía regla nativa de Whaapy entregada por webhook — `conversation.assigned` u otro evento equivalente; M4 decide cuál según docs de Whaapy actuales): M4 resuelve el `whaapy_agent_id` contra membresía organizacional; si match, asigna al maestro Y propaga a Shopify vía API saliente (agregando la tag mapeada del vendedor al customer).
-- **Edición manual del admin en M6 (detalle de contacto)**: la plataforma actualiza el maestro inmediatamente y propaga a Shopify Y Whaapy vía APIs salientes.
+- **Asignación originada en Whaapy** (vía regla nativa de Whaapy entregada por webhook — `conversation.assigned` u otro evento equivalente; M4 decide cuál según docs de Whaapy actuales): M4 resuelve el `whaapy_agent_id` contra membresía organizacional; si match, asigna al maestro Y propaga a Shopify vía API saliente **si el contacto ya tiene `shopify_customer_id` enlazado** (agregando la tag mapeada del vendedor al customer); si el contacto es lead (sin identidad Shopify), no hay nada que propagar a Shopify hasta que el botón "Crear contacto en Shopify" enlace la identidad faltante.
+- **Edición manual del admin en M6 (detalle de contacto)**: la plataforma actualiza el maestro inmediatamente y propaga a los sistemas externos que tengan identidad enlazada — si hay `shopify_customer_id`, propaga a Shopify; si hay `whaapy_contact_id`, propaga a Whaapy.
 
-Si el contacto existe solo en una fuente y la otra no tiene contraparte aún, la plataforma orquesta la creación faltante (ver M3 y M4 para mecánica concreta). El asesor de un contacto puede divergir del asesor de sus oportunidades/órdenes — es regla de negocio explícita, no anomalía (R2). Un contacto anonimizado pierde nombre/email/teléfono pero conserva ID y relaciones para preservar histórico. **Las ediciones desde cualquiera de los tres sistemas se sincronizan automáticamente con los otros dos**; el operador no tiene que mantener tres registros idénticos manualmente (resuelve dolor operativo central de Centr).
+**Sincronización asimétrica en creación, simétrica en updates (v5.1):**
+- Si el contacto entra desde Shopify y no tiene `whaapy_contact_id`, la plataforma orquesta creación en Whaapy automáticamente (vía API saliente, siempre que `missing_phone = false`).
+- Si el contacto entra desde Whaapy y no tiene `shopify_customer_id`, **NO se crea automáticamente en Shopify** — queda como lead hasta que el vendedor/admin use el botón "Crear contacto en Shopify" en M6 (modal con campos editables + match defensivo por teléfono normalizado para no duplicar customer Shopify existente).
+- Updates de campos en contacto con ambas identidades enlazadas se propagan automáticamente en ambas direcciones (LWW por campo — R3).
+
+El asesor de un contacto puede divergir del asesor de sus oportunidades/órdenes — es regla de negocio explícita, no anomalía (R2). Un contacto anonimizado pierde nombre/email/teléfono pero conserva ID y relaciones para preservar histórico.
 
 **Identidades del contacto** (modelado de transición)
 En v5 las identidades externas viven directamente como columnas (`shopify_customer_id`, `whaapy_contact_id`) en la entidad Contacto, no como entidad relacional separada. Esto refleja que en MVP cada contacto tiene como máximo 2 identidades (Shopify + Whaapy). Si V2 expande a más canales (Instagram, Facebook Messenger, etc.), se evalúa migrar a entidad relacional `contact_identities` sin retrabajo del core — la decisión de modelado concreta (columnas vs entidad relacional desde día 1) la toma Claude Code en M1.
 
-*Reglas de integridad:* la combinación de organización + `shopify_customer_id` (cuando no es null) es única. Misma regla para `whaapy_contact_id`. El identity matching durante sincronización opera por teléfono E.164 y email normalizado: si encuentra match con un contacto existente, **agrega la identidad faltante al contacto existente** (no crea duplicado) y dispara propagación al sistema externo donde faltaba.
+*Reglas de integridad:* la combinación de organización + `shopify_customer_id` (cuando no es null) es única. Misma regla para `whaapy_contact_id`. El identity matching durante sincronización opera por teléfono E.164 y email normalizado: si encuentra match con un contacto existente, **agrega la identidad faltante al contacto existente** (no crea duplicado). En el caso Shopify → Whaapy faltante, **dispara propagación automática a Whaapy**; en el caso Whaapy → Shopify faltante, **NO dispara propagación automática** — el enlace ocurre cuando el vendedor/admin use el botón "Crear contacto en Shopify" en M6 (asimetría v5.1).
 
 #### 3.3.4 Grupo C — Pipeline (venta + post-venta)
 
 **Etapa del pipeline**
 Cada paso por el que pasa una oportunidad dentro de un funnel. Las etapas son por organización y por funnel — Centr y Rustr pueden tener pipelines distintos; cada funnel tiene su propio set de etapas.
 
-*Información relevante:* nombre visible (ej. "Cotización enviada"), funnel al que pertenece (venta o post-venta), posición en el orden del pipeline, color de display, probabilidad default asociada (solo relevante en Funnel Venta), flag de etapa inicial (la que reciben oportunidades nuevas del funnel), flag de etapa ganada, flag de etapa perdida, flag de "requiere motivo al moverse" (típicamente en etapas perdidas).
+*Información relevante:* nombre visible (ej. "Cotización"), funnel al que pertenece (venta o post-venta), posición en el orden del pipeline, color de display, probabilidad default asociada (solo relevante en Funnel Venta), flag de etapa inicial (la que reciben oportunidades nuevas del funnel), flag de etapa ganada, flag de etapa perdida, flag de "requiere motivo al moverse" (típicamente en etapas perdidas).
 
 *Relaciones:* 1..N con oportunidades del funnel correspondiente. Aparece en el histórico de cambios de etapa.
 
@@ -463,6 +502,11 @@ Unidad central del CRM. Cada oportunidad pertenece a un funnel (venta o post-ven
 - El monto ponderado solo aplica a Funnel Venta (no se calcula para Funnel Post-venta).
 - Cuando una oportunidad de Funnel Venta pasa a etapa ganada vía webhook `orders/paid`, automáticamente se crea su oportunidad hija en Funnel Post-venta (operación atómica — ver R1 en 3.3.10).
 - La oportunidad de Funnel Venta original NO se altera al crear la hija; queda cerrada como ganada para histórico y métricas.
+- **Auto-creación POST-backfill en etapa inicial del Funnel Venta — Modelo C2 (v5.1):** dos disparadores generan oportunidad automática en la etapa marcada como `is_initial = true` del Funnel Venta (semánticamente "Lead nuevo" en el catálogo pre-cargado):
+  - **(a) Contacto nuevo entra a Whaapy** (primera vez que aparece en la base maestra de la organización — sea por webhook `contact.created` de Whaapy o por match de identidad nueva durante procesamiento).
+  - **(b) Contacto existente vuelve a interactuar en Whaapy después de N días sin actividad** (default N=30, configurable por el admin desde Reglas).
+  El asesor de la oportunidad recién creada se hereda del `assigned_advisor_id` del contacto (asignación nativa Whaapy). Si el contacto no tiene asesor, la oportunidad queda sin asignar hasta acción del admin. **Durante el backfill de M11 esta auto-creación está suprimida** (flag `backfill_in_progress` activa modo pasivo) — sin esta supresión, cada contacto histórico leído generaría una oportunidad "Lead nuevo" sintética que no refleja la realidad del proceso comercial. Regla operativa completa documentada en R12.
+- **Botón manual "Crear oportunidad nueva"** en M6 (detalle de contacto) sigue existiendo para casos especiales: lead capturado fuera de Whaapy, oportunidad adicional sobre contacto activo, corrección de oportunidad eliminada, etc. La auto-creación C2 cubre el caso default; el botón manual cubre las excepciones.
 
 **Line item de oportunidad**
 Cada producto cotizado dentro de una oportunidad. Sincronizado desde los `line_items` del Draft Order de Shopify; capturable manualmente si la oportunidad nace en plataforma sin Draft Order todavía.
@@ -512,7 +556,7 @@ Cada producto vendido dentro de una orden. Análogo conceptualmente al line item
 **Regla de automatización**
 Una regla del motor. Cada regla pertenece a una organización y a un funnel específico (una regla solo evalúa oportunidades de su funnel). Las reglas se construyen con tres componentes: trigger (cuándo evaluar), condiciones (qué debe cumplir), acciones (qué hacer si pasa).
 
-*Información relevante:* organización, funnel al que aplica, nombre visible, descripción opcional, flag de activación, flag de plantilla (las pre-cargadas vienen como plantillas editables), tipo de trigger (uno de: `stage_aging`, `no_activity`, `created`, `stage_changed`, `won`, `lost`, `contact.created`, `contact.no_activity`), configuración del trigger (estructura libre que parametriza el trigger — ej. "después de cuántas horas en etapa", "qué etapa específica"), lista de condiciones (estructura libre que codifica condiciones como `monto > 5000`, `etapa = "Cotización enviada"`, `asesor in [X, Y]`), lista de acciones (estructura libre que codifica acciones del set permitido: `create_task`, `notify_advisor`, `notify_admin`, `move_to_stage`, `add_tag`), usuario que la creó, timestamps.
+*Información relevante:* organización, funnel al que aplica, nombre visible, descripción opcional, flag de activación, flag de plantilla (las pre-cargadas vienen como plantillas editables), tipo de trigger (uno de: `stage_aging`, `no_activity`, `created`, `stage_changed`, `won`, `lost`, `contact.created`, `contact.no_activity`), configuración del trigger (estructura libre que parametriza el trigger — ej. "después de cuántas horas en etapa", "qué etapa específica"), lista de condiciones (estructura libre que codifica condiciones como `monto > 5000`, `etapa = "Cotización"`, `asesor in [X, Y]`), lista de acciones (estructura libre que codifica acciones del set permitido: `create_task`, `notify_advisor`, `notify_admin`, `move_to_stage`, `add_tag`), usuario que la creó, timestamps.
 
 **Guardrails al payload JSONB:**
 - Validación con Zod obligatoria al recibir input desde la UI (principio de organización del código de 3.2 reiterado aquí por criticidad).
@@ -619,17 +663,21 @@ Configuración explícita que clasifica una tag de Shopify (normalizada) en una 
 
 Cada organización se crea con los siguientes datos pre-cargados. Estos seeds son **parte del modelo conceptual del producto** porque definen el comportamiento "out of the box" de Centr Hub — sin ellos, la plataforma estaría vacía y Centr tendría que configurar todo manualmente para empezar a operar.
 
-**Etapas pre-cargadas — Funnel Venta** (7 etapas, editables por admin):
+**Etapas pre-cargadas — Funnel Venta** (9 etapas, editables por admin — modelo refinado en v5.1 con base en el proceso real de Centr en GoHighLevel):
 
 | # | Nombre | Prob. inicial | Tipo |
 |---|---|---|---|
-| 1 | Lead nuevo | 10% | Inicial |
-| 2 | Calificado | 25% | Intermedia |
-| 3 | Cotización enviada | 40% | Llegada automática desde Shopify Draft Order |
-| 4 | En negociación | 60% | Manual |
-| 5 | Esperando pago | 85% | Manual |
-| 6 | Ganada | 100% | Ganada (automática al recibir webhook `orders/paid`) |
-| 7 | Perdida | 0% | Perdida, requiere motivo |
+| 1 | Lead nuevo | 10% | Inicial (recibe auto-creación por R12 — Modelo C2) |
+| 2 | Contactado asesor | 20% | Manual |
+| 3 | Contacto calificado | 30% | Manual |
+| 4 | Reunión agendada | 45% | Manual |
+| 5 | Diseño de espacios | 55% | Manual |
+| 6 | Cotización | 70% | Llegada automática desde Shopify Draft Order (webhook `draft_orders/create`) |
+| 7 | Seguimiento para cierre | 85% | Manual |
+| 8 | Ganada | 100% | Ganada (automática al recibir webhook `orders/paid`) |
+| 9 | Perdida | 0% | Perdida, requiere motivo |
+
+Las probabilidades iniciales son razonables y editables por el admin desde la pantalla de Etapas (M7). El nombre de cada etapa, su orden, color y flags también son editables — Centr puede ajustar el pipeline si el proceso comercial evoluciona. Lo único que el admin no puede eliminar es la propiedad estructural de tener al menos una etapa inicial, una ganada y una perdida en el Funnel Venta (3.3.4).
 
 **Etapas pre-cargadas — Funnel Post-venta** (6 etapas, editables por admin):
 
@@ -657,9 +705,9 @@ Cada organización se crea con los siguientes datos pre-cargados. Estos seeds so
 
 | # | Funnel | Nombre | Trigger | Condición | Acción |
 |---|---|---|---|---|---|
-| 1 | Venta | Cotización sin respuesta 24h | `stage_aging` en "Cotización enviada" | 24h en etapa, sin actividad nueva | Tarea automática al asesor: "Hacer seguimiento" |
+| 1 | Venta | Cotización sin respuesta 24h | `stage_aging` en "Cotización" | 24h en etapa, sin actividad nueva | Tarea automática al asesor: "Hacer seguimiento" |
 | 2 | Venta | Oportunidad estancada 72h | `no_activity` | 72h sin actividad, etapa activa (no terminal) | Notificar al asesor + al admin |
-| 3 | Venta | Esperando pago tardío | `stage_aging` en "Esperando pago" | >7 días en etapa | Notificar al admin |
+| 3 | Venta | Seguimiento para cierre tardío | `stage_aging` en "Seguimiento para cierre" | >7 días en etapa | Notificar al admin |
 | 4 | Post-venta | Cliente entregado hace 7 días | `stage_aging` en "Entregado" | 7 días en etapa | Tarea al asesor: "Contactar cliente para seguimiento" + mover a "Seguimiento post-entrega" |
 
 *Opcionales (inactivas — el admin las activa cuando lo decida):*
@@ -728,7 +776,10 @@ La granularidad de last-write-wins depende del tipo de entidad:
 
 **Borrados intencionales propagados:** si un campo viene vacío en un update reciente, el vacío **SÍ sobrescribe** el valor existente. El usuario pudo haber borrado el dato deliberadamente; preservar el valor antiguo contradice la intención. Aplica a campos editables (nombre, email, teléfono, dirección, notas). NO aplica a identificadores externos (`shopify_customer_id`, `whaapy_contact_id`) — esos solo se borran con la operación explícita de desenlazar identidad.
 
-**Excepción aplicable solo al match inicial:** cuando un contacto de Shopify hace match con uno existente en Whaapy (o viceversa) por primera vez, los campos de Shopify tienen prioridad sobre los de Whaapy en el enriquecimiento inicial (Shopify es la fuente principal de información del contacto en operación de Centr — Discovery 2). Pero si un campo está vacío en Shopify y tiene valor en Whaapy, se preserva el valor de Whaapy (no se borra). Esta excepción aplica únicamente en el momento del primer enlace de identidades; después, LWW por campo universal con borrados propagados.
+**Excepción aplicable solo al match inicial (ajustada en v5.1 al flujo asimétrico):** el "match inicial" ocurre en dos situaciones concretas:
+- **(a) Shopify → Whaapy automático:** customer nuevo de Shopify dispara creación en Whaapy. En este flujo Shopify es la fuente — sus campos llenan la creación. No hay conflicto con Whaapy porque el contacto se está creando ahí.
+- **(b) Whaapy → Shopify manual (botón "Crear contacto en Shopify"):** el vendedor abre el modal, los campos vienen pre-llenados desde el maestro (que ya tiene los campos sincronizados de Whaapy), y el vendedor puede editarlos antes de confirmar. Al confirmar, los campos del modal se envían a Shopify. **No aplica regla automática de "Shopify gana"** — el vendedor es quien decide los valores finales en el modal.
+- **(c) Match defensivo durante enlace manual:** si el modal del botón "Crear contacto en Shopify" detecta que el teléfono normalizado ya existe como customer en Shopify, NO se crea duplicado: se enlaza la identidad Shopify existente al maestro. En ese momento, los campos del customer Shopify pre-existente tienen prioridad sobre los del maestro (Shopify es la fuente principal cuando ya existía allá — Discovery 2); pero si un campo está vacío en Shopify y tiene valor en el maestro, se preserva el valor del maestro (no se borra). Después del enlace, LWW por campo universal con borrados propagados.
 
 **Implementación:** Claude Code decide en M1/M3/M4 si materializar esto como columnas adicionales de metadata por campo, como entidad relacional de "field history", o con una capa de servicio que reconcilia explícitamente en cada upsert de contacto. El principio operativo es el mismo: ningún campo se sobrescribe con un valor más viejo que el actual, salvo borrado intencional reciente.
 
@@ -777,6 +828,27 @@ La sincronización bidireccional de contactos (Ajuste post-Discovery 2 #14) intr
 
 Eventos descartados por defensa de bucle se loguean como audit log `sync_loop_prevented` (para diagnóstico operacional sin contaminar el flujo normal). El audit log permite al operador verificar que la defensa está operando si sospecha que la sincronización no propaga.
 
+**R12 — Auto-creación de oportunidades en "Lead nuevo" — Modelo C2 (v5.1).**
+La pestaña Pipeline (M5) refleja el trabajo activo de los vendedores. Para que un contacto que está conversando con Centr en WhatsApp aparezca naturalmente como oportunidad en el pipeline sin requerir creación manual cada vez, la plataforma auto-crea oportunidades de Funnel Venta en la etapa marcada como `is_initial = true` (semánticamente "Lead nuevo") en dos disparadores:
+
+- **(a) Contacto nuevo entra a Whaapy.** Cuando un contacto aparece por primera vez en la base maestra desde Whaapy (sea por webhook `contact.created` o por match de identidad nueva durante procesamiento de webhook), se crea automáticamente oportunidad nueva en etapa inicial del Funnel Venta. Asesor: heredado del `assigned_advisor_id` del contacto (si Whaapy entregó asignación nativa o ya tenía asesor). Si el contacto no tiene asesor, la oportunidad queda sin asignar.
+
+- **(b) Contacto existente vuelve a interactuar en Whaapy después de N días sin actividad.** Si el `last_whaapy_activity_at` del contacto fue hace más de N días (default N=30) y llega evento de actividad reciente en Whaapy (mensaje nuevo, conversación re-abierta, evento equivalente según docs de Whaapy), se crea oportunidad nueva en etapa inicial. Razón operativa: un cliente o lead silencioso que vuelve a hablar es señal de interés renovado que merece tracking activo en el pipeline. N es configurable por organización desde la pantalla Reglas (default 30).
+
+**Pre-condiciones (todas deben cumplirse para que la auto-creación dispare):**
+- El Funnel Venta de la organización debe tener una etapa con `is_initial = true` (defensa contra catálogo mal configurado).
+- El contacto NO debe tener ya una oportunidad activa (no terminal — no ganada ni perdida) en Funnel Venta. Si ya hay oportunidad activa, no se crea duplicado — la auto-creación es para abrir tracking nuevo, no para multiplicar oportunidades sobre el mismo flujo comercial vivo.
+- El flag `backfill_in_progress` de la organización debe estar en false. Durante el backfill de M11 esta auto-creación se suprime — el backfill no genera oportunidades sintéticas.
+
+**Modo del botón manual "Crear oportunidad nueva":** sigue existiendo en M6 (detalle de contacto) para los casos donde la auto-creación no aplica:
+- Lead capturado por canal distinto a Whaapy (referido, evento presencial, etc.) que no genera webhook Whaapy.
+- Oportunidad adicional sobre un contacto que ya tiene oportunidad activa (caso B2C raro pero válido — segundo producto, segundo pedido independiente).
+- Corrección de oportunidad eliminada por error.
+
+**Materialización delegada a Claude Code:** la implementación concreta (regla del motor con nuevo tipo de acción `create_opportunity`, servicio dedicado escuchando eventos de M4, worker Inngest con scheduler, etc.) la decide Claude Code al construir M8 o M4 según convenga. El principio operativo es el mismo: los dos disparadores generan oportunidad en etapa inicial sin intervención del usuario, salvo las pre-condiciones listadas.
+
+**Audit log obligatorio:** cada auto-creación deja entrada en audit log con tipo `c2_opportunity_auto_created` indicando el disparador (`new_contact_in_whaapy` o `reactivity_after_n_days`), el contacto, la oportunidad creada y el `assigned_advisor_id` heredado. Permite al operador y al admin diagnosticar por qué apareció una oportunidad si no fue manual.
+
 #### 3.3.11 Observaciones y decisiones de modelado
 
 Notas que afectan la traducción de este modelo conceptual a schema SQL en M1.
@@ -800,7 +872,7 @@ Concretamente, una tag en `Mapeo de tag ↔ vendedor` está en uno de dos estado
 **Decisión de modelado:** sin estado "huérfana" o "pendiente" — la mayoría de las tags NO son tags de vendedor, eso es comportamiento normal. Eliminar la noción de "huérfana" elimina ruido operativo (notificaciones espurias) y simplifica el mental model del admin.
 
 **O5 — Oportunidades pre-Shopify.**
-Es válido que una oportunidad de Funnel Venta exista en la plataforma SIN Draft Order todavía: el vendedor capta un lead manualmente, abre una oportunidad, le pone `estimated_amount`, la mueve por las etapas "Lead nuevo" → "Calificado" → "En negociación". Solo cuando crea la Draft Order en Shopify llega el webhook `draft_orders/create` y se asocia. El modelo debe soportar oportunidades con `shopify_draft_order_id` nulo durante esta fase. Cuando llega la asociación, los line items y `amount` real se sincronizan.
+Es válido que una oportunidad de Funnel Venta exista en la plataforma SIN Draft Order todavía: el vendedor capta un lead manualmente o por auto-creación C2 (R12), abre la oportunidad o la encuentra auto-creada, le pone `estimated_amount`, la mueve por las etapas intermedias del Funnel Venta ("Lead nuevo" → "Contactado asesor" → "Contacto calificado" → "Reunión agendada" → "Diseño de espacios"). Solo cuando crea la Draft Order en Shopify llega el webhook `draft_orders/create` y la oportunidad se enriquece con `shopify_draft_order_id` + line items reales + monto real + transición a etapa "Cotización". El modelo debe soportar oportunidades con `shopify_draft_order_id` nulo durante esta fase pre-cotización.
 
 **O6 — Órdenes huérfanas.**
 Es válido que llegue una orden de Shopify sin oportunidad de Funnel Venta asociada — típicamente del backfill cuando la Draft Order original ya fue auto-borrada por Shopify, o de órdenes hechas directo en Shopify sin pasar por flujo de cotización. La orden se crea con `opportunity_id = nulo` y se cuenta en métricas de revenue. NO se crea oportunidad sintética para llenarle el hueco — sería información inventada.
@@ -824,16 +896,32 @@ Confirmado por Centr en Discovery 2 (respuesta 2.2). Cada organización lleva un
 
 NO se permite eliminar, ni reactivar, ni invitar el usuario sistema "Histórico" desde la UI. Solo lectura.
 
-**O11 — Base maestra de contactos como fuente única de verdad. Shopify y Whaapy son espejos sincronizados.**
-Confirmado por el operador en repaso final pre-M0 (mayo 2026) tras revisión de la lógica de contactos. La entidad Contacto en la BD de la plataforma es la **fuente única de verdad** para datos de contactos. Shopify y Whaapy son sistemas externos espejados — la plataforma orquesta sincronización bidireccional para mantener los tres consistentes.
+**O11 — Base maestra de contactos como fuente única de verdad. Shopify y Whaapy son espejos sincronizados (con asimetría en creación, v5.1).**
+Confirmado por el operador en repaso final pre-M0 (mayo 2026) y refinado en la revisión post-M2 (21 de mayo 2026) tras revisar el flujo real de Centr en GoHighLevel. La entidad Contacto en la BD de la plataforma es la **fuente única de verdad** para datos de contactos. Shopify y Whaapy son sistemas externos espejados.
 
 **Justificación operativa:** hoy Centr edita el mismo dato manualmente en tres sistemas (Shopify para venta, Whaapy para mensajería, Excel para reportes). Es dolor operativo central — produce divergencia, errores, y tiempo perdido. Centr Hub resuelve esto al ser la base maestra: el vendedor edita en cualquiera de los tres (Shopify, Whaapy, plataforma) y la sincronización se propaga transparentemente a los otros dos.
 
+**Modelo de sincronización asimétrico en creación, simétrico en updates (refinamiento v5.1):**
+- **Shopify → Whaapy:** creación automática. Un customer nuevo en Shopify que no tiene contraparte Whaapy dispara creación en Whaapy vía API saliente (si `missing_phone = false`).
+- **Whaapy → Shopify:** creación manual on-demand. Un contacto nacido en Whaapy queda como **lead** en la plataforma sin propagación automática a Shopify. El vendedor/admin lo convierte a cliente Shopify explícitamente desde el botón "Crear contacto en Shopify" en M6 (detalle de oportunidad o contacto), con modal de campos editables y match defensivo por teléfono normalizado para no duplicar customer existente.
+- **Updates de campos en contacto con ambas identidades enlazadas:** propagación automática bidireccional (LWW por campo — R3).
+
+**Razón operativa de la asimetría:** la mayoría de contactos que entran a Whaapy sin contraparte Shopify son **leads no calificados** (preguntas iniciales, consultas que no avanzan, prospectos que no compran). Crear cada uno automáticamente en Shopify satura el customer base con registros que distorsionan reportes de Shopify y consumen cuotas de API innecesariamente. La asimetría refleja la lógica comercial: un lead se vuelve cliente cuando el vendedor decide trabajarlo seriamente, no automáticamente.
+
+**Clasificación lead vs cliente derivada (v5.1):** la presencia/ausencia de `shopify_customer_id` clasifica automáticamente al contacto como lead (sin Shopify) o cliente (con Shopify). Es propiedad derivada, no campo manual. La pestaña Contactos consume esta clasificación para badge visual y filtros. Cuando el botón "Crear contacto en Shopify" enlaza identidad Shopify, el contacto pasa automáticamente de lead a cliente sin acción adicional.
+
 **Decisión de modelado:** identificadores externos (`shopify_customer_id`, `whaapy_contact_id`) viven como columnas en la entidad Contacto, no como entidad relacional separada — refleja el caso MVP de máximo 2 identidades por contacto. Si V2 expande a más canales, se migra a entidad relacional `contact_identities` sin retrabajo del core.
 
-**Decisión arquitectónica:** la mecánica de sincronización vive distribuida entre M3 (Shopify inbound + outbound), M4 (Whaapy inbound + outbound) y M6 (edición manual con propagación). CLAUDE.md sección "Sincronización bidireccional de contactos" documenta el flujo de propagación y la regla anti-bucle (R11) — es lectura obligatoria al construir M3, M4, M6.
+**Decisión arquitectónica:** la mecánica de sincronización vive distribuida entre M3 (Shopify inbound + outbound), M4 (Whaapy inbound + outbound + auto-creación C2 de oportunidades), M6 (edición manual con propagación + botón "Crear contacto en Shopify"). CLAUDE.md sección "Sincronización bidireccional de contactos" documenta el flujo de propagación y las reglas anti-bucle (R11) + auto-creación (R12) — es lectura obligatoria al construir M3, M4, M6.
 
 **Reversión parcial del Ajuste final 5:** la decisión de "Whaapy sincroniza solo contactos sin api_key server-side" del Ajuste final 5 se mantiene parcialmente — Whaapy sigue sincronizando solo contactos (no mensajes, no media), pero **ahora se necesita api_key server-side para llamadas salientes** (crear/actualizar/asignar contactos en Whaapy via API). El iframe sigue usando sesión nativa del navegador para que el vendedor opere conversaciones. Las dos cosas coexisten: iframe para chat operacional + API saliente para sincronización de contactos.
+
+**O12 — Clasificación lead vs cliente como propiedad derivada, no campo manual (v5.1).**
+La distinción lead/cliente no es un estado editable del contacto. Es propiedad **derivada en runtime** de la presencia de `shopify_customer_id`: si está enlazado, es cliente; si no, es lead. Esta decisión evita la divergencia que ocurriría si fuera flag manual editable (un cliente Shopify mal marcado como lead seguiría siendo cliente en realidad).
+
+**Decisión de modelado delegada a Claude Code en M1:** materializar la derivación como columna calculada en Postgres (`type` = CASE WHEN shopify_customer_id IS NOT NULL THEN 'cliente' ELSE 'lead' END), vista derivada (`contact_with_type`), o derivación en la capa de servicio in-app — cualquiera de las tres es válida. El principio operativo se conserva: no hay flag editable que pueda divergir de la realidad de identidades enlazadas.
+
+**Uso en UI (M6):** la pestaña Contactos muestra badge "Lead" (color secundario) o "Cliente" (color primario) según la derivación. Los filtros (solo-leads / solo-clientes / todos) operan sobre esa propiedad. La transición lead → cliente ocurre automáticamente cuando se enlaza identidad Shopify (vía sincronización automática Shopify → maestro, o vía botón "Crear contacto en Shopify" que enlaza el nuevo `shopify_customer_id`).
 
 ---
 
@@ -910,7 +998,12 @@ Detalle por proveedor:
   - **Customers:** `create`, `update`, `delete`.
   - **Draft orders:** `create`, `update`, `delete`.
   - **Orders:** `create`, `updated`, `paid`, `cancelled`, `fulfilled`, `partially_fulfilled`.
-- **Llamadas salientes (outbound — Ajuste post-Discovery 2 #14):** la plataforma invoca Shopify Admin API para propagar cambios de contacto originados en Whaapy o en M6 (edición manual). Endpoints típicos: `POST /admin/api/.../customers.json` (crear customer cuando un contacto nuevo de Whaapy no existe en Shopify), `PUT /admin/api/.../customers/{id}.json` (actualizar customer con cambios provenientes de Whaapy o de M6). Agregar/quitar tags de vendedor también vía este endpoint (propagación de asignación de asesor desde Whaapy o desde M6 admin). **Token de Shopify ya en Vault cubre estas llamadas — sin nuevo secret**. Nota operativa importante: Shopify soporta nativamente customers con `orders_count = 0` (la plataforma puede crear un customer en Shopify aunque el contacto no haya hecho compra todavía — útil cuando el contacto nace en Whaapy).
+- **Llamadas salientes (outbound — Ajuste post-Discovery 2 #14, refinadas en v5.1 con asimetría en creación):** la plataforma invoca Shopify Admin API para propagar cambios de contacto a Shopify. Endpoints típicos:
+  - `POST /admin/api/.../customers.json` (**crear customer en Shopify — disparado exclusivamente desde el botón manual "Crear contacto en Shopify" en M6**, no automáticamente desde webhooks de Whaapy). El modal permite al vendedor/admin editar los campos antes de enviar. Match defensivo previo: si el teléfono normalizado ya existe como customer Shopify, NO se crea duplicado — solo se enlaza la identidad faltante al maestro y se notifica al vendedor.
+  - `PUT /admin/api/.../customers/{id}.json` (actualizar customer con cambios provenientes de Whaapy o de M6, **solo si el contacto ya tiene `shopify_customer_id` enlazado**). Updates de contacto sin identidad Shopify enlazada no propagan a Shopify hasta que se enlace identidad.
+  - Agregar/quitar tags de vendedor también vía este endpoint (propagación de asignación de asesor desde Whaapy o desde M6 admin), **condicional a que el contacto ya tenga `shopify_customer_id` enlazado**.
+
+  **Token de Shopify ya en Vault cubre estas llamadas — sin nuevo secret**. Nota operativa importante: Shopify soporta nativamente customers con `orders_count = 0` (la plataforma puede crear un customer en Shopify aunque el contacto no haya hecho compra todavía — útil cuando el vendedor convierte un lead a cliente desde M6). **La asimetría v5.1 implica que la creación automática Whaapy → Shopify del modelo original ya no ocurre** — es manual on-demand.
 - **Verificación:** HMAC-SHA256 con comparación constant-time antes de parsear JSON.
 - **Dedup:** clave en Upstash Redis con namespace dedicado a Shopify, usando `X-Shopify-Event-Id` y TTL de 24h.
 - **Defensa anti-bucle (R11):** las llamadas salientes a Shopify se marcan con identificador de origen "plataforma" (header, nota, propiedad custom — Claude Code decide en M3 según lo que la API permita). Webhooks `customers/update` entrantes que lleven ese marcador se descartan + audit log `sync_loop_prevented`.
@@ -922,15 +1015,22 @@ Detalle por proveedor:
 
 - **API:** propia, según contrato vigente.
 - **Webhooks consumidos (inbound):** `contact.created`, `contact.updated`, `contact.deleted`. **Adicionalmente, M4 consume el webhook que Whaapy provea para "asesor asignado a contacto"** — sea `conversation.assigned`, sea `contact.updated` con campo de asesor cambiado, sea otro evento equivalente; la sesión de M4 decide cuál según docs de Whaapy actuales. La regla operativa es: la plataforma debe enterarse cuando Whaapy asigna asesor a un contacto, para propagar a Shopify (tag mapeada). NO se consumen `message.received`, `message.sent` — los mensajes viven en Whaapy y el vendedor los opera desde el iframe.
-- **Llamadas salientes (outbound — Ajuste post-Discovery 2 #14):** la plataforma invoca la API saliente de Whaapy para propagar cambios de contacto originados en Shopify o en M6 (edición manual). Operaciones típicas: crear contacto en Whaapy cuando viene un customer nuevo de Shopify que no existe allá, actualizar contacto con cambios provenientes de Shopify o de M6, asignar contacto a `whaapy_agent_id` cuando el asesor cambia desde otra fuente. **Whaapy api_key necesario server-side para estas llamadas** — vuelve a Vault (revierte parcialmente el Ajuste final 5; ver bloque Vault abajo). Endpoints concretos a decisión de Claude Code en M4 según docs de Whaapy actuales. Whaapy requiere mínimo nombre y teléfono al crear contacto; la plataforma envía todos los campos disponibles del maestro (email, dirección, notas) para que Whaapy quede sincronizado con la maestra.
+- **Llamadas salientes (outbound — Ajuste post-Discovery 2 #14, conserva creación automática en v5.1):** la plataforma invoca la API saliente de Whaapy para propagar cambios de contacto originados en Shopify o en M6 (edición manual). Operaciones típicas:
+  - **Crear contacto en Whaapy automáticamente** cuando viene un customer nuevo de Shopify que no existe allá (asimétrico v5.1 — esta dirección sigue siendo automática, a diferencia de Whaapy → Shopify que ahora es manual). Requiere `missing_phone = false`.
+  - Actualizar contacto con cambios provenientes de Shopify o de M6 (cuando el contacto tiene `whaapy_contact_id` enlazado).
+  - Asignar contacto a `whaapy_agent_id` cuando el asesor cambia desde otra fuente.
+
+  **Whaapy api_key necesario server-side para estas llamadas** — vuelve a Vault (revierte parcialmente el Ajuste final 5; ver bloque Vault abajo). Endpoints concretos a decisión de Claude Code en M4 según docs de Whaapy actuales. Whaapy requiere mínimo nombre y teléfono al crear contacto; la plataforma envía todos los campos disponibles del maestro (email, dirección, notas) para que Whaapy quede sincronizado con la maestra.
+
+- **Auto-creación de oportunidades C2 (v5.1 — disparado desde M4, no es llamada saliente sino acción local):** cuando llega webhook `contact.created` de Whaapy (contacto nuevo en maestro) o cuando un contacto existente con `last_whaapy_activity_at` > N días registra actividad nueva (mensaje, conversación re-abierta), M4 dispara auto-creación de oportunidad en etapa inicial del Funnel Venta con asesor heredado del contacto. Regla operativa completa en R12. Durante backfill esta auto-creación se suprime (flag `backfill_in_progress`).
 - **Verificación e idempotencia:** mismo patrón conceptual que Shopify, adaptado al contrato específico de Whaapy. Dedup con namespace distinto en Upstash para separar de Shopify. Eventos no soportados se loguean como `unhandled_whaapy_event` en audit log; notificación al admin SOLO si el mismo evento desconocido aparece >5 veces en 24h.
 - **Iframe en plataforma:** la pestaña Whaapy renderiza el chat de Whaapy embebido (técnica validada en Kibah). El vendedor opera todas las conversaciones desde ahí; la plataforma no necesita acceso a los mensajes vía API — para mensajes, el iframe es suficiente y usa la sesión nativa del navegador del usuario.
 - **Defensa anti-bucle (R11):** las llamadas salientes a Whaapy se marcan con identificador de origen "plataforma" (la mecánica concreta — propiedad custom, header, comparación de timestamps — la decide Claude Code en M4 según lo que la API de Whaapy permita). Webhooks `contact.updated` entrantes que reflejen un cambio propio se descartan + audit log `sync_loop_prevented`.
-- **Identity matching:** webhook de contacto entrante → normalizar phone a E.164 + email a lowercase + trim → buscar contact local existente por estas identidades → si match, **enlazar la identidad Whaapy al contact existente** (puede ya tener identidad Shopify, queda con ambas); si no, crear contact nuevo con identidad Whaapy + disparar creación en Shopify vía API saliente.
+- **Identity matching:** webhook de contacto entrante → normalizar phone a E.164 + email a lowercase + trim → buscar contact local existente por estas identidades → si match, **enlazar la identidad Whaapy al contact existente** (puede ya tener identidad Shopify, queda con ambas); si no, crear contact nuevo con identidad Whaapy únicamente. **NO dispara creación automática en Shopify** (asimetría v5.1) — el contacto queda como lead hasta que el vendedor/admin use el botón "Crear contacto en Shopify" en M6.
 - **Sin descarga de media.** No se descargan ni almacenan audios, imágenes ni videos de las conversaciones. Quedan en Whaapy.
 - **Asignación de asesor:** dos casos.
   - Contacto Whaapy con match Shopify: hereda `assigned_advisor_id` del contact Shopify si lo tiene; si Whaapy entrega su propia asignación nativa después, gana la más reciente por R3 (LWW por campo).
-  - Contacto Whaapy nuevo (sin match Shopify): si Whaapy entrega asignación nativa, se aplica al maestro y se propaga a Shopify al crear el customer correspondiente (tag mapeada del vendedor agregada en la creación). Si no entrega asignación, queda sin asesor hasta asignación manual del admin desde M6.
+  - Contacto Whaapy nuevo (sin match Shopify — lead): si Whaapy entrega asignación nativa, se aplica al maestro. **NO se propaga a Shopify automáticamente** (no hay customer Shopify a quien aplicarle la tag — el contacto es lead). Si después el vendedor convierte el lead a cliente usando el botón "Crear contacto en Shopify" en M6, la creación en Shopify aplica la tag mapeada del vendedor al customer recién creado. Si Whaapy no entrega asignación nativa, queda sin asesor hasta asignación manual del admin desde M6.
 
 #### Inngest
 
@@ -1002,17 +1102,18 @@ Esta sección documenta los flujos de usuario críticos. Los detalles visuales (
 
 ### 4.2 Flujo de venta operativo (caso happy path)
 
-**Nota inicial sobre sincronización bidireccional de contactos** (Ajuste post-Discovery 2 #14 — Observación O11): a lo largo del flujo descrito abajo, las ediciones de contactos en cualquiera de los tres sistemas (Shopify, Whaapy, plataforma) se sincronizan automáticamente con los otros dos. El vendedor edita donde le sea más conveniente (Shopify Admin al crear Draft Order, Whaapy al chatear, M6 detalle de contacto en la plataforma) — la sincronización es transparente. La base maestra de contactos vive en la plataforma; Shopify y Whaapy son espejos. M3 y M4 orquestan la propagación con defensa contra bucles (R11).
+**Nota inicial sobre sincronización de contactos** (Ajuste post-Discovery 2 #14 — Observación O11, refinada en v5.1 con asimetría en creación): a lo largo del flujo descrito abajo, las ediciones de campos de contactos en cualquiera de los tres sistemas (Shopify, Whaapy, plataforma) se sincronizan automáticamente con los otros dos cuando el contacto tiene las identidades enlazadas. La **creación** es asimétrica: Shopify → Whaapy automática, Whaapy → Shopify manual on-demand vía botón "Crear contacto en Shopify" en M6. La clasificación lead/cliente del contacto es derivada de la presencia de `shopify_customer_id`. M3 y M4 orquestan la propagación con defensa contra bucles (R11). M4 también dispara auto-creación de oportunidades en "Lead nuevo" según R12 (Modelo C2).
 
-1. **Captura del lead.** Vendedor habla con prospecto por WhatsApp (desde la pestaña Whaapy con iframe de Whaapy). Si Centr usa Whaapy para inbound, el contacto ya existe sincronizado por M4.
-2. **Calificación.** Si decide trabajar el lead, abre detalle de contacto (pestaña Contactos), crea oportunidad manual desde el detalle (M6), captura `estimated_amount` y mueve a etapa "Calificado" (M5).
-3. **Cotización.** Cuando llega el momento, vendedor crea Draft Order en Shopify Admin con sus line items, **agrega su tag de atribución al crear el Draft Order** (supuesto operativo confirmado por inferencia — Discovery 2 respuesta 1.3 no fue explícita; el operador asume que es la primera acción del flujo donde el vendedor ya sabe que es su cliente), envía el invoice link desde Shopify al contacto por WhatsApp.
-4. **Sincronización automática.** Webhook `draft_orders/create` llega a Centr Hub (M3), parser de tags lee la tag y asigna el vendedor. La oportunidad de la plataforma se actualiza con `shopify_draft_order_id`, line items reales, monto real, y pasa automáticamente a etapa "Cotización enviada" (mediante la lógica del worker — el evento de creación de Draft Order es la señal natural de que la cotización fue enviada).
-5. **Seguimiento automático.** Si después de 24h no hay actividad nueva en la oportunidad, regla pre-cargada "Cotización sin respuesta 24h" genera tarea automática "Hacer seguimiento" al asesor (M8). El vendedor la ve en Mi Día (M9).
-6. **Negociación.** El vendedor avanza la oportunidad manualmente entre etapas del kanban según el avance real ("En negociación", "Esperando pago").
-7. **Pago confirmado.** El cliente paga el invoice link. Shopify cambia el estado de la orden a `paid` y dispara webhook `orders/paid` (M3). El worker mueve la oportunidad de Funnel Venta a etapa "Ganada", y atómicamente crea la oportunidad hija en Funnel Post-venta con etapa "Pago confirmado", heredando contacto y asesor (M7). Toast: "Oportunidad ganada. Se creó seguimiento en Post-venta."
-8. **Mantenimiento Post-venta.** La oportunidad en Funnel Post-venta avanza por sus etapas según seguimiento operativo (Preparación → Entregado → Seguimiento post-entrega automático a los 7 días por regla pre-cargada → Cliente activo).
-9. **Recompra (idealmente).** Cuando el cliente vuelve a comprar, llega nuevo Draft Order/Order y se crea una oportunidad nueva en Funnel Venta. Las métricas del dashboard reflejan la recompra.
+1. **Captura del lead.** Vendedor habla con prospecto por WhatsApp (desde la pestaña Whaapy con iframe de Whaapy). Si Centr usa Whaapy para inbound, el contacto ya existe sincronizado por M4 como **lead** en la base maestra (sin `shopify_customer_id` aún). M4 dispara auto-creación de oportunidad en etapa "Lead nuevo" del Funnel Venta (R12 — Modelo C2), heredando el asesor del contacto si Whaapy lo asignó.
+2. **Calificación.** El vendedor ve la oportunidad recién creada en su pipeline (M5) o en Mi Día (M9). Si decide trabajarla, abre el detalle (M6), captura `estimated_amount` y mueve manualmente entre las etapas intermedias del Funnel Venta ("Contactado asesor" → "Contacto calificado" → "Reunión agendada" → "Diseño de espacios") según el avance comercial real.
+3. **Conversión lead → cliente Shopify.** Cuando el vendedor está listo para cotizar formalmente, abre el detalle del contacto u oportunidad y presiona "Crear contacto en Shopify". Modal con campos editables aparece; al confirmar, la plataforma invoca API saliente de Shopify para crear customer (con match defensivo por teléfono). El contacto pasa de **lead** a **cliente** automáticamente (la derivación se actualiza al enlazar `shopify_customer_id`).
+4. **Cotización.** Vendedor crea Draft Order en Shopify Admin con sus line items para ese customer, **agrega su tag de atribución al crear el Draft Order** (supuesto operativo confirmado por inferencia — Discovery 2 respuesta 1.3 no fue explícita; el operador asume que es la primera acción del flujo donde el vendedor ya sabe que es su cliente), envía el invoice link desde Shopify al contacto por WhatsApp.
+5. **Sincronización automática del Draft Order.** Webhook `draft_orders/create` llega a Centr Hub (M3), parser de tags lee la tag y asigna el vendedor. La oportunidad de la plataforma se enriquece con `shopify_draft_order_id`, line items reales y monto real, y pasa automáticamente a etapa "Cotización" del Funnel Venta (el evento de creación de Draft Order es la señal natural de que la cotización fue enviada).
+6. **Seguimiento automático.** Si después de 24h no hay actividad nueva en la oportunidad, regla pre-cargada "Cotización sin respuesta 24h" genera tarea automática "Hacer seguimiento" al asesor (M8). El vendedor la ve en Mi Día (M9).
+7. **Negociación final.** El vendedor avanza la oportunidad manualmente a "Seguimiento para cierre" cuando el cliente está cerca de pagar.
+8. **Pago confirmado.** El cliente paga el invoice link. Shopify cambia el estado de la orden a `paid` y dispara webhook `orders/paid` (M3). El worker mueve la oportunidad de Funnel Venta a etapa "Ganada", y atómicamente crea la oportunidad hija en Funnel Post-venta con etapa "Pago confirmado", heredando contacto y asesor (M7). Toast: "Oportunidad ganada. Se creó seguimiento en Post-venta."
+9. **Mantenimiento Post-venta.** La oportunidad en Funnel Post-venta avanza por sus etapas según seguimiento operativo (Preparación → Entregado → Seguimiento post-entrega automático a los 7 días por regla pre-cargada → Cliente activo).
+10. **Recompra o re-actividad.** Si el cliente vuelve a comprar, llega nuevo Draft Order/Order y se crea una oportunidad nueva en Funnel Venta. Adicionalmente, si el cliente vuelve a interactuar en Whaapy después de 30 días de silencio (configurable), R12 dispara auto-creación de oportunidad nueva en "Lead nuevo" para reabrir el tracking comercial. Las métricas del dashboard reflejan ambos casos.
 
 **¿Por qué el trigger F1→F2 solo dispara desde webhook `orders/paid` y no desde movimiento manual?**
 
@@ -1052,7 +1153,7 @@ Casos especiales:
 1. Admin entra a Admin > Reglas de automación (construida en M8).
 2. Presiona "Nueva regla".
 3. **Paso 1 — Trigger:** dropdown del tipo de trigger (`stage_aging`, `no_activity`, `created`, `stage_changed`, `won`, `lost`, `contact.created`, `contact.no_activity`) + parametrización contextual (ej. para `stage_aging`: cuántas horas, qué etapa). Funnel se selecciona aquí.
-4. **Paso 2 — Condiciones:** opcional, agregar cero o más condiciones. Cada una con campo + operador + valor. Ejemplos: "monto > 5000", "etapa = Cotización enviada", "asesor en [Gina, Laura]". Combinables.
+4. **Paso 2 — Condiciones:** opcional, agregar cero o más condiciones. Cada una con campo + operador + valor. Ejemplos: "monto > 5000", "etapa = Cotización", "asesor en [Gina, Laura]". Combinables.
 5. **Paso 3 — Acciones:** una o más acciones del set permitido (`create_task`, `notify_advisor`, `notify_admin`, `move_to_stage`, `add_tag`). Cada una con parametrización contextual.
 6. Antes de guardar, vista previa: "Esta regla afectará oportunidades del Funnel X. Última ejecución hipotética con datos actuales: N oportunidades cumplirían las condiciones."
 7. Si el wizard detecta contradicciones entre condiciones (ej. "etapa = X AND etapa = Y" con X≠Y) muestra modal de confirmación: "Detectamos que estas condiciones se contradicen — la regla nunca se activará con datos actuales. ¿Estás seguro de continuar?" — fuerza confirmación explícita sin bloquear.
