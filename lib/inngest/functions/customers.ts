@@ -1,7 +1,9 @@
 import "server-only";
 import {
   getInngestClient,
+  WHAAPY_OUTBOUND_CONTACT_SYNC_EVENT,
   type ShopifyWebhookEnvelope,
+  type WhaapyContactSyncEnvelope,
 } from "@/lib/inngest/client";
 import { runWebhookWorker } from "@/lib/inngest/helpers";
 import {
@@ -117,17 +119,58 @@ async function persistMissingPhoneFlag(
   await updateContact(contactId, { missing_phone: phoneNormalized === null });
 }
 
-async function recordWhaapySyncIntent(
+/**
+ * Exportada para tests sintéticos. El caller dentro del worker es
+ * el único uso de producción — se llama solo si la guardia de
+ * asimetría v5.1 lo permite (ver llamadas en customersCreate y
+ * customersUpdate).
+ */
+export async function recordWhaapySyncIntent(
   contact: ContactRow,
   reason: "create_from_shopify" | "update_from_shopify",
 ): Promise<void> {
-  // Stub para M4 — se reemplazará por step.sendEvent('whaapy/outbound...').
+  // 1) Audit log paralelo (trazabilidad histórica — Sección 3.3.7).
+  //    NO reemplaza el evento Inngest; sirve para auditar "se intentó
+  //    propagar X contacto Y en Z momento" sin depender del estado de
+  //    la cola.
   await recordAuditEvent({
     actorUserId: null,
     eventType: "whaapy_sync_intent_recorded",
     entityType: "contact",
     entityId: contact.id,
     payload: { reason, has_phone: contact.phone !== null } as Json,
+  });
+
+  // 2) Evento Inngest — la cola REAL que M4 consume.
+  //    Si M4 no existe todavía cuando M3 está en producción, los
+  //    eventos se acumulan en la cola Inngest y se procesan al
+  //    registrarse el worker `whaapy/outbound.contact_sync_requested`
+  //    (pub/sub durable). El snapshot completo del contact viaja
+  //    aquí para que M4 procese aunque el contact local cambie
+  //    después — LWW reconcilia al aplicar el outbound.
+  const envelope: WhaapyContactSyncEnvelope = {
+    organizationId: contact.organization_id,
+    contactId: contact.id,
+    reason,
+    contactSnapshot: {
+      shopifyCustomerId: contact.shopify_customer_id,
+      whaapyContactId: contact.whaapy_contact_id,
+      fullName: contact.full_name,
+      email: contact.email,
+      phone: contact.phone,
+      address: contact.address,
+      internalNote: contact.internal_note,
+      shopifyTags: contact.shopify_tags,
+      shopifyState: contact.shopify_state,
+      assignedAdvisorId: contact.assigned_advisor_id,
+      fieldMetadata: contact.field_metadata,
+      lastModifiedAt: contact.last_modified_at,
+      lastModifiedSource: contact.last_modified_source,
+    },
+  };
+  await inngest.send({
+    name: WHAAPY_OUTBOUND_CONTACT_SYNC_EVENT,
+    data: envelope,
   });
 }
 

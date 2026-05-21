@@ -38,6 +38,43 @@ export interface OutboundRetryEnvelope {
   payload: Json;
 }
 
+/**
+ * Envelope para sincronización outbound Shopify → Whaapy
+ * (asimetría v5.1 + Ajuste post-Discovery 2 #14).
+ *
+ * Emitido por workers de M3 (customers/create y customers/update)
+ * cuando un cambio del lado Shopify debe propagarse a Whaapy.
+ * Consumido por M4 cuando se registre su worker. Si M4 no existe
+ * todavía cuando M3 está deployado, la cola Inngest acumula
+ * eventos y los drena al registrarse — sin backfill manual.
+ *
+ * El snapshot completo del contacto viaja en el evento para que
+ * M4 procese aunque el contact local cambie después. LWW se
+ * reconcilia al aplicar el outbound (M4 compara timestamps).
+ */
+export interface WhaapyContactSyncEnvelope {
+  organizationId: UUID;
+  contactId: UUID;
+  reason: "create_from_shopify" | "update_from_shopify";
+  contactSnapshot: {
+    shopifyCustomerId: string | null;
+    whaapyContactId: string | null;
+    fullName: string | null;
+    email: string | null;
+    phone: string | null;
+    address: Json | null;
+    internalNote: string | null;
+    shopifyTags: string[];
+    shopifyState: string | null;
+    assignedAdvisorId: UUID | null;
+    fieldMetadata: Json;
+    lastModifiedAt: string;
+    lastModifiedSource: string;
+  };
+}
+
+export const WHAAPY_OUTBOUND_CONTACT_SYNC_EVENT = "whaapy/outbound.contact_sync_requested" as const;
+
 let cached: Inngest | null = null;
 
 export function getInngestClient(): Inngest {
