@@ -61,6 +61,12 @@ export interface LoopCheckInput {
 export interface LoopCheckResult {
   isOwnEcho: boolean;
   reason: "no_local_record" | "marker_mismatch" | "outside_window" | "own_echo_detected";
+  /** Delta absoluto en ms entre payload.updated_at y contact.last_modified_at.
+   *  Undefined cuando no se llegó a computar (no_local_record o marker_mismatch). */
+  deltaMs?: number;
+  /** ISO timestamp local (contact.last_modified_at) usado en la comparación.
+   *  Undefined cuando no se pudo leer el row local. */
+  lastLocalWriteAt?: string;
 }
 
 export async function checkInboundIsOwnEcho(
@@ -81,17 +87,18 @@ export async function checkInboundIsOwnEcho(
   if (!data) return { isOwnEcho: false, reason: "no_local_record" };
 
   const source = data.last_modified_source as string;
+  const lastLocalWriteAt = data.last_modified_at as string;
   if (source !== "platform") {
-    return { isOwnEcho: false, reason: "marker_mismatch" };
+    return { isOwnEcho: false, reason: "marker_mismatch", lastLocalWriteAt };
   }
 
-  const localTs = new Date(data.last_modified_at as string).getTime();
+  const localTs = new Date(lastLocalWriteAt).getTime();
   const payloadTs = new Date(input.payloadUpdatedAt).getTime();
-  const delta = Math.abs(payloadTs - localTs);
-  if (delta > ECHO_WINDOW_MS) {
-    return { isOwnEcho: false, reason: "outside_window" };
+  const deltaMs = Math.abs(payloadTs - localTs);
+  if (deltaMs > ECHO_WINDOW_MS) {
+    return { isOwnEcho: false, reason: "outside_window", deltaMs, lastLocalWriteAt };
   }
-  return { isOwnEcho: true, reason: "own_echo_detected" };
+  return { isOwnEcho: true, reason: "own_echo_detected", deltaMs, lastLocalWriteAt };
 }
 
 /**
@@ -121,6 +128,16 @@ export async function discardIfOwnEcho(input: {
       shopify_entity_id: input.shopifyEntityId ?? null,
       whaapy_entity_id: input.whaapyEntityId ?? null,
       reason: result.reason,
+      // Trazabilidad del trade-off documentado en ERRORES.md
+      // ("Falso positivo posible en R11 dentro de la ventana de 30s").
+      // Si un usuario reporta "edité X en Shopify y se perdió",
+      // consultar este audit log: delta_ms cercano al límite (≈30s)
+      // + payload_updated_at posterior a last_local_write_at sugiere
+      // un edit legítimo descartado, no un eco real.
+      delta_ms: result.deltaMs ?? null,
+      payload_updated_at: input.payloadUpdatedAt,
+      last_local_write_at: result.lastLocalWriteAt ?? null,
+      echo_window_ms: ECHO_WINDOW_MS,
     },
   });
   return true;

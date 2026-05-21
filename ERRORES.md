@@ -75,6 +75,25 @@ Cada entrada documenta UN bug o lección con la siguiente estructura:
   - **Apps públicas del App Store** (distribución masiva, store-listing): scopes protegidos requieren Protected Customer Data Form y, para `read_all_orders`, request manual con justificación en Partner Dashboard.
   - La documentación de Shopify mezcla los dos modelos en páginas adyacentes sin etiquetarlos siempre con claridad. Antes de documentar restricciones operativas o bloqueos a milestones futuros, verificar explícitamente bajo qué modelo opera la app. El disparador de esta corrección fue el cuestionamiento operativo del operador ("¿por qué necesitaríamos un trámite externo si la app es 1-a-1?") durante el setup post-M2 — ese tipo de pregunta es la señal correcta para revisar el supuesto.
 
+### Falso positivo posible en R11 dentro de la ventana de 30s (trade-off aceptado)
+
+- **Milestone donde se detectó:** M3 (documentado tras cierre).
+- **Síntoma esperado en producción:** un usuario edita un contacto directamente en Shopify Admin (cambia nombre, teléfono, dirección) dentro de los ~30 segundos posteriores a una escritura outbound de la plataforma sobre ese mismo contacto. El webhook `customers/update` resultante lleva `updated_at` cercano al `contact.last_modified_at` local Y el contact tiene `last_modified_source = 'platform'` → la defensa anti-bucle lo descarta como si fuera echo de la propia plataforma. El edit del usuario NO se aplica al maestro local y NO se propaga a Whaapy. Silencioso del lado del usuario; solo aparece en el audit log `sync_loop_prevented`. No hay reporte de error.
+- **Causa raíz:** la mecánica R11 implementada es la **opción B** descrita en CLAUDE.md (comparación de timestamps + marker `last_modified_source`). Detecta correctamente los echos reales de Shopify cuando la plataforma escribió, pero NO puede distinguir un echo real de un edit legítimo del usuario hecho dentro de la misma ventana. Es una propiedad inherente a la mecánica: si `payload.updated_at` cae dentro de `[last_local_write_at, last_local_write_at + 30s]` Y la última fuente local es `platform`, se asume eco.
+- **Por qué no opción A:** la opción A (marker en metafield/note custom del customer) requiere request adicional contra Shopify para leer el metafield por cada webhook entrante — duplica el tráfico contra la API y consume cuotas. La opción B no requiere round-trip y captura el 99%+ de los casos reales en producción típica (Shopify entrega webhooks en <5s en operación normal; la ventana de 30s deja margen para latencia transitoria sin abrir tanto que aumente el falso positivo).
+- **Probabilidad e impacto:** **probabilidad baja en operación real** (requiere que un humano edite manualmente en Shopify Admin justo en la ventana donde la plataforma acaba de escribir; la mayoría de los edits manuales son aleatorios en el tiempo y no caen en esa ventana). **Impacto alto cuando ocurre** porque es silencioso — el usuario no recibe error, solo nota que su cambio "no se propagó" si vuelve a la plataforma.
+- **Decisión: aceptar el trade-off.** No re-implementar opción A profilácticamente. Si la evidencia operativa muestra incidentes (Mayor o el admin reporta "edité X y se perdió"), re-evaluar.
+- **Workaround / fix:** trazabilidad mejorada en el audit log `sync_loop_prevented`. El payload ahora incluye:
+  - `delta_ms` — diferencia absoluta en ms entre `payload.updated_at` y `contact.last_modified_at`.
+  - `payload_updated_at` — timestamp del webhook entrante.
+  - `last_local_write_at` — timestamp de la última escritura outbound local.
+  - `echo_window_ms` — la constante de la ventana (30000ms).
+  Con estos campos, si un usuario reporta pérdida de un edit:
+  1. Consultar `audit_log` filtrado por `event_type = 'sync_loop_prevented'` y `entity_id = <contact_id>`.
+  2. Si aparece un evento con `delta_ms` cercano al límite (~25-30s) Y `payload_updated_at > last_local_write_at` por varios segundos: alta sospecha de falso positivo. El edit del usuario probablemente cayó en la ventana.
+  3. Si `delta_ms < 5s`: muy probablemente echo real (Shopify entrega webhooks ~3-5s después de la escritura).
+- **Lección:** defensas heurísticas con ventana temporal siempre tienen falsos positivos potenciales. La regla operativa en milestone M3 fue "implementar defensa desde el primer commit, no diferir" — eso obliga a aceptar la heurística más simple disponible. Documentar el trade-off **con telemetría suficiente para diagnosticar el bug si se manifiesta** es la única defensa contra "no sabíamos que ocurría". Patrón aplicable a futuras defensas similares (rate limiting, dedup atómico, etc.): siempre exponer en audit/log los parámetros de la decisión, no solo el resultado.
+
 ### Cancelado ≠ Perdido — la cancelación administrativa NO debe mapearse a etapa `is_lost`
 
 - **Milestone donde se detectó:** M3 (corrección post-entrega).
