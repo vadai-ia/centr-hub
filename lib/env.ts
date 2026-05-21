@@ -29,7 +29,12 @@ const serverSchema = clientSchema.extend({
   INNGEST_SIGNING_KEY: z.string().min(1).optional(),
   UPSTASH_REDIS_REST_URL: z.string().url().optional(),
   UPSTASH_REDIS_REST_TOKEN: z.string().min(1).optional(),
-  // Requeridas desde M3 — vacío permitido antes de ese milestone
+  // Shopify Dev Dashboard (flujo post 1-ene-2026). Requeridas desde
+  // M3 — pero se aceptan vacías en el schema para no romper arranque
+  // de milestones anteriores. Los helpers getShopifyClientId/Secret
+  // del Vault aplican validación en runtime.
+  SHOPIFY_API_KEY: z.string().optional(),
+  SHOPIFY_API_SECRET: z.string().optional(),
   SHOPIFY_WEBHOOK_SECRET: z.string().optional(),
   WHAAPY_API_KEY: z.string().optional(),
 });

@@ -7,29 +7,35 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "test": "vitest"
+    "test": "vitest",
+    "shopify:configure-webhooks": "tsx scripts/shopify/configure-webhooks.ts",
+    "shopify:backfill-incremental": "tsx scripts/shopify/backfill-incremental.ts",
+    "shopify:harness-create-customer": "tsx scripts/shopify/harness-create-customer.ts"
   },
   "dependencies": {
+    "@supabase/ssr": "0.10.3",
+    "@supabase/supabase-js": "2.105.4",
+    "@upstash/redis": "1.38.0",
+    "inngest": "4.4.0",
+    "libphonenumber-js": "^1.11.20",
+    "luxon": "3.7.2",
     "next": "14.2.35",
     "react": "18.3.1",
     "react-dom": "18.3.1",
-    "@supabase/supabase-js": "2.105.4",
-    "@supabase/ssr": "0.10.3",
-    "inngest": "4.4.0",
-    "@upstash/redis": "1.38.0",
-    "zod": "4.4.3",
-    "luxon": "3.7.2"
+    "zod": "4.4.3"
   },
   "devDependencies": {
-    "typescript": "5.9.3",
+    "@types/luxon": "3.7.1",
     "@types/node": "20.19.41",
     "@types/react": "18.3.28",
     "@types/react-dom": "18.3.7",
-    "@types/luxon": "3.7.1",
-    "postcss": "8.5.14",
-    "tailwindcss": "3.4.19",
+    "dotenv": "^16.4.7",
     "eslint": "8.57.1",
     "eslint-config-next": "14.2.35",
+    "postcss": "8.5.14",
+    "tailwindcss": "3.4.19",
+    "tsx": "^4.19.2",
+    "typescript": "5.9.3",
     "vitest": "4.1.6"
   }
 }

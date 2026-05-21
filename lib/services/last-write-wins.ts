@@ -3,21 +3,31 @@ import { requireTenantContext } from "@/lib/tenant/context";
 import type { ContactRow, Json } from "@/lib/types/database";
 
 /**
- * Last-write-wins (R3 + Ajuste post-Discovery 2 #14).
+ * Last-write-wins refinado (R3 + Ajuste post-Discovery 2 #14).
  *
- * Granularidad diferenciada:
- *   - Draft Orders / Orders: LWW a nivel REGISTRO completo
- *     (fuente única Shopify). Implementación en M3.
- *   - Contacts: LWW POR CAMPO. Implementación en M3 (Shopify
- *     inbound), M4 (Whaapy inbound) y M6 (edición manual).
+ * Granularidad:
+ *   - Draft Orders y Orders → LWW por REGISTRO (fuente única
+ *     Shopify). Usa `shouldApplyRecordUpdate`.
+ *   - Contacts → LWW POR CAMPO con `field_metadata` JSONB.
+ *     Usa `reconcileContactFields` (procesa varios campos juntos
+ *     en una sola pasada).
  *
- * Excepción del match inicial: cuando contacto Shopify hace match
- * con contacto Whaapy por primera vez, los campos Shopify
- * prevalecen pero valores VACÍOS en Shopify NO borran valores
- * existentes en Whaapy. Después del match, LWW por campo universal
- * con borrados propagados (R3).
+ * Borrados intencionales:
+ *   - Campo editable que llega vacío en update más reciente:
+ *     vacío SOBRESCRIBE valor existente. El usuario pudo borrarlo
+ *     deliberadamente; preservar lo previo contradice la intención.
+ *   - Identificadores externos (`shopify_customer_id`,
+ *     `whaapy_contact_id`): NO se borran nunca por LWW. Esos
+ *     enlaces se gestionan explícitamente.
  *
- * Estructura de `field_metadata` JSONB:
+ * Excepción del match inicial (v5.1):
+ *   - Shopify → Whaapy automático: Shopify llena la creación.
+ *   - Whaapy → Shopify manual vía botón: el vendedor decide.
+ *   - Match defensivo (enlace de customer Shopify pre-existente):
+ *     campos del customer Shopify ganan pero VACÍOS no borran
+ *     valores del maestro/Whaapy.
+ *
+ * Estructura de `field_metadata`:
  *   {
  *     "full_name": { "updated_at": "2026-05-01T...", "source": "shopify" },
  *     "email":     { "updated_at": "2026-05-02T...", "source": "whaapy" },
@@ -27,34 +37,174 @@ import type { ContactRow, Json } from "@/lib/types/database";
 
 export type ContactFieldSource = "shopify" | "whaapy" | "platform";
 
-export interface FieldUpdateProposal {
-  field: keyof ContactRow;
-  value: unknown;          // nullable: borrado intencional
-  updatedAt: string;       // ISO timestamp del payload externo
+const EDITABLE_FIELDS = [
+  "full_name",
+  "email",
+  "phone",
+  "address",
+  "internal_note",
+  "shopify_state",
+  "shopify_tags",
+  "assigned_advisor_id",
+] as const;
+
+export type EditableContactField = (typeof EDITABLE_FIELDS)[number];
+
+const NEVER_OVERWRITE_BY_LWW = new Set<string>([
+  "shopify_customer_id",
+  "whaapy_contact_id",
+]);
+
+export interface FieldProposal {
+  field: EditableContactField;
+  value: unknown; // null/undefined/"" representan borrado intencional
+  updatedAt: string;
   source: ContactFieldSource;
 }
 
-export interface FieldUpdateResult {
+export interface FieldDecision {
+  field: EditableContactField;
   applied: boolean;
-  reason: "newer" | "older_ignored" | "initial_match_shopify_priority" | "empty_overwrite";
+  reason:
+    | "first_value"
+    | "newer"
+    | "older_ignored"
+    | "initial_match_shopify_priority"
+    | "initial_match_preserve_value"
+    | "empty_overwrite"
+    | "blocked_external_id";
+  finalValue?: unknown;
+}
+
+export interface ReconcileResult {
+  /** Patch listo para `.update(...)` en la tabla contacts. */
+  patch: Record<string, unknown>;
+  /** Nueva metadata por campo para guardar en `field_metadata`. */
+  nextFieldMetadata: Json;
+  /** Decisiones tomadas — útil para audit log y debugging. */
+  decisions: FieldDecision[];
+}
+
+interface FieldMetaEntry {
+  updated_at: string;
+  source: ContactFieldSource;
+}
+
+function readMeta(meta: Json, field: string): FieldMetaEntry | null {
+  if (!meta || typeof meta !== "object" || Array.isArray(meta)) return null;
+  const obj = (meta as Record<string, Json>)[field];
+  if (!obj || typeof obj !== "object" || Array.isArray(obj)) return null;
+  const entry = obj as { updated_at?: unknown; source?: unknown };
+  if (typeof entry.updated_at !== "string" || typeof entry.source !== "string") {
+    return null;
+  }
+  return { updated_at: entry.updated_at, source: entry.source as ContactFieldSource };
+}
+
+function isEmptyValue(value: unknown): boolean {
+  if (value === null || value === undefined) return true;
+  if (typeof value === "string" && value.trim() === "") return true;
+  if (Array.isArray(value) && value.length === 0) return true;
+  return false;
 }
 
 /**
- * Decide si aplicar `proposal` sobre `current.field_metadata`.
- * Stub para M1 — la lógica concreta vive en M3/M4/M6.
+ * Decide si aplicar un conjunto de proposals sobre un contacto.
+ * `isInitialMatch=true` aplica únicamente cuando es la PRIMERA
+ * vez que se enlaza una identidad externa al contacto existente
+ * (match defensivo Shopify pre-existente, en M6).
  */
-export function reconcileContactField(
-  _current: ContactRow,
-  _proposal: FieldUpdateProposal,
-  _isInitialMatch: boolean,
-): FieldUpdateResult {
-  throw new Error("last-write-wins: implementación pendiente (M3/M4/M6)");
+export function reconcileContactFields(
+  current: ContactRow,
+  proposals: FieldProposal[],
+  options: { isInitialMatch?: boolean } = {},
+): ReconcileResult {
+  const patch: Record<string, unknown> = {};
+  const decisions: FieldDecision[] = [];
+  let nextMeta: Record<string, Json> = {};
+  if (current.field_metadata && typeof current.field_metadata === "object" && !Array.isArray(current.field_metadata)) {
+    nextMeta = { ...(current.field_metadata as Record<string, Json>) };
+  }
+
+  for (const proposal of proposals) {
+    const field = proposal.field;
+
+    if (NEVER_OVERWRITE_BY_LWW.has(field as string)) {
+      decisions.push({ field, applied: false, reason: "blocked_external_id" });
+      continue;
+    }
+
+    const meta = readMeta(current.field_metadata, field);
+    const currentValue = (current as unknown as Record<string, unknown>)[field];
+    const proposalEmpty = isEmptyValue(proposal.value);
+    const normalizedValue = proposalEmpty ? null : proposal.value;
+
+    // Caso especial: match inicial (v5.1)
+    if (options.isInitialMatch && proposal.source === "shopify") {
+      if (proposalEmpty && !isEmptyValue(currentValue)) {
+        decisions.push({
+          field,
+          applied: false,
+          reason: "initial_match_preserve_value",
+        });
+        continue;
+      }
+      patch[field] = normalizedValue;
+      nextMeta[field] = {
+        updated_at: proposal.updatedAt,
+        source: proposal.source,
+      } as Json;
+      decisions.push({
+        field,
+        applied: true,
+        reason: "initial_match_shopify_priority",
+        finalValue: normalizedValue,
+      });
+      continue;
+    }
+
+    if (!meta) {
+      patch[field] = normalizedValue;
+      nextMeta[field] = {
+        updated_at: proposal.updatedAt,
+        source: proposal.source,
+      } as Json;
+      decisions.push({
+        field,
+        applied: true,
+        reason: "first_value",
+        finalValue: normalizedValue,
+      });
+      continue;
+    }
+
+    const isNewer =
+      new Date(proposal.updatedAt).getTime() > new Date(meta.updated_at).getTime();
+    if (!isNewer) {
+      decisions.push({ field, applied: false, reason: "older_ignored" });
+      continue;
+    }
+
+    patch[field] = normalizedValue;
+    nextMeta[field] = {
+      updated_at: proposal.updatedAt,
+      source: proposal.source,
+    } as Json;
+    decisions.push({
+      field,
+      applied: true,
+      reason: proposalEmpty ? "empty_overwrite" : "newer",
+      finalValue: normalizedValue,
+    });
+  }
+
+  return { patch, nextFieldMetadata: nextMeta as Json, decisions };
 }
 
 /**
- * LWW a nivel registro. Devuelve true si el payload debe aplicarse
- * (su `updated_at` es más reciente que el local). Usado por M3
- * para Draft Orders y Orders.
+ * LWW a nivel registro completo. Usado por workers de Draft Order
+ * y Order. `localUpdatedAt` puede venir de `orders.updated_at` o
+ * `opportunities.last_modified_at`.
  */
 export function shouldApplyRecordUpdate(
   localUpdatedAt: string | null,
@@ -67,8 +217,7 @@ export function shouldApplyRecordUpdate(
 }
 
 /**
- * Aux: crea un patch de `field_metadata` con la entrada actualizada
- * para `field` (preservando lo demás).
+ * Compatibilidad con tests M1 — alias preserva firma anterior.
  */
 export function buildFieldMetadataPatch(
   current: Json,
@@ -76,9 +225,38 @@ export function buildFieldMetadataPatch(
   updatedAt: string,
   source: ContactFieldSource,
 ): Json {
-  const obj = (current && typeof current === "object" && !Array.isArray(current)
-    ? { ...(current as Record<string, Json>) }
-    : {}) as Record<string, Json>;
-  obj[field] = { updated_at: updatedAt, source };
+  const obj =
+    current && typeof current === "object" && !Array.isArray(current)
+      ? { ...(current as Record<string, Json>) }
+      : ({} as Record<string, Json>);
+  obj[field] = { updated_at: updatedAt, source } as Json;
   return obj as Json;
+}
+
+/** Re-export del tipo legacy para compatibilidad. */
+export interface FieldUpdateProposal {
+  field: keyof ContactRow;
+  value: unknown;
+  updatedAt: string;
+  source: ContactFieldSource;
+}
+
+export interface FieldUpdateResult {
+  applied: boolean;
+  reason: FieldDecision["reason"];
+}
+
+/** Helper legacy preservado por backward compat — usa el nuevo reconciler. */
+export function reconcileContactField(
+  current: ContactRow,
+  proposal: FieldUpdateProposal,
+  isInitialMatch: boolean,
+): FieldUpdateResult {
+  const result = reconcileContactFields(
+    current,
+    [proposal as FieldProposal],
+    { isInitialMatch },
+  );
+  const decision = result.decisions[0];
+  return { applied: decision.applied, reason: decision.reason };
 }
