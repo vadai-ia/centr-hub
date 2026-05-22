@@ -341,6 +341,22 @@ La sincronización con propagación entre sistemas crea riesgo de loops infinito
 
 **Sin esta defensa, el primer edit de cualquier contacto rompe el sistema en producción.** No es optimización — es requerimiento operativo. Los tests sintéticos de M3 y M4 deben validar explícitamente que el loop NO ocurre antes del commit final.
 
+### Orden de operaciones del worker `whaapyContactUpdated` (M4 commit `e377e2f`)
+
+La doctrina v5.1 y la sección R11 conceptual de arriba describen QUÉ tiene que pasar pero no fijan el ORDEN exacto entre el GET de reconciliación y las dos capas de R11. El worker `whaapyContactUpdated` quedó implementado con la siguiente secuencia, que reemplaza al orden propuesto inicialmente en el prompt de M4 (Claude Code lo razonó al revés durante implementación y la decisión se aceptó tras revisión del operador):
+
+1. **GET reconcile** — `GET /contacts/v1/{id}` contra Whaapy para obtener snapshot completo. El payload `contact.updated` de Whaapy NO trae snapshot (solo `updated_fields` + `name` + `previous_name`), así que el GET es obligatorio antes de aplicar LWW. Fallo → audit `whaapy_reconciliation_failed` + throw → Inngest retry → DLQ. Maestro queda en estado pre-webhook hasta éxito.
+2. **R11 opción B** — comparación de timestamps con `last_modified_source='platform'` y ventana echo 30s sobre el contact local. Si descarta: actualiza `last_whaapy_activity_at` + audit `sync_loop_prevented` + return.
+3. **R11 opción A** — marker `custom_fields.last_platform_write_at` extraído del snapshot del GET. Ventana 5min hacia atrás (más amplia que la opción B porque cubre latencia del GET reconcile). Si descarta: actualiza `last_whaapy_activity_at` + audit `sync_loop_prevented` con `reason: "custom_field_marker_match"` + return.
+4. **LWW por campo** — proposals construidos desde el snapshot reconciliado, reconciliación contra `field_metadata` local. `lwwChangedSomething = Object.keys(reconciled.patch).length > 0` captura si hubo cambios efectivos.
+5. **Propagación condicional a Shopify** — `propagateUpdateToShopify(...)` se invoca **únicamente** si las tres condiciones se cumplen: (a) `lwwChangedSomething === true`, (b) el contact tiene `shopify_customer_id` enlazado, (c) `missing_phone === false`. Si LWW no aplicó ningún campo (todos los proposals quedaron `older_ignored`), no hay nada que propagar — se evita un PUT redundante a Shopify Admin API.
+
+**Trade-off aceptado:** el GET corre ANTES de R11, por lo tanto cada webhook eco consume una API call a Whaapy. La alternativa (R11 timestamp primero, GET solo si pasa) ahorra la API call en echoes pero **pierde la posibilidad de cross-check con el marker custom_field**, que es más confiable que la comparación de timestamps (ver entrada en `ERRORES.md` "Falso positivo posible en R11 dentro de la ventana de 30s" — la opción B sola produce falsos positivos cuando un usuario edita el contacto en el sistema externo dentro de la ventana echo post-write outbound). El costo de una API call extra por eco se considera menor que el costo de descartar silenciosamente un edit legítimo del usuario.
+
+**Si un milestone futuro propone reordenar para hacer R11 timestamp primero** (ahorrar la API call al GET para echoes detectables por timestamp), tiene que también re-evaluar la pérdida de precisión: sin el marker como segunda capa, la única defensa es la heurística temporal con sus falsos positivos conocidos. La decisión de M4 fue priorizar correctitud sobre eficiencia. Cualquier cambio futuro debe documentar explícitamente la nueva relación costo/beneficio.
+
+`last_whaapy_activity_at` se actualiza en TODOS los caminos del worker (incluidos los discard paths de R11 B y A) excepto cuando el GET falla (throw para retry sin cambios parciales). Esto preserva la semántica "Whaapy emitió el webhook → registró actividad del lado conversacional, aunque el cambio en sí sea eco propio".
+
 ### Granularidad de last-write-wins refinada (R3)
 
 - **Draft Orders y Orders:** LWW a nivel **registro entero** (fuente única Shopify).
