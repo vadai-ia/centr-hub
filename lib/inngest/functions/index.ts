@@ -3,15 +3,23 @@ import { customerFunctions } from "./customers";
 import { draftOrderFunctions } from "./draft-orders";
 import { orderFunctions } from "./orders";
 import { dlqFunctions } from "./dlq";
+import { whaapyContactFunctions } from "./whaapy-contacts";
+import { whaapyConversationFunctions } from "./whaapy-conversations";
+import { whaapyOutboundFunctions } from "./whaapy-outbound";
 
 /**
  * Registro completo de funciones Inngest para servir desde
- * `/api/inngest`. Cuando M4 agregue workers Whaapy, exportarlos
- * desde su propio archivo y concatenar al array.
+ * `/api/inngest`.
+ *
+ * M3 (Shopify): customers, draft-orders, orders, dlq.
+ * M4 (Whaapy):  contact.*, conversation.*, outbound.
  */
 export const allFunctions = [
   ...customerFunctions,
   ...draftOrderFunctions,
   ...orderFunctions,
   ...dlqFunctions,
+  ...whaapyContactFunctions,
+  ...whaapyConversationFunctions,
+  ...whaapyOutboundFunctions,
 ];

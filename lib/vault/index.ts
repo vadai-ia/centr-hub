@@ -38,6 +38,12 @@ type ShopifyVaultBag = {
 
 type WhaapyVaultBag = {
   api_key?: string;
+  /**
+   * Secret HMAC del webhook Whaapy (M4). Devuelto por Whaapy al
+   * registrar el webhook vía `POST /user-webhooks`. Único por
+   * organización, separado del api_key (que es de las APIs outbound).
+   */
+  webhook_secret?: string;
 };
 
 type OrgVaultKeys = {
@@ -218,4 +224,32 @@ export async function storeWhaapyApiKey(
   apiKey: string,
 ): Promise<void> {
   await patchVaultBag(organizationId, VAULT_NAMESPACE_WHAAPY, { api_key: apiKey });
+}
+
+/**
+ * Devuelve el secret HMAC del webhook Whaapy. Sin fallback a env —
+ * el secret se obtiene únicamente al registrar el webhook contra
+ * Whaapy via `POST /user-webhooks` y se persiste en Vault.
+ */
+export async function getWhaapyWebhookSecret(
+  organizationId: UUID,
+): Promise<string> {
+  const bag = await readVaultKeys(organizationId);
+  const fromVault = bag.whaapy?.webhook_secret;
+  if (!fromVault) {
+    throw new Error(
+      `vault: WHAAPY webhook_secret no configurado (org ${organizationId}). ` +
+        `Registra el webhook con scripts/whaapy/configure-webhook.ts.`,
+    );
+  }
+  return fromVault;
+}
+
+export async function storeWhaapyWebhookSecret(
+  organizationId: UUID,
+  webhookSecret: string,
+): Promise<void> {
+  await patchVaultBag(organizationId, VAULT_NAMESPACE_WHAAPY, {
+    webhook_secret: webhookSecret,
+  });
 }

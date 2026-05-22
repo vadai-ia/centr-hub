@@ -103,6 +103,9 @@ export interface ContactRow {
   deleted_in_shopify: boolean;
   deleted_in_whaapy: boolean;
   anonymized_at: ISODateString | null;
+  // Migración 0013 (v5.1): última actividad observada en Whaapy.
+  // Usado por R12 (b) y la pestaña Contactos para "sin actividad X días".
+  last_whaapy_activity_at: ISODateString | null;
   created_at: ISODateString;
   updated_at: ISODateString;
 }

@@ -1,7 +1,10 @@
 import "server-only";
 import { withTenantContext } from "@/lib/tenant/context";
 import { recordAuditEvent } from "@/lib/db/operational";
-import type { ShopifyWebhookEnvelope } from "@/lib/inngest/client";
+import type {
+  ShopifyWebhookEnvelope,
+  WhaapyWebhookEnvelope,
+} from "@/lib/inngest/client";
 import type { Json, UUID } from "@/lib/types/database";
 
 /**
@@ -62,4 +65,51 @@ export async function runWebhookWorker<T>(
 
 export function asUUID(value: string): UUID {
   return value as UUID;
+}
+
+/**
+ * Espejo de `runWebhookWorker` para webhooks Whaapy (M4). Idéntica
+ * disciplina (tenant context, audit log received/failed, re-throw para
+ * retry). Diferencia: el envelope usa `whaapyBusinessId` en lugar de
+ * `shopDomain` y los event types se prefijan con `whaapy_webhook_`.
+ */
+export async function runWhaapyWebhookWorker<T>(
+  envelope: WhaapyWebhookEnvelope,
+  topic: string,
+  callback: (env: WhaapyWebhookEnvelope) => Promise<T>,
+): Promise<T> {
+  return withTenantContext(
+    envelope.organizationId,
+    async () => {
+      await recordAuditEvent({
+        actorUserId: null,
+        eventType: "whaapy_webhook_received",
+        entityType: topic.split(".")[0] ?? null,
+        entityId: null,
+        payload: {
+          topic,
+          whaapy_event_id: envelope.eventId,
+          whaapy_business_id: envelope.whaapyBusinessId,
+          received_at: envelope.receivedAt,
+        } as Json,
+      });
+      try {
+        return await callback(envelope);
+      } catch (err) {
+        await recordAuditEvent({
+          actorUserId: null,
+          eventType: "whaapy_webhook_failed",
+          entityType: topic.split(".")[0] ?? null,
+          entityId: null,
+          payload: {
+            topic,
+            whaapy_event_id: envelope.eventId,
+            error: (err as Error)?.message ?? String(err),
+          },
+        });
+        throw err;
+      }
+    },
+    { source: "webhook" },
+  );
 }

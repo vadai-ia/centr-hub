@@ -75,6 +75,25 @@ export interface WhaapyContactSyncEnvelope {
 
 export const WHAAPY_OUTBOUND_CONTACT_SYNC_EVENT = "whaapy/outbound.contact_sync_requested" as const;
 
+/**
+ * Envelope inbound Whaapy → workers.
+ *
+ * Construido por `/api/webhooks/whaapy` después de verificar HMAC,
+ * resolver tenant por `data.businessId` y deduplicar `X-Webhook-ID`.
+ * Los workers castean `event.data` a este tipo.
+ */
+export interface WhaapyWebhookEnvelope {
+  organizationId: UUID;
+  whaapyBusinessId: string;
+  /** X-Webhook-ID — dedup atómico + trazabilidad. */
+  eventId: string;
+  /** Topic exacto del payload (ej. "contact.created", "conversation.assigned"). */
+  topic: string;
+  /** Timestamp de entrega del webhook si Whaapy lo expone. */
+  receivedAt: string;
+  payload: Json;
+}
+
 let cached: Inngest | null = null;
 
 export function getInngestClient(): Inngest {
@@ -100,3 +119,20 @@ export const SHOPIFY_TOPIC_TO_INNGEST: Record<string, string> = {
 
 /** Topics que el endpoint público acepta + script de subscriptions registra. */
 export const SHOPIFY_SUBSCRIBED_TOPICS = Object.keys(SHOPIFY_TOPIC_TO_INNGEST);
+
+// ============================================================
+// Whaapy — topic map + registro de webhooks (M4)
+// ============================================================
+
+export const WHAAPY_TOPIC_TO_INNGEST: Record<string, string> = {
+  "contact.created":         "whaapy/contact.created",
+  "contact.updated":         "whaapy/contact.updated",
+  "contact.deleted":         "whaapy/contact.deleted",
+  "conversation.created":    "whaapy/conversation.created",
+  "conversation.assigned":   "whaapy/conversation.assigned",
+  "conversation.unassigned": "whaapy/conversation.unassigned",
+  "conversation.closed":     "whaapy/conversation.closed",
+};
+
+/** Topics que el endpoint público acepta + script de setup registra. */
+export const WHAAPY_SUBSCRIBED_TOPICS = Object.keys(WHAAPY_TOPIC_TO_INNGEST);

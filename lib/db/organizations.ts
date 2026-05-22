@@ -55,6 +55,19 @@ export async function getOrganizationByShopifyDomain(
   return data ?? null;
 }
 
+export async function getOrganizationByWhaapyBusinessId(
+  businessId: string,
+): Promise<OrganizationRow | null> {
+  const supabase = getSupabaseAdminClient();
+  const { data, error } = await supabase
+    .from("organizations")
+    .select("*")
+    .eq("whaapy_business_id", businessId)
+    .maybeSingle();
+  if (error) throw error;
+  return data ?? null;
+}
+
 export async function updateOrganization(
   id: UUID,
   patch: Update,

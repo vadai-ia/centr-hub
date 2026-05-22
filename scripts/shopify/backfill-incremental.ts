@@ -122,6 +122,7 @@ async function backfillContact(
     deleted_in_shopify: false,
     deleted_in_whaapy: false,
     anonymized_at: null,
+    last_whaapy_activity_at: null,
   });
   return created.id;
 }

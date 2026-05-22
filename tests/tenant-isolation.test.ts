@@ -187,6 +187,7 @@ describe("aislamiento multi-tenant — Barrera 2", () => {
           deleted_in_shopify: false,
           deleted_in_whaapy: false,
           anonymized_at: null,
+          last_whaapy_activity_at: null,
         });
       },
       { source: "test" },

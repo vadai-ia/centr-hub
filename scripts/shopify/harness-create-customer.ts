@@ -90,6 +90,7 @@ async function main() {
           deleted_in_shopify: false,
           deleted_in_whaapy: false,
           anonymized_at: null,
+          last_whaapy_activity_at: null,
         });
         contactId = created.id;
         console.log(`Contacto local creado: ${contactId}`);
