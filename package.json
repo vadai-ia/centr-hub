@@ -8,9 +8,9 @@
     "start": "next start",
     "lint": "next lint",
     "test": "vitest",
-    "shopify:configure-webhooks": "tsx scripts/shopify/configure-webhooks.ts",
-    "shopify:backfill-incremental": "tsx scripts/shopify/backfill-incremental.ts",
-    "shopify:harness-create-customer": "tsx scripts/shopify/harness-create-customer.ts"
+    "shopify:configure-webhooks": "tsx --tsconfig scripts/tsconfig.json scripts/shopify/configure-webhooks.ts",
+    "shopify:backfill-incremental": "tsx --tsconfig scripts/tsconfig.json scripts/shopify/backfill-incremental.ts",
+    "shopify:harness-create-customer": "tsx --tsconfig scripts/tsconfig.json scripts/shopify/harness-create-customer.ts"
   },
   "dependencies": {
     "@supabase/ssr": "0.10.3",
