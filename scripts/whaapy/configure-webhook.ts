@@ -143,7 +143,7 @@ async function main() {
 main().catch((err: Error) => {
   console.error("configure-webhook falló:", err.message);
   if ((err as unknown as { body?: unknown }).body) {
-    console.error("body:", (err as unknown as { body: unknown }).body);
+    console.dir((err as unknown as { body: unknown }).body, { depth: null });
   }
   process.exit(1);
 });
