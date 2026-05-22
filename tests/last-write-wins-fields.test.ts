@@ -137,6 +137,40 @@ describe("reconcileContactFields — R3 LWW por campo", () => {
     expect(result.patch.shopify_customer_id).toBeUndefined();
   });
 
+  it("shopify_tags vacío en CREATE produce [] en el patch, no null (NOT NULL constraint)", () => {
+    // Regresión: customer Shopify sin tags entraba con shopify_tags=null
+    // en el patch del LWW, violando text[] NOT NULL en contacts.
+    // Bug detectado en CHECKPOINT M4 — customer 10100735082772.
+    const contact = makeContact({ shopify_tags: [] });
+    const proposals: FieldProposal[] = [
+      { field: "shopify_tags", value: [], updatedAt: "2026-05-01T00:00:00Z", source: "shopify" },
+    ];
+    const result = reconcileContactFields(contact, proposals);
+    expect(result.patch.shopify_tags).toEqual([]);
+    expect(result.patch.shopify_tags).not.toBeNull();
+    expect(result.decisions[0].reason).toBe("first_value");
+  });
+
+  it("shopify_tags vacío en UPDATE sobrescribe con [] (no null) aunque exista valor previo", () => {
+    // Cuando un customer ya tiene tags ["Gina"] y un update llega
+    // con tags vacíos (Shopify reporta 0 tags), debe quedar [] —
+    // doctrina v5.1 "empty overwrites" + representación correcta
+    // para columna text[] NOT NULL.
+    const contact = makeContact({
+      shopify_tags: ["Gina"],
+      field_metadata: {
+        shopify_tags: { updated_at: "2026-01-01T00:00:00Z", source: "shopify" },
+      } as Json,
+    });
+    const proposals: FieldProposal[] = [
+      { field: "shopify_tags", value: [], updatedAt: "2026-05-01T00:00:00Z", source: "shopify" },
+    ];
+    const result = reconcileContactFields(contact, proposals);
+    expect(result.patch.shopify_tags).toEqual([]);
+    expect(result.patch.shopify_tags).not.toBeNull();
+    expect(result.decisions[0].reason).toBe("empty_overwrite");
+  });
+
   it("metadata se preserva campo por campo en el patch final", () => {
     const contact = makeContact({
       field_metadata: {

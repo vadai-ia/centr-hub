@@ -55,6 +55,18 @@ const NEVER_OVERWRITE_BY_LWW = new Set<string>([
   "whaapy_contact_id",
 ]);
 
+// Campos cuya columna es `NOT NULL` array (text[]) en la BD. Para
+// estos, la representación de "vacío" es `[]`, no `null` — un
+// patch con `null` rompería la NOT NULL constraint (ver
+// contacts.shopify_tags, migración 0003). La semántica doctrinal
+// "empty overwrites" se mantiene: `[]` sobrescribe `["X"]` cuando
+// la propuesta es más reciente; solo cambia el storage.
+const ARRAY_TYPED_FIELDS = new Set<string>(["shopify_tags"]);
+
+function emptyValueFor(field: string): unknown {
+  return ARRAY_TYPED_FIELDS.has(field) ? [] : null;
+}
+
 export interface FieldProposal {
   field: EditableContactField;
   value: unknown; // null/undefined/"" representan borrado intencional
@@ -137,7 +149,7 @@ export function reconcileContactFields(
     const meta = readMeta(current.field_metadata, field);
     const currentValue = (current as unknown as Record<string, unknown>)[field];
     const proposalEmpty = isEmptyValue(proposal.value);
-    const normalizedValue = proposalEmpty ? null : proposal.value;
+    const normalizedValue = proposalEmpty ? emptyValueFor(field) : proposal.value;
 
     // Caso especial: match inicial (v5.1)
     if (options.isInitialMatch && proposal.source === "shopify") {
