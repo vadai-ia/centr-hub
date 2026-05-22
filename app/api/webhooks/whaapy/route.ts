@@ -27,7 +27,8 @@ import type { Json, UUID } from "@/lib/types/database";
  * Disciplina (espejo del flujo Shopify con diferencias documentadas
  * en CLAUDE.md / prompt M4):
  *   1. Body raw como Buffer ANTES de parsear.
- *   2. Parse JSON para resolver tenant por `data.businessId`.
+ *   2. Parse JSON para resolver tenant por `businessId` (root del
+ *      payload, NO `data.businessId` — ver entrada en ERRORES.md).
  *   3. HMAC-SHA256 verify con `X-Webhook-Signature` contra el
  *      webhook_secret de la org (Vault).
  *   4. Dedup atómico en Upstash (`SET NX EX 24h`) con `X-Webhook-ID`.

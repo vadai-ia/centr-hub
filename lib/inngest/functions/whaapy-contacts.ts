@@ -74,7 +74,7 @@ export const whaapyContactCreated = inngest.createFunction(
       // 1. Identity matching
       const match = await matchContactIdentity({
         source: "whaapy",
-        whaapyContactId: data.id,
+        whaapyContactId: data.contact_id,
         phone: data.phone_number ?? null,
         email: data.email ?? null,
       });
@@ -86,7 +86,7 @@ export const whaapyContactCreated = inngest.createFunction(
         contact = match.match;
         if (!contact.whaapy_contact_id) {
           contact = await updateContact(contact.id, {
-            whaapy_contact_id: data.id,
+            whaapy_contact_id: data.contact_id,
           });
           isInitialMatch = true;
           await recordAuditEvent({
@@ -94,7 +94,7 @@ export const whaapyContactCreated = inngest.createFunction(
             eventType: "identity_linked_whaapy",
             entityType: "contact",
             entityId: contact.id,
-            payload: { external_id: data.id },
+            payload: { external_id: data.contact_id },
           });
         }
       } else {
@@ -109,7 +109,7 @@ export const whaapyContactCreated = inngest.createFunction(
           shopify_tags: [],
           assigned_advisor_id: null,
           shopify_customer_id: null,
-          whaapy_contact_id: data.id,
+          whaapy_contact_id: data.contact_id,
           missing_phone: normalizePhone(data.phone_number ?? null) === null,
           field_metadata: {} as Json,
           last_modified_at: effectiveUpdatedAt,
@@ -174,7 +174,7 @@ export const whaapyContactUpdated = inngest.createFunction(
       // 1. Localizar contact local. Si no existe, fallback create
       //    (matching via id Whaapy nada más — sin teléfono podemos
       //    hacer poco; se completa con el GET reconcile).
-      let contact = await findContactByWhaapyContactId(data.id);
+      let contact = await findContactByWhaapyContactId(data.contact_id);
       if (!contact) {
         contact = await createContact({
           full_name: data.name ?? null,
@@ -186,7 +186,7 @@ export const whaapyContactUpdated = inngest.createFunction(
           shopify_tags: [],
           assigned_advisor_id: null,
           shopify_customer_id: null,
-          whaapy_contact_id: data.id,
+          whaapy_contact_id: data.contact_id,
           missing_phone: true,
           field_metadata: {} as Json,
           last_modified_at: effectiveUpdatedAt,
@@ -211,7 +211,7 @@ export const whaapyContactUpdated = inngest.createFunction(
         const raw = await whaapyRest<unknown>(
           { organizationId: env.organizationId },
           "GET",
-          `/contacts/${data.id}`,
+          `/contacts/${data.contact_id}`,
         );
         snapshot = WhaapyContactGetResponseSchema.parse(raw);
       } catch (err) {
@@ -221,7 +221,7 @@ export const whaapyContactUpdated = inngest.createFunction(
           entityType: "contact",
           entityId: contact.id,
           payload: {
-            whaapy_contact_id: data.id,
+            whaapy_contact_id: data.contact_id,
             error: (err as Error).message,
           },
         });
@@ -236,7 +236,7 @@ export const whaapyContactUpdated = inngest.createFunction(
         contactId: contact.id,
         payloadUpdatedAt: effectiveUpdatedAt,
         source: "whaapy",
-        whaapyEntityId: data.id,
+        whaapyEntityId: data.contact_id,
       });
       if (isEchoTimestamp) {
         await updateContact(contact.id, {
@@ -255,7 +255,7 @@ export const whaapyContactUpdated = inngest.createFunction(
           entityId: contact.id,
           payload: {
             source: "whaapy",
-            whaapy_entity_id: data.id,
+            whaapy_entity_id: data.contact_id,
             reason: "custom_field_marker_match",
             marker_field: WHAAPY_OUTBOUND_MARKER_FIELD,
             marker_value: snapshot.custom_fields?.[WHAAPY_OUTBOUND_MARKER_FIELD] ?? null,
@@ -317,7 +317,7 @@ export const whaapyContactDeleted = inngest.createFunction(
     const envelope = event.data as unknown as WhaapyWebhookEnvelope;
     return runWhaapyWebhookWorker(envelope, "contact.deleted", async (env) => {
       const parsed = WhaapyContactDeletedPayloadSchema.parse(env.payload);
-      const contact = await findContactByWhaapyContactId(parsed.data.id);
+      const contact = await findContactByWhaapyContactId(parsed.data.contact_id);
       if (!contact) return { discarded: true, reason: "not_local" };
 
       const ts = parsed.data.deleted_at ?? env.receivedAt;

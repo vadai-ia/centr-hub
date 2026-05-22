@@ -94,10 +94,32 @@ beforeEach(() => {
   ]);
 });
 
+/**
+ * Payload de referencia con la estructura REAL que Whaapy entrega
+ * (validada en producción contra el webhook real recibido tras el
+ * deploy de M4 — businessId vive en root, NO dentro de data, y el
+ * identificador del contacto se llama `contact_id`).
+ */
+function realWhaapyPayload(overrides: Record<string, unknown> = {}) {
+  return {
+    event: "contact.created",
+    timestamp: "2026-05-22T23:28:04.685Z",
+    businessId: BUSINESS_ID,
+    data: {
+      contact_id: "1db0bff4-aaaa-4444-9999-faaf93b40000",
+      name: "Test Contact",
+      phone_number: "+525500000000",
+      tags: [],
+      created_at: "2026-05-22T23:28:04.000Z",
+    },
+    ...overrides,
+  };
+}
+
 describe("POST /api/webhooks/whaapy", () => {
   it("HMAC inválido → 401 + no encolado", async () => {
     const req = buildRequest({
-      body: { event: "contact.created", data: { id: "c1", businessId: BUSINESS_ID } },
+      body: realWhaapyPayload(),
       eventId: "ev-1",
       signatureOverride: Buffer.from("fakefakefakefakefakefakefake").toString("base64"),
     });
@@ -106,34 +128,29 @@ describe("POST /api/webhooks/whaapy", () => {
     expect(sendMock).not.toHaveBeenCalled();
   });
 
-  it("HMAC válido + topic conocido → 200 + encolado", async () => {
+  it("HMAC válido + topic conocido → 200 + encolado (payload real con businessId en root)", async () => {
     const req = buildRequest({
-      body: {
-        event: "contact.created",
-        data: {
-          id: "c1",
-          businessId: BUSINESS_ID,
-          phone_number: "+525500000000",
-          name: "Test",
-        },
-      },
+      body: realWhaapyPayload(),
       eventId: "ev-ok",
     });
     const res = await POST(req as unknown as Parameters<typeof POST>[0]);
     expect(res.status).toBe(200);
     expect(sendMock).toHaveBeenCalledTimes(1);
     const calls = sendMock.mock.calls as unknown as Array<
-      [{ name: string; data: { topic: string; organizationId: string } }]
+      [{ name: string; data: { topic: string; organizationId: string; whaapyBusinessId: string } }]
     >;
     expect(calls[0][0].name).toBe("whaapy/contact.created");
     expect(calls[0][0].data.topic).toBe("contact.created");
     expect(calls[0][0].data.organizationId).toBe(ORG_ID);
+    expect(calls[0][0].data.whaapyBusinessId).toBe(BUSINESS_ID);
   });
 
   it("idempotencia: mismo X-Webhook-ID 2 veces → solo 1 encolado", async () => {
     const body = {
       event: "contact.updated",
-      data: { id: "c2", businessId: BUSINESS_ID, updated_fields: ["name"] },
+      timestamp: "2026-05-22T23:28:04.685Z",
+      businessId: BUSINESS_ID,
+      data: { contact_id: "c2", updated_fields: ["name"] },
     };
     const r1 = buildRequest({ body, eventId: "dup-id" });
     const r2 = buildRequest({ body, eventId: "dup-id" });
@@ -146,7 +163,7 @@ describe("POST /api/webhooks/whaapy", () => {
 
   it("topic desconocido (message.received) → 200 + audit + no encolado", async () => {
     const req = buildRequest({
-      body: { event: "message.received", data: { businessId: BUSINESS_ID } },
+      body: { event: "message.received", businessId: BUSINESS_ID, data: {} },
       eventId: "ev-unknown",
     });
     const res = await POST(req as unknown as Parameters<typeof POST>[0]);
@@ -156,10 +173,10 @@ describe("POST /api/webhooks/whaapy", () => {
     expect(audit.some((row) => row.event_type === "unhandled_whaapy_event")).toBe(true);
   });
 
-  it("businessId desconocido → 200 sin encolar", async () => {
+  it("businessId desconocido (en root) → 200 sin encolar", async () => {
     fakeSupabase.setTable("organizations", []);
     const req = buildRequest({
-      body: { event: "contact.created", data: { id: "x", businessId: "biz-otra" } },
+      body: realWhaapyPayload({ businessId: "biz-otra" }),
       eventId: "ev-unknown-biz",
     });
     const res = await POST(req as unknown as Parameters<typeof POST>[0]);
@@ -167,9 +184,10 @@ describe("POST /api/webhooks/whaapy", () => {
     expect(sendMock).not.toHaveBeenCalled();
   });
 
-  it("payload sin businessId → 200 sin encolar", async () => {
+  it("payload sin businessId en root → 200 sin encolar (no acumular DLQ Whaapy)", async () => {
     const req = buildRequest({
-      body: { event: "contact.created", data: { id: "x" } },
+      // No businessId at root — debe rechazar
+      body: { event: "contact.created", data: { contact_id: "x" } },
       eventId: "ev-no-biz",
     });
     const res = await POST(req as unknown as Parameters<typeof POST>[0]);
@@ -177,8 +195,23 @@ describe("POST /api/webhooks/whaapy", () => {
     expect(sendMock).not.toHaveBeenCalled();
   });
 
+  it("regresión: businessId DENTRO de data NO debe resolver tenant (bug previo a este fix)", async () => {
+    // Estructura incorrecta que asumía la implementación original:
+    // businessId anidado dentro de data → debe ser ignorado.
+    const req = buildRequest({
+      body: {
+        event: "contact.created",
+        data: { contact_id: "x", businessId: BUSINESS_ID, name: "Test" },
+      },
+      eventId: "ev-nested-bug",
+    });
+    const res = await POST(req as unknown as Parameters<typeof POST>[0]);
+    expect(res.status).toBe(200);
+    expect(sendMock).not.toHaveBeenCalled();
+  });
+
   it("header x-webhook-signature ausente → 400", async () => {
-    const bodyStr = JSON.stringify({ event: "contact.created", data: { businessId: BUSINESS_ID } });
+    const bodyStr = JSON.stringify(realWhaapyPayload());
     const req = new Request("http://localhost/api/webhooks/whaapy", {
       method: "POST",
       headers: { "content-type": "application/json" },

@@ -79,7 +79,8 @@ export const WHAAPY_OUTBOUND_CONTACT_SYNC_EVENT = "whaapy/outbound.contact_sync_
  * Envelope inbound Whaapy → workers.
  *
  * Construido por `/api/webhooks/whaapy` después de verificar HMAC,
- * resolver tenant por `data.businessId` y deduplicar `X-Webhook-ID`.
+ * resolver tenant por `businessId` (root del payload) y deduplicar
+ * `X-Webhook-ID`.
  * Los workers castean `event.data` a este tipo.
  */
 export interface WhaapyWebhookEnvelope {

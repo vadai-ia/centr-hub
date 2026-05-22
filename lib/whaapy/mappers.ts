@@ -13,6 +13,23 @@ import type { Json } from "@/lib/types/database";
  *     workers consumen — desacopla el shape externo del modelo
  *     interno.
  *
+ * Estructura REAL del payload Whaapy (validada contra captura del
+ * webhook entregado por Whaapy y la doc pública
+ * /api-reference/webhooks/payloads):
+ *
+ *   {
+ *     "event": "contact.created",
+ *     "timestamp": "2026-05-22T23:28:04.685Z",
+ *     "businessId": "1db0bff4-...",
+ *     "data": { "name": "...", "contact_id": "...", "phone_number": "...", ... }
+ *   }
+ *
+ * `businessId` vive a NIVEL ROOT, no anidado dentro de `data`. El
+ * identificador del contacto en eventos `contact.*` se llama
+ * `contact_id` dentro de `data` (no `id`). Eventos `conversation.*`
+ * usan `data.id` para el id de la conversación y `data.contact_id`
+ * para referenciar al contacto.
+ *
  * NOTA payload `contact.updated`: Whaapy solo emite delta —
  * `updated_fields`, `name`, `previous_name`, `updated_by`. El worker
  * hace GET /contacts/v1/{id} para reconciliar snapshot completo
@@ -46,10 +63,11 @@ const WhaapyCustomFieldsSchema = z
 export const WhaapyContactCreatedPayloadSchema = z
   .object({
     event: z.literal("contact.created").optional(),
+    businessId: z.string(),
+    timestamp: z.string().nullish(),
     data: z
       .object({
-        id: z.string(),
-        businessId: z.string(),
+        contact_id: z.string(),
         phone_number: z.string().nullish(),
         name: z.string().nullish(),
         email: z.string().nullish(),
@@ -73,10 +91,11 @@ export const WhaapyContactCreatedPayloadSchema = z
 export const WhaapyContactUpdatedPayloadSchema = z
   .object({
     event: z.literal("contact.updated").optional(),
+    businessId: z.string(),
+    timestamp: z.string().nullish(),
     data: z
       .object({
-        id: z.string(),
-        businessId: z.string(),
+        contact_id: z.string(),
         updated_fields: z.array(z.string()).default([]),
         name: z.string().nullish(),
         previous_name: z.string().nullish(),
@@ -94,10 +113,11 @@ export const WhaapyContactUpdatedPayloadSchema = z
 export const WhaapyContactDeletedPayloadSchema = z
   .object({
     event: z.literal("contact.deleted").optional(),
+    businessId: z.string(),
+    timestamp: z.string().nullish(),
     data: z
       .object({
-        id: z.string(),
-        businessId: z.string(),
+        contact_id: z.string(),
         deleted_at: z.string().nullish(),
       })
       .passthrough(),
@@ -111,10 +131,11 @@ export const WhaapyContactDeletedPayloadSchema = z
 export const WhaapyConversationCreatedPayloadSchema = z
   .object({
     event: z.literal("conversation.created").optional(),
+    businessId: z.string(),
+    timestamp: z.string().nullish(),
     data: z
       .object({
         id: z.string(),
-        businessId: z.string(),
         contact_id: z.string(),
         channel: z.string().nullish(),
         created_at: z.string().nullish(),
@@ -126,10 +147,11 @@ export const WhaapyConversationCreatedPayloadSchema = z
 export const WhaapyConversationAssignedPayloadSchema = z
   .object({
     event: z.literal("conversation.assigned").optional(),
+    businessId: z.string(),
+    timestamp: z.string().nullish(),
     data: z
       .object({
         id: z.string(),
-        businessId: z.string(),
         contact_id: z.string(),
         assigned_to: z.string(),
         assigned_at: z.string().nullish(),
@@ -141,10 +163,11 @@ export const WhaapyConversationAssignedPayloadSchema = z
 export const WhaapyConversationUnassignedPayloadSchema = z
   .object({
     event: z.literal("conversation.unassigned").optional(),
+    businessId: z.string(),
+    timestamp: z.string().nullish(),
     data: z
       .object({
         id: z.string(),
-        businessId: z.string(),
         contact_id: z.string(),
         unassigned_at: z.string().nullish(),
       })
@@ -155,10 +178,11 @@ export const WhaapyConversationUnassignedPayloadSchema = z
 export const WhaapyConversationClosedPayloadSchema = z
   .object({
     event: z.literal("conversation.closed").optional(),
+    businessId: z.string(),
+    timestamp: z.string().nullish(),
     data: z
       .object({
         id: z.string(),
-        businessId: z.string(),
         contact_id: z.string(),
         closed_at: z.string().nullish(),
       })
@@ -197,24 +221,37 @@ export type WhaapyContactSnapshot = z.infer<typeof WhaapyContactGetResponseSchem
  * en TODOS los topics y permite resolver tenant antes del HMAC
  * verify (en este flujo HMAC verify viene primero, así que esto se
  * llama después del verify exitoso).
+ *
+ * Path real: ROOT del payload (NO `data.businessId`). Ver entrada
+ * en ERRORES.md "businessId de Whaapy vive en root del payload, no
+ * dentro de data".
  */
 export function extractBusinessId(payload: Json): string | null {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
   const obj = payload as Record<string, Json>;
-  const data = obj.data;
-  if (!data || typeof data !== "object" || Array.isArray(data)) return null;
-  const dataObj = data as Record<string, Json>;
-  const id = dataObj.businessId;
+  const id = obj.businessId;
   return typeof id === "string" && id.length > 0 ? id : null;
 }
 
 /**
  * Extrae el topic del payload — fallback cuando Whaapy no lo envíe
- * en header. Esperado en `event` o `topic`.
+ * en header. Esperado en `event` o `topic` (root level).
  */
 export function extractTopic(payload: Json): string | null {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
   const obj = payload as Record<string, Json>;
   const ev = obj.event ?? obj.topic;
   return typeof ev === "string" && ev.length > 0 ? ev : null;
+}
+
+/**
+ * Extrae el timestamp del payload Whaapy si está presente (root
+ * level). Permite usar la marca temporal del proveedor en lugar de
+ * `new Date()` cuando convenga para trazabilidad.
+ */
+export function extractTimestamp(payload: Json): string | null {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
+  const obj = payload as Record<string, Json>;
+  const ts = obj.timestamp;
+  return typeof ts === "string" && ts.length > 0 ? ts : null;
 }
