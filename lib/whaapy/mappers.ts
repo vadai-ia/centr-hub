@@ -200,13 +200,27 @@ export const WhaapyConversationClosedPayloadSchema = z
 // ============================================================
 // GET /contacts/v1/{id} — snapshot completo para reconciliación
 // ============================================================
+//
+// Estructura REAL del response (capturada con
+// scripts/whaapy/inspect-get-contact.ts contra contact real
+// 2026-05-22): el contact NO viene flat — viene envuelto en
+// `{ contact: {...}, conversations: [...] }`. El inner usa
+// snake_case (mismo convention que webhooks). El POST /contacts/v1
+// outbound, en contraste, SÍ devuelve flat (sin wrapper) — es
+// inconsistencia del proveedor que costó un retry-loop a DLQ.
+// Ver entrada en ERRORES.md "GET /contacts/v1/{id} de Whaapy
+// envuelve en {contact:{...}}".
+//
+// `WhaapyContactSnapshot` apunta al inner para que el código
+// downstream consuma `.name`, `.custom_fields`, etc. sin cambios.
 
-export const WhaapyContactGetResponseSchema = z
+const WhaapyContactGetInnerSchema = z
   .object({
     id: z.string(),
-    businessId: z.string().nullish(),
     phone_number: z.string().nullish(),
     name: z.string().nullish(),
+    first_name: z.string().nullish(),
+    last_name: z.string().nullish(),
     email: z.string().nullish(),
     tags: z.array(z.string()).nullish(),
     assigned_agent_id: z.string().nullish(),
@@ -217,7 +231,13 @@ export const WhaapyContactGetResponseSchema = z
   })
   .passthrough();
 
-export type WhaapyContactSnapshot = z.infer<typeof WhaapyContactGetResponseSchema>;
+export const WhaapyContactGetResponseSchema = z
+  .object({
+    contact: WhaapyContactGetInnerSchema,
+  })
+  .passthrough();
+
+export type WhaapyContactSnapshot = z.infer<typeof WhaapyContactGetInnerSchema>;
 
 // ============================================================
 // Tenant resolution helper

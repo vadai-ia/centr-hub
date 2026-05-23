@@ -252,41 +252,84 @@ describe("WhaapyConversation*PayloadSchemas", () => {
 });
 
 describe("WhaapyContactGetResponseSchema (GET /contacts/v1/{id})", () => {
-  it("snapshot mínimo del GET — solo id presente, demás campos omitidos", () => {
-    const snapshot = { id: "c1" };
-    const result = WhaapyContactGetResponseSchema.safeParse(snapshot);
+  // Shape derivado de captura real con scripts/whaapy/inspect-get-contact.ts
+  // (2026-05-22): el response viene envuelto en `{ contact: {...}, conversations: [...] }`,
+  // NO flat. Inner usa snake_case (igual que webhooks). Estos tests
+  // reemplazan a los previos basados en doc — esos asumían shape flat
+  // y dejaron pasar el bug de DLQ en M4.
+
+  it("response real mínimo — wrapper contact con solo id", () => {
+    const response = { contact: { id: "c1" } };
+    const result = WhaapyContactGetResponseSchema.safeParse(response);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.contact.id).toBe("c1");
+    }
+  });
+
+  it("response real con address omitido (caso del contact recién creado sin dirección)", () => {
+    const response = {
+      contact: {
+        id: "c1",
+        name: "X",
+        first_name: "X",
+        last_name: null,
+        phone_number: "525500000000",
+        email: null,
+        tags: [],
+        // sin address
+      },
+      conversations: [],
+    };
+    const result = WhaapyContactGetResponseSchema.safeParse(response);
     expect(result.success).toBe(true);
   });
 
-  it("snapshot con address omitido (caso espejo del payload contact.created)", () => {
-    const snapshot = {
-      id: "c1",
-      name: "X",
-      phone_number: "525500000000",
-      email: null,
-      tags: [],
-      // sin address
+  it("response real completo — espejo de la captura del 2026-05-22", () => {
+    const response = {
+      contact: {
+        id: "1e9f3641-b882-45c5-a0e7-2c7fad2b47f5",
+        phone_number: "525511111111",
+        name: "Test Nuevo Editado",
+        first_name: "Test",
+        last_name: "Nuevo Editado",
+        wa_name: null,
+        email: null,
+        avatar_url: null,
+        tags: [],
+        custom_fields: { last_platform_write_at: "2026-05-22T22:00:00Z" },
+        external_ids: {},
+        notes: [],
+        funnel_stage: null,
+        source: "manual",
+        company: null,
+        address: null,
+        city: null,
+        state: null,
+        postal_code: null,
+        country: "MX",
+        assigned_agent_id: null,
+        last_contact_at: "2026-05-23T02:32:23.443Z",
+        created_at: "2026-05-23T02:02:54.037Z",
+        updated_at: "2026-05-23T02:39:52.970Z",
+        is_blocked: false,
+        blocked_at: null,
+      },
+      conversations: [],
     };
-    const result = WhaapyContactGetResponseSchema.safeParse(snapshot);
+    const result = WhaapyContactGetResponseSchema.safeParse(response);
     expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.contact.custom_fields?.last_platform_write_at).toBe(
+        "2026-05-22T22:00:00Z",
+      );
+    }
   });
 
-  it("snapshot completo — todos los campos presentes", () => {
-    const snapshot = {
-      id: "c1",
-      businessId: "biz-1",
-      phone_number: "525500000000",
-      name: "X",
-      email: "x@example.com",
-      tags: ["VIP"],
-      assigned_agent_id: "agent-1",
-      custom_fields: { last_platform_write_at: "2026-05-22T22:00:00Z" },
-      address: { city: "CDMX" },
-      created_at: "2026-05-22T22:13:17.792Z",
-      updated_at: "2026-05-22T22:13:17.792Z",
-    };
-    const result = WhaapyContactGetResponseSchema.safeParse(snapshot);
-    expect(result.success).toBe(true);
+  it("rechaza shape flat (regresión del bug original)", () => {
+    const flat = { id: "c1", name: "X", phone_number: "525500000000" };
+    const result = WhaapyContactGetResponseSchema.safeParse(flat);
+    expect(result.success).toBe(false);
   });
 });
 

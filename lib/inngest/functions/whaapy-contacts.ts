@@ -211,9 +211,9 @@ export const whaapyContactUpdated = inngest.createFunction(
         const raw = await whaapyRest<unknown>(
           { organizationId: env.organizationId },
           "GET",
-          `/contacts/${data.contact_id}`,
+          `/contacts/v1/${data.contact_id}`,
         );
-        snapshot = WhaapyContactGetResponseSchema.parse(raw);
+        snapshot = WhaapyContactGetResponseSchema.parse(raw).contact;
       } catch (err) {
         await recordAuditEvent({
           actorUserId: null,

@@ -11,7 +11,8 @@
     "shopify:configure-webhooks": "tsx --tsconfig scripts/tsconfig.json scripts/shopify/configure-webhooks.ts",
     "shopify:backfill-incremental": "tsx --tsconfig scripts/tsconfig.json scripts/shopify/backfill-incremental.ts",
     "shopify:harness-create-customer": "tsx --tsconfig scripts/tsconfig.json scripts/shopify/harness-create-customer.ts",
-    "whaapy:configure-webhook": "tsx --tsconfig scripts/tsconfig.json scripts/whaapy/configure-webhook.ts"
+    "whaapy:configure-webhook": "tsx --tsconfig scripts/tsconfig.json scripts/whaapy/configure-webhook.ts",
+    "whaapy:inspect-get-contact": "tsx --tsconfig scripts/tsconfig.json scripts/whaapy/inspect-get-contact.ts"
   },
   "dependencies": {
     "@supabase/ssr": "0.10.3",
