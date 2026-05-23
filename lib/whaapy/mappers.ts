@@ -40,6 +40,13 @@ import type { Json } from "@/lib/types/database";
 // Envelope común — todos los webhooks
 // ============================================================
 
+// `.nullish()` (no `.nullable()`) — Whaapy omite `address` cuando el
+// contacto no tiene dirección cargada (no manda `null` explícito ni
+// objeto vacío). Validado contra payload real `contact.created`
+// capturado en producción 2026-05-22 — el campo `address` no aparece
+// en el JSON cuando el contacto se crea solo con nombre + teléfono.
+// Ver entrada en ERRORES.md "Schemas Zod inbound Whaapy intolerantes
+// a omisiones de campos opcionales".
 const WhaapyAddressSchema = z
   .object({
     street: z.string().nullish(),
@@ -50,7 +57,7 @@ const WhaapyAddressSchema = z
   })
   .passthrough()
   .partial()
-  .nullable();
+  .nullish();
 
 const WhaapyCustomFieldsSchema = z
   .record(z.string(), z.unknown())
