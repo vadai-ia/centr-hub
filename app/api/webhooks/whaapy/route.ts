@@ -16,7 +16,7 @@ import {
   extractTopic,
 } from "@/lib/whaapy/mappers";
 import {
-  WHAAPY_EVENT_ID_HEADER,
+  WHAAPY_DELIVERY_ID_HEADER,
   WHAAPY_SIGNATURE_HEADER,
 } from "@/lib/whaapy/config";
 import type { Json, UUID } from "@/lib/types/database";
@@ -72,7 +72,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const rawId = await recordProductiveIngress(req.headers, bodyBuf);
 
   const signatureHeader = req.headers.get(WHAAPY_SIGNATURE_HEADER);
-  const eventIdHeader = req.headers.get(WHAAPY_EVENT_ID_HEADER);
+  const deliveryIdHeader = req.headers.get(WHAAPY_DELIVERY_ID_HEADER);
   const receivedAt = new Date().toISOString();
 
   if (!signatureHeader) {
@@ -105,7 +105,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         event: "whaapy_webhook_discarded",
         discard_reason: "missing_business_id",
         signature_present: !!signatureHeader,
-        event_id_header: eventIdHeader,
+        delivery_id_header: deliveryIdHeader,
         received_at: receivedAt,
       }),
     );
@@ -122,7 +122,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         event: "whaapy_webhook_discarded",
         discard_reason: "organization_not_found",
         business_id: businessId,
-        event_id_header: eventIdHeader,
+        delivery_id_header: deliveryIdHeader,
         received_at: receivedAt,
       }),
     );
@@ -149,12 +149,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // 4. Resolver topic. Whaapy lo emite en el body (`event` o `topic`).
   const topic = extractTopic(payload);
   if (!topic) {
-    await safeAuditUnhandled(org.id, "unknown", eventIdHeader);
+    await safeAuditUnhandled(org.id, "unknown", deliveryIdHeader);
     await tagExitReason(rawId, "unknown_topic");
     return new NextResponse("ok", { status: 200 });
   }
 
-  const eventId = eventIdHeader ?? cryptoRandomFallback();
+  const deliveryId = deliveryIdHeader ?? cryptoRandomFallback();
 
   // 5. Audit `whaapy_webhook_received` a NIVEL ENDPOINT (visibilidad
   //    independiente del estado del worker downstream — Inngest dispatch,
@@ -169,7 +169,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     eventType: "whaapy_webhook_received",
     payload: {
       topic,
-      whaapy_event_id: eventId,
+      whaapy_delivery_id: deliveryId,
       whaapy_business_id: businessId,
       received_at: receivedAt,
       source: "endpoint",
@@ -177,18 +177,20 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   });
 
   // 6. Dedup atómico (después del audit edge para que retransmisiones
-  //    queden visibles vía `whaapy_webhook_deduped`).
+  //    queden visibles vía `whaapy_webhook_deduped`). El parámetro
+  //    `eventId` del helper genérico recibe nuestro deliveryId — el
+  //    helper es agnóstico de proveedor, la semántica vive acá.
   let firstDelivery: boolean;
   try {
     firstDelivery = await reserveOnce({
       namespace: "whaapy",
-      eventId,
+      eventId: deliveryId,
       topic,
     });
   } catch (err) {
     // eslint-disable-next-line no-console
     console.error("whaapy_webhook_dedup_failed", {
-      eventId,
+      deliveryId,
       topic,
       err: (err as Error).message,
     });
@@ -199,7 +201,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       eventType: "whaapy_webhook_deduped",
       payload: {
         topic,
-        whaapy_event_id: eventId,
+        whaapy_delivery_id: deliveryId,
         whaapy_business_id: businessId,
         received_at: receivedAt,
       } as Json,
@@ -211,7 +213,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // 7. Topic → evento Inngest. Topic no soportado = audit + 200.
   const inngestEvent = WHAAPY_TOPIC_TO_INNGEST[topic];
   if (!inngestEvent) {
-    await handleUnhandledEvent(org.id, topic, eventId);
+    await handleUnhandledEvent(org.id, topic, deliveryId);
     await tagExitReason(rawId, "unhandled_topic");
     return new NextResponse("ok", { status: 200 });
   }
@@ -219,7 +221,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const envelope: WhaapyWebhookEnvelope = {
     organizationId: org.id as UUID,
     whaapyBusinessId: businessId,
-    eventId,
+    deliveryId,
     topic,
     receivedAt,
     payload,
@@ -236,14 +238,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     // eslint-disable-next-line no-console
     console.error("whaapy_webhook_enqueue_failed", {
       topic,
-      eventId,
+      deliveryId,
       err: errMsg,
     });
     await safeAuditAtEdge(org.id as UUID, {
       eventType: "whaapy_webhook_enqueue_failed",
       payload: {
         topic,
-        whaapy_event_id: eventId,
+        whaapy_delivery_id: deliveryId,
         whaapy_business_id: businessId,
         error: errMsg,
       } as Json,
@@ -385,7 +387,7 @@ async function safeAuditAtEdge(
 async function safeAuditUnhandled(
   organizationId: UUID,
   topic: string,
-  eventId: string | null,
+  deliveryId: string | null,
 ): Promise<void> {
   try {
     await withTenantContext(
@@ -396,7 +398,7 @@ async function safeAuditUnhandled(
           eventType: "unhandled_whaapy_event",
           entityType: null,
           entityId: null,
-          payload: { topic, eventId },
+          payload: { topic, deliveryId },
         });
       },
       { source: "webhook" },
@@ -409,7 +411,7 @@ async function safeAuditUnhandled(
 async function handleUnhandledEvent(
   organizationId: UUID,
   topic: string,
-  eventId: string,
+  deliveryId: string,
 ): Promise<void> {
   try {
     await withTenantContext(
@@ -420,7 +422,7 @@ async function handleUnhandledEvent(
           eventType: "unhandled_whaapy_event",
           entityType: null,
           entityId: null,
-          payload: { topic, eventId },
+          payload: { topic, deliveryId },
         });
         // Notificación admin si el mismo topic apareció más de N veces
         // en las últimas 24h (CLAUDE.md / prompt M4 — protección contra

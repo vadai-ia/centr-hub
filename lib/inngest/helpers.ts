@@ -88,7 +88,7 @@ export async function runWhaapyWebhookWorker<T>(
         entityId: null,
         payload: {
           topic,
-          whaapy_event_id: envelope.eventId,
+          whaapy_delivery_id: envelope.deliveryId,
           whaapy_business_id: envelope.whaapyBusinessId,
           received_at: envelope.receivedAt,
         } as Json,
@@ -103,7 +103,7 @@ export async function runWhaapyWebhookWorker<T>(
           entityId: null,
           payload: {
             topic,
-            whaapy_event_id: envelope.eventId,
+            whaapy_delivery_id: envelope.deliveryId,
             error: (err as Error)?.message ?? String(err),
           },
         });

@@ -7,7 +7,9 @@ import { FakeSupabase } from "./helpers/fake-supabase";
  * Valida disciplina end-to-end espejo del de Shopify:
  *   - HMAC válido → 200 + encolado.
  *   - HMAC inválido → 401.
- *   - X-Webhook-ID duplicado → 1 sola operación.
+ *   - X-Webhook-Delivery-ID duplicado → 1 sola operación.
+ *   - X-Webhook-ID reusado (whaapy lo persiste por contact_id)
+ *     pero delivery_id distinto → 200 + encolado en cada delivery.
  *   - businessId desconocido → 200 sin encolar.
  *   - Topic desconocido → 200 + audit log.
  *   - sin businessId → 200 (no acumular DLQ del lado Whaapy).
@@ -61,7 +63,14 @@ const ORG_ID = "org-centr-test";
 
 function buildRequest(opts: {
   body: unknown;
-  eventId?: string;
+  /** Header `x-webhook-delivery-id` — único por entrega, key real del dedup. */
+  deliveryId?: string;
+  /**
+   * Header `x-webhook-id` — Whaapy lo reusa por contact_id, NO se
+   * usa para dedup. Solo presente para que los tests de regresión
+   * puedan validar que el endpoint NO se confunde con este header.
+   */
+  webhookId?: string;
   signatureOverride?: string;
 }): Request {
   const bodyStr = JSON.stringify(opts.body);
@@ -72,7 +81,8 @@ function buildRequest(opts: {
     "content-type": "application/json",
     "x-webhook-signature": sig,
   };
-  if (opts.eventId) headers["x-webhook-id"] = opts.eventId;
+  if (opts.deliveryId) headers["x-webhook-delivery-id"] = opts.deliveryId;
+  if (opts.webhookId) headers["x-webhook-id"] = opts.webhookId;
   return new Request("http://localhost/api/webhooks/whaapy", {
     method: "POST",
     headers,
@@ -120,7 +130,7 @@ describe("POST /api/webhooks/whaapy", () => {
   it("HMAC inválido → 401 + no encolado", async () => {
     const req = buildRequest({
       body: realWhaapyPayload(),
-      eventId: "ev-1",
+      deliveryId: "whd_test_1",
       signatureOverride: Buffer.from("fakefakefakefakefakefakefake").toString("base64"),
     });
     const res = await POST(req as unknown as Parameters<typeof POST>[0]);
@@ -131,29 +141,30 @@ describe("POST /api/webhooks/whaapy", () => {
   it("HMAC válido + topic conocido → 200 + encolado (payload real con businessId en root)", async () => {
     const req = buildRequest({
       body: realWhaapyPayload(),
-      eventId: "ev-ok",
+      deliveryId: "whd_ok",
     });
     const res = await POST(req as unknown as Parameters<typeof POST>[0]);
     expect(res.status).toBe(200);
     expect(sendMock).toHaveBeenCalledTimes(1);
     const calls = sendMock.mock.calls as unknown as Array<
-      [{ name: string; data: { topic: string; organizationId: string; whaapyBusinessId: string } }]
+      [{ name: string; data: { topic: string; organizationId: string; whaapyBusinessId: string; deliveryId: string } }]
     >;
     expect(calls[0][0].name).toBe("whaapy/contact.created");
     expect(calls[0][0].data.topic).toBe("contact.created");
     expect(calls[0][0].data.organizationId).toBe(ORG_ID);
     expect(calls[0][0].data.whaapyBusinessId).toBe(BUSINESS_ID);
+    expect(calls[0][0].data.deliveryId).toBe("whd_ok");
   });
 
-  it("idempotencia: mismo X-Webhook-ID 2 veces → solo 1 encolado", async () => {
+  it("idempotencia: mismo X-Webhook-Delivery-ID 2 veces → solo 1 encolado", async () => {
     const body = {
       event: "contact.updated",
       timestamp: "2026-05-22T23:28:04.685Z",
       businessId: BUSINESS_ID,
       data: { contact_id: "c2", updated_fields: ["name"] },
     };
-    const r1 = buildRequest({ body, eventId: "dup-id" });
-    const r2 = buildRequest({ body, eventId: "dup-id" });
+    const r1 = buildRequest({ body, deliveryId: "whd_dup_id" });
+    const r2 = buildRequest({ body, deliveryId: "whd_dup_id" });
     const res1 = await POST(r1 as unknown as Parameters<typeof POST>[0]);
     const res2 = await POST(r2 as unknown as Parameters<typeof POST>[0]);
     expect(res1.status).toBe(200);
@@ -161,10 +172,59 @@ describe("POST /api/webhooks/whaapy", () => {
     expect(sendMock).toHaveBeenCalledTimes(1);
   });
 
+  it("regresión M4: 3 deliveries con MISMO x-webhook-id pero DISTINTO x-webhook-delivery-id → las 3 pasan dedup", async () => {
+    // Reproduce el bug original: Whaapy reusa `x-webhook-id` por
+    // contact_id durante todo el ciclo de vida del contact. Antes
+    // del fix, los updates 2..N caían a dedup_hit. Tras el fix, el
+    // dedup se basa en `x-webhook-delivery-id` (único por entrega).
+    const sharedWebhookId = "306dde2b-bb55-4652-8b76-c203eb2efd2b";
+    const body1 = {
+      event: "contact.updated",
+      businessId: BUSINESS_ID,
+      data: { contact_id: "c-update", updated_fields: ["name"], updated_at: "2026-05-23T05:00:00Z" },
+    };
+    const body2 = { ...body1, data: { ...body1.data, updated_at: "2026-05-23T05:22:00Z" } };
+    const body3 = { ...body1, data: { ...body1.data, updated_at: "2026-05-23T05:28:00Z" } };
+    const r1 = buildRequest({ body: body1, webhookId: sharedWebhookId, deliveryId: "whd_aaa" });
+    const r2 = buildRequest({ body: body2, webhookId: sharedWebhookId, deliveryId: "whd_bbb" });
+    const r3 = buildRequest({ body: body3, webhookId: sharedWebhookId, deliveryId: "whd_ccc" });
+    const res1 = await POST(r1 as unknown as Parameters<typeof POST>[0]);
+    const res2 = await POST(r2 as unknown as Parameters<typeof POST>[0]);
+    const res3 = await POST(r3 as unknown as Parameters<typeof POST>[0]);
+    expect(res1.status).toBe(200);
+    expect(res2.status).toBe(200);
+    expect(res3.status).toBe(200);
+    expect(res1.headers.get("x-centrhub-dedup")).toBe("miss");
+    expect(res2.headers.get("x-centrhub-dedup")).toBe("miss");
+    expect(res3.headers.get("x-centrhub-dedup")).toBe("miss");
+    expect(sendMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("retry del proveedor: 2 deliveries con MISMO x-webhook-delivery-id (mismo evento, reintento) → segundo es deduped", async () => {
+    // Whaapy reintenta tras un fallo HTTP 4xx/5xx con el MISMO
+    // delivery_id (es el mismo evento físico). El dedup correcto
+    // descarta el segundo intento para que el worker no procese
+    // dos veces.
+    const body = {
+      event: "contact.updated",
+      businessId: BUSINESS_ID,
+      data: { contact_id: "c-retry", updated_fields: ["name"], updated_at: "2026-05-23T05:00:00Z" },
+    };
+    const r1 = buildRequest({ body, deliveryId: "whd_retry_id" });
+    const r2 = buildRequest({ body, deliveryId: "whd_retry_id" });
+    const res1 = await POST(r1 as unknown as Parameters<typeof POST>[0]);
+    const res2 = await POST(r2 as unknown as Parameters<typeof POST>[0]);
+    expect(res1.status).toBe(200);
+    expect(res2.status).toBe(200);
+    expect(res1.headers.get("x-centrhub-dedup")).toBe("miss");
+    expect(res2.headers.get("x-centrhub-dedup")).toBe("hit");
+    expect(sendMock).toHaveBeenCalledTimes(1);
+  });
+
   it("topic desconocido (message.received) → 200 + audit + no encolado", async () => {
     const req = buildRequest({
       body: { event: "message.received", businessId: BUSINESS_ID, data: {} },
-      eventId: "ev-unknown",
+      deliveryId: "whd_unknown",
     });
     const res = await POST(req as unknown as Parameters<typeof POST>[0]);
     expect(res.status).toBe(200);
@@ -177,7 +237,7 @@ describe("POST /api/webhooks/whaapy", () => {
     fakeSupabase.setTable("organizations", []);
     const req = buildRequest({
       body: realWhaapyPayload({ businessId: "biz-otra" }),
-      eventId: "ev-unknown-biz",
+      deliveryId: "whd_unknown_biz",
     });
     const res = await POST(req as unknown as Parameters<typeof POST>[0]);
     expect(res.status).toBe(200);
@@ -188,7 +248,7 @@ describe("POST /api/webhooks/whaapy", () => {
     const req = buildRequest({
       // No businessId at root — debe rechazar
       body: { event: "contact.created", data: { contact_id: "x" } },
-      eventId: "ev-no-biz",
+      deliveryId: "whd_no_biz",
     });
     const res = await POST(req as unknown as Parameters<typeof POST>[0]);
     expect(res.status).toBe(200);
@@ -203,7 +263,7 @@ describe("POST /api/webhooks/whaapy", () => {
         event: "contact.created",
         data: { contact_id: "x", businessId: BUSINESS_ID, name: "Test" },
       },
-      eventId: "ev-nested-bug",
+      deliveryId: "whd_nested_bug",
     });
     const res = await POST(req as unknown as Parameters<typeof POST>[0]);
     expect(res.status).toBe(200);
@@ -228,7 +288,7 @@ describe("POST /api/webhooks/whaapy", () => {
   it("happy path → audit whaapy_webhook_received escrito en endpoint ANTES del enqueue", async () => {
     const req = buildRequest({
       body: realWhaapyPayload(),
-      eventId: "ev-edge-audit",
+      deliveryId: "whd_edge_audit",
     });
     const res = await POST(req as unknown as Parameters<typeof POST>[0]);
     expect(res.status).toBe(200);
@@ -238,11 +298,11 @@ describe("POST /api/webhooks/whaapy", () => {
     expect(received.length).toBe(1);
     const row = received[0] as {
       organization_id: string;
-      payload: { topic: string; whaapy_event_id: string; source: string };
+      payload: { topic: string; whaapy_delivery_id: string; source: string };
     };
     expect(row.organization_id).toBe(ORG_ID);
     expect(row.payload.topic).toBe("contact.created");
-    expect(row.payload.whaapy_event_id).toBe("ev-edge-audit");
+    expect(row.payload.whaapy_delivery_id).toBe("whd_edge_audit");
     expect(row.payload.source).toBe("endpoint");
   });
 
@@ -256,8 +316,8 @@ describe("POST /api/webhooks/whaapy", () => {
         created_at: "2026-05-22T23:28:04.000Z",
       },
     });
-    const r1 = buildRequest({ body, eventId: "dup-edge" });
-    const r2 = buildRequest({ body, eventId: "dup-edge" });
+    const r1 = buildRequest({ body, deliveryId: "whd_dup_edge" });
+    const r2 = buildRequest({ body, deliveryId: "whd_dup_edge" });
     const res1 = await POST(r1 as unknown as Parameters<typeof POST>[0]);
     const res2 = await POST(r2 as unknown as Parameters<typeof POST>[0]);
     expect(res1.status).toBe(200);
@@ -274,10 +334,10 @@ describe("POST /api/webhooks/whaapy", () => {
     expect(deduped.length).toBe(1);
     const dedupRow = deduped[0] as {
       organization_id: string;
-      payload: { whaapy_event_id: string; topic: string };
+      payload: { whaapy_delivery_id: string; topic: string };
     };
     expect(dedupRow.organization_id).toBe(ORG_ID);
-    expect(dedupRow.payload.whaapy_event_id).toBe("dup-edge");
+    expect(dedupRow.payload.whaapy_delivery_id).toBe("whd_dup_edge");
     expect(dedupRow.payload.topic).toBe("contact.created");
   });
 
@@ -293,7 +353,7 @@ describe("POST /api/webhooks/whaapy", () => {
           created_at: "2026-05-22T23:28:04.000Z",
         },
       }),
-      eventId: "ev-enqueue-fail",
+      deliveryId: "whd_enqueue_fail",
     });
     const res = await POST(req as unknown as Parameters<typeof POST>[0]);
     expect(res.status).toBe(503);
@@ -304,10 +364,10 @@ describe("POST /api/webhooks/whaapy", () => {
     expect(failed.length).toBe(1);
     const failRow = failed[0] as {
       organization_id: string;
-      payload: { whaapy_event_id: string; topic: string; error: string };
+      payload: { whaapy_delivery_id: string; topic: string; error: string };
     };
     expect(failRow.organization_id).toBe(ORG_ID);
-    expect(failRow.payload.whaapy_event_id).toBe("ev-enqueue-fail");
+    expect(failRow.payload.whaapy_delivery_id).toBe("whd_enqueue_fail");
     expect(failRow.payload.topic).toBe("contact.created");
     expect(failRow.payload.error).toBe("inngest_unreachable");
   });

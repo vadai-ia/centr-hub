@@ -21,8 +21,21 @@ export const WHAAPY_API_BASE = `${WHAAPY_API_BASE_URL}` as const;
 /** Header HTTP con el HMAC firmado por Whaapy en cada webhook. */
 export const WHAAPY_SIGNATURE_HEADER = "x-webhook-signature" as const;
 
-/** Header HTTP con el identificador único de cada entrega (dedup). */
-export const WHAAPY_EVENT_ID_HEADER = "x-webhook-id" as const;
+/**
+ * Header HTTP con el identificador único de cada entrega (dedup).
+ *
+ * IMPORTANTE: Whaapy reusa `x-webhook-id` por contact_id durante todo
+ * el ciclo de vida del contact (created + updates + deleted comparten
+ * el mismo valor). El identificador real por entrega es
+ * `x-webhook-delivery-id` (prefijo `whd_*`). Ver entrada en ERRORES.md
+ * "x-webhook-id de Whaapy es persistente por contact, no único por
+ * delivery — dedup descartaba updates legítimos".
+ *
+ * Convención vs Shopify: `x-shopify-webhook-id` SÍ es único por
+ * delivery, así que para Shopify ese es el campo correcto. NO asumir
+ * que la convención de headers es portable entre proveedores.
+ */
+export const WHAAPY_DELIVERY_ID_HEADER = "x-webhook-delivery-id" as const;
 
 /** Campo custom usado para marcar escrituras outbound (R11 capa A). */
 export const WHAAPY_OUTBOUND_MARKER_FIELD = "last_platform_write_at" as const;

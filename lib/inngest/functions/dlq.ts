@@ -26,7 +26,17 @@ interface FailedEventData {
   function_id?: string;
   run_id?: string;
   error?: { name?: string; message?: string };
-  event?: { data?: { organizationId?: UUID; eventId?: string; topic?: string } };
+  // `eventId` viene en envelopes Shopify; `deliveryId` en envelopes
+  // Whaapy (rename M4). El DLQ es agnóstico de proveedor — toma el
+  // primero que esté presente.
+  event?: {
+    data?: {
+      organizationId?: UUID;
+      eventId?: string;
+      deliveryId?: string;
+      topic?: string;
+    };
+  };
 }
 
 export const dlqHandler = inngest.createFunction(
@@ -42,7 +52,8 @@ export const dlqHandler = inngest.createFunction(
     const functionId = data.function_id ?? "unknown";
     const runId = data.run_id ?? "unknown";
     const errorMessage = data.error?.message ?? "unknown_error";
-    const originalEventId = data.event?.data?.eventId ?? null;
+    const originalEventId =
+      data.event?.data?.eventId ?? data.event?.data?.deliveryId ?? null;
     const originalTopic = data.event?.data?.topic ?? null;
 
     if (!orgId) {

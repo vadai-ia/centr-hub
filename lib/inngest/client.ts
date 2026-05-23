@@ -80,14 +80,15 @@ export const WHAAPY_OUTBOUND_CONTACT_SYNC_EVENT = "whaapy/outbound.contact_sync_
  *
  * Construido por `/api/webhooks/whaapy` después de verificar HMAC,
  * resolver tenant por `businessId` (root del payload) y deduplicar
- * `X-Webhook-ID`.
+ * por `X-Webhook-Delivery-ID` (único por entrega — el header
+ * `X-Webhook-ID` se reusa por contact_id; ver ERRORES.md).
  * Los workers castean `event.data` a este tipo.
  */
 export interface WhaapyWebhookEnvelope {
   organizationId: UUID;
   whaapyBusinessId: string;
-  /** X-Webhook-ID — dedup atómico + trazabilidad. */
-  eventId: string;
+  /** X-Webhook-Delivery-ID — único por entrega, dedup + trazabilidad. */
+  deliveryId: string;
   /** Topic exacto del payload (ej. "contact.created", "conversation.assigned"). */
   topic: string;
   /** Timestamp de entrega del webhook si Whaapy lo expone. */
