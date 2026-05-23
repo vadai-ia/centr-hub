@@ -31,10 +31,16 @@ import type { Json, UUID } from "@/lib/types/database";
  *      payload, NO `data.businessId` — ver entrada en ERRORES.md).
  *   3. HMAC-SHA256 verify con `X-Webhook-Signature` contra el
  *      webhook_secret de la org (Vault).
- *   4. Dedup atómico en Upstash (`SET NX EX 24h`) con `X-Webhook-ID`.
- *   5. Encolar a Inngest con envelope normalizado.
- *   6. 200 en <5s. Eventos no soportados → 200 + audit log
- *      (no acumular DLQ del lado Whaapy).
+ *   4. Resolver topic.
+ *   5. Audit `whaapy_webhook_received` a NIVEL ENDPOINT (visibilidad
+ *      independiente del dispatch de Inngest — ver ERRORES.md
+ *      "Endpoint Whaapy sin visibilidad por audit-only-in-worker").
+ *   6. Dedup atómico en Upstash (`SET NX EX 24h`). Hit → audit
+ *      `whaapy_webhook_deduped` + 200.
+ *   7. Topic no soportado → audit `unhandled_whaapy_event` + 200.
+ *   8. Encolar a Inngest con envelope normalizado. Falla → audit
+ *      `whaapy_webhook_enqueue_failed` + 503.
+ *   9. 200 en <5s en el happy path.
  *
  * HMAC falla → 401. Topic no soportado → 200 + audit (Whaapy
  * podría agregar eventos nuevos al contrato; no rompemos el endpoint).
@@ -81,9 +87,20 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const businessId = extractBusinessId(payload);
   if (!businessId) {
     // Sin businessId no podemos resolver tenant — 200 para no
-    // acumular DLQ del lado Whaapy, pero registramos a stdout.
+    // acumular DLQ del lado Whaapy. Registramos con payload
+    // estructurado a Vercel runtime logs. NO podemos escribir
+    // audit_log sin org_id (NOT NULL constraint en migración 0007);
+    // ver PENDIENTES.md M4-DT-XX "audit_log.organization_id nullable".
     // eslint-disable-next-line no-console
-    console.warn("whaapy_webhook_missing_business_id");
+    console.warn(
+      JSON.stringify({
+        event: "whaapy_webhook_discarded",
+        discard_reason: "missing_business_id",
+        signature_present: !!signatureHeader,
+        event_id_header: eventIdHeader,
+        received_at: receivedAt,
+      }),
+    );
     return new NextResponse("ok", { status: 200 });
   }
 
@@ -91,7 +108,15 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const org = await getOrganizationByWhaapyBusinessId(businessId);
   if (!org) {
     // eslint-disable-next-line no-console
-    console.warn("whaapy_webhook_unknown_business", { businessId });
+    console.warn(
+      JSON.stringify({
+        event: "whaapy_webhook_discarded",
+        discard_reason: "organization_not_found",
+        business_id: businessId,
+        event_id_header: eventIdHeader,
+        received_at: receivedAt,
+      }),
+    );
     return new NextResponse("ok", { status: 200 });
   }
 
@@ -116,8 +141,30 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return new NextResponse("ok", { status: 200 });
   }
 
-  // 5. Dedup atómico (después de HMAC para no gastar Redis en spam).
   const eventId = eventIdHeader ?? cryptoRandomFallback();
+
+  // 5. Audit `whaapy_webhook_received` a NIVEL ENDPOINT (visibilidad
+  //    independiente del estado del worker downstream — Inngest dispatch,
+  //    signing key, etc.). Antes de dedup y enqueue. El worker también
+  //    escribe su propio `whaapy_webhook_received` cuando arranca; los
+  //    dos no son redundantes — el del endpoint prueba "el HTTP llegó y
+  //    pasó HMAC", el del worker prueba "Inngest dispatchó y el handler
+  //    arrancó". Si vemos el del endpoint pero no el del worker, sabemos
+  //    que el problema es de dispatch. Ver ERRORES.md "Endpoint Whaapy
+  //    sin visibilidad por audit-only-in-worker pattern".
+  await safeAuditAtEdge(org.id as UUID, {
+    eventType: "whaapy_webhook_received",
+    payload: {
+      topic,
+      whaapy_event_id: eventId,
+      whaapy_business_id: businessId,
+      received_at: receivedAt,
+      source: "endpoint",
+    } as Json,
+  });
+
+  // 6. Dedup atómico (después del audit edge para que retransmisiones
+  //    queden visibles vía `whaapy_webhook_deduped`).
   let firstDelivery: boolean;
   try {
     firstDelivery = await reserveOnce({
@@ -135,10 +182,19 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     firstDelivery = true;
   }
   if (!firstDelivery) {
+    await safeAuditAtEdge(org.id as UUID, {
+      eventType: "whaapy_webhook_deduped",
+      payload: {
+        topic,
+        whaapy_event_id: eventId,
+        whaapy_business_id: businessId,
+        received_at: receivedAt,
+      } as Json,
+    });
     return new NextResponse("ok", { status: 200, headers: { "x-centrhub-dedup": "hit" } });
   }
 
-  // 6. Topic → evento Inngest. Topic no soportado = audit + 200.
+  // 7. Topic → evento Inngest. Topic no soportado = audit + 200.
   const inngestEvent = WHAAPY_TOPIC_TO_INNGEST[topic];
   if (!inngestEvent) {
     await handleUnhandledEvent(org.id, topic, eventId);
@@ -154,18 +210,28 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     payload,
   };
 
-  // 7. Encolar a Inngest.
+  // 8. Encolar a Inngest.
   try {
     await getInngestClient().send({
       name: inngestEvent,
       data: envelope,
     });
   } catch (err) {
+    const errMsg = (err as Error).message;
     // eslint-disable-next-line no-console
     console.error("whaapy_webhook_enqueue_failed", {
       topic,
       eventId,
-      err: (err as Error).message,
+      err: errMsg,
+    });
+    await safeAuditAtEdge(org.id as UUID, {
+      eventType: "whaapy_webhook_enqueue_failed",
+      payload: {
+        topic,
+        whaapy_event_id: eventId,
+        whaapy_business_id: businessId,
+        error: errMsg,
+      } as Json,
     });
     return new NextResponse("enqueue_failed", { status: 503 });
   }
@@ -175,6 +241,38 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
 function cryptoRandomFallback(): string {
   return `local-${Math.random().toString(36).slice(2)}-${Date.now()}`;
+}
+
+/**
+ * Audit a nivel endpoint con tenant context. Nunca bloquea la
+ * respuesta HTTP — si el insert falla, lo deja en console.error y
+ * sigue (el alternativo sería 500 a Whaapy, peor que perder un audit).
+ */
+async function safeAuditAtEdge(
+  organizationId: UUID,
+  input: { eventType: string; payload: Json },
+): Promise<void> {
+  try {
+    await withTenantContext(
+      organizationId,
+      async () => {
+        await recordAuditEvent({
+          actorUserId: null,
+          eventType: input.eventType,
+          entityType: null,
+          entityId: null,
+          payload: input.payload,
+        });
+      },
+      { source: "webhook" },
+    );
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error("whaapy_endpoint_audit_failed", {
+      event_type: input.eventType,
+      err: (err as Error).message,
+    });
+  }
 }
 
 async function safeAuditUnhandled(

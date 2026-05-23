@@ -220,4 +220,95 @@ describe("POST /api/webhooks/whaapy", () => {
     const res = await POST(req as unknown as Parameters<typeof POST>[0]);
     expect(res.status).toBe(400);
   });
+
+  // ============================================================
+  // Visibilidad del endpoint — audit edge antes del enqueue
+  // ============================================================
+
+  it("happy path → audit whaapy_webhook_received escrito en endpoint ANTES del enqueue", async () => {
+    const req = buildRequest({
+      body: realWhaapyPayload(),
+      eventId: "ev-edge-audit",
+    });
+    const res = await POST(req as unknown as Parameters<typeof POST>[0]);
+    expect(res.status).toBe(200);
+    expect(sendMock).toHaveBeenCalledTimes(1);
+    const audit = fakeSupabase.getTable("audit_log");
+    const received = audit.filter((r) => r.event_type === "whaapy_webhook_received");
+    expect(received.length).toBe(1);
+    const row = received[0] as {
+      organization_id: string;
+      payload: { topic: string; whaapy_event_id: string; source: string };
+    };
+    expect(row.organization_id).toBe(ORG_ID);
+    expect(row.payload.topic).toBe("contact.created");
+    expect(row.payload.whaapy_event_id).toBe("ev-edge-audit");
+    expect(row.payload.source).toBe("endpoint");
+  });
+
+  it("dedup hit → audit whaapy_webhook_deduped escrito + 200 + 1 sola corrida de enqueue", async () => {
+    const body = realWhaapyPayload({
+      data: {
+        contact_id: "dup-contact",
+        name: "Dup Test",
+        phone_number: "+525500001111",
+        tags: [],
+        created_at: "2026-05-22T23:28:04.000Z",
+      },
+    });
+    const r1 = buildRequest({ body, eventId: "dup-edge" });
+    const r2 = buildRequest({ body, eventId: "dup-edge" });
+    const res1 = await POST(r1 as unknown as Parameters<typeof POST>[0]);
+    const res2 = await POST(r2 as unknown as Parameters<typeof POST>[0]);
+    expect(res1.status).toBe(200);
+    expect(res2.status).toBe(200);
+    expect(res2.headers.get("x-centrhub-dedup")).toBe("hit");
+    expect(sendMock).toHaveBeenCalledTimes(1);
+    const audit = fakeSupabase.getTable("audit_log");
+    const received = audit.filter((r) => r.event_type === "whaapy_webhook_received");
+    const deduped = audit.filter((r) => r.event_type === "whaapy_webhook_deduped");
+    // El primero escribe received; el segundo (dedup hit) escribe
+    // received TAMBIÉN porque el audit edge ocurre ANTES del dedup,
+    // y luego escribe deduped al detectar el hit.
+    expect(received.length).toBe(2);
+    expect(deduped.length).toBe(1);
+    const dedupRow = deduped[0] as {
+      organization_id: string;
+      payload: { whaapy_event_id: string; topic: string };
+    };
+    expect(dedupRow.organization_id).toBe(ORG_ID);
+    expect(dedupRow.payload.whaapy_event_id).toBe("dup-edge");
+    expect(dedupRow.payload.topic).toBe("contact.created");
+  });
+
+  it("inngest.send throwea → audit whaapy_webhook_enqueue_failed escrito + 503", async () => {
+    sendMock.mockRejectedValueOnce(new Error("inngest_unreachable"));
+    const req = buildRequest({
+      body: realWhaapyPayload({
+        data: {
+          contact_id: "fail-contact",
+          name: "Fail Test",
+          phone_number: "+525500002222",
+          tags: [],
+          created_at: "2026-05-22T23:28:04.000Z",
+        },
+      }),
+      eventId: "ev-enqueue-fail",
+    });
+    const res = await POST(req as unknown as Parameters<typeof POST>[0]);
+    expect(res.status).toBe(503);
+    const audit = fakeSupabase.getTable("audit_log");
+    const received = audit.filter((r) => r.event_type === "whaapy_webhook_received");
+    const failed = audit.filter((r) => r.event_type === "whaapy_webhook_enqueue_failed");
+    expect(received.length).toBe(1);
+    expect(failed.length).toBe(1);
+    const failRow = failed[0] as {
+      organization_id: string;
+      payload: { whaapy_event_id: string; topic: string; error: string };
+    };
+    expect(failRow.organization_id).toBe(ORG_ID);
+    expect(failRow.payload.whaapy_event_id).toBe("ev-enqueue-fail");
+    expect(failRow.payload.topic).toBe("contact.created");
+    expect(failRow.payload.error).toBe("inngest_unreachable");
+  });
 });
