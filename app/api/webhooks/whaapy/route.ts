@@ -65,11 +65,18 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return new NextResponse("invalid_body", { status: 400 });
   }
 
+  // INSTRUMENTACIÓN M4-DEBUG (migración 0016): persistir TODA request
+  // que cruza este endpoint en `whaapy_raw_webhooks` para diagnosticar
+  // dónde se corta el flujo. `rawId` es null si el insert falla — los
+  // taggers downstream son no-op en ese caso.
+  const rawId = await recordProductiveIngress(req.headers, bodyBuf);
+
   const signatureHeader = req.headers.get(WHAAPY_SIGNATURE_HEADER);
   const eventIdHeader = req.headers.get(WHAAPY_EVENT_ID_HEADER);
   const receivedAt = new Date().toISOString();
 
   if (!signatureHeader) {
+    await tagExitReason(rawId, "missing_signature");
     return new NextResponse("missing_signature", { status: 400 });
   }
 
@@ -81,6 +88,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
     payload = JSON.parse(bodyBuf.toString("utf8")) as Json;
   } catch {
+    await tagExitReason(rawId, "invalid_json");
     return new NextResponse("invalid_json", { status: 400 });
   }
 
@@ -101,6 +109,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         received_at: receivedAt,
       }),
     );
+    await tagExitReason(rawId, "missing_business_id");
     return new NextResponse("ok", { status: 200 });
   }
 
@@ -117,6 +126,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         received_at: receivedAt,
       }),
     );
+    await tagExitReason(rawId, "organization_not_found");
     return new NextResponse("ok", { status: 200 });
   }
 
@@ -128,9 +138,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     // Sin secret no podemos validar. 401 — Whaapy debería pausar
     // tras fallos consecutivos, lo que es OK: el operador debe
     // correr `whaapy:configure-webhook` para poblar el secret.
+    await tagExitReason(rawId, "missing_secret");
     return new NextResponse("missing_secret", { status: 401 });
   }
   if (!verifyWhaapyHmac(bodyBuf, signatureHeader, secret)) {
+    await tagExitReason(rawId, "invalid_hmac");
     return new NextResponse("invalid_hmac", { status: 401 });
   }
 
@@ -138,6 +150,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const topic = extractTopic(payload);
   if (!topic) {
     await safeAuditUnhandled(org.id, "unknown", eventIdHeader);
+    await tagExitReason(rawId, "unknown_topic");
     return new NextResponse("ok", { status: 200 });
   }
 
@@ -191,6 +204,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         received_at: receivedAt,
       } as Json,
     });
+    await tagExitReason(rawId, "dedup_hit");
     return new NextResponse("ok", { status: 200, headers: { "x-centrhub-dedup": "hit" } });
   }
 
@@ -198,6 +212,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const inngestEvent = WHAAPY_TOPIC_TO_INNGEST[topic];
   if (!inngestEvent) {
     await handleUnhandledEvent(org.id, topic, eventId);
+    await tagExitReason(rawId, "unhandled_topic");
     return new NextResponse("ok", { status: 200 });
   }
 
@@ -233,14 +248,106 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         error: errMsg,
       } as Json,
     });
+    await tagExitReason(rawId, "enqueue_failed");
     return new NextResponse("enqueue_failed", { status: 503 });
   }
 
+  await tagExitReason(rawId, "enqueue_succeeded");
   return new NextResponse("ok", { status: 200, headers: { "x-centrhub-dedup": "miss" } });
 }
 
 function cryptoRandomFallback(): string {
   return `local-${Math.random().toString(36).slice(2)}-${Date.now()}`;
+}
+
+/**
+ * INSTRUMENTACIÓN M4-DEBUG (migración 0016).
+ *
+ * Persiste TODA request entrante en `whaapy_raw_webhooks` antes de
+ * cualquier validación / HMAC / tenant resolution. Retorna el `id`
+ * generado para que los exit paths puedan taggear `exit_reason` antes
+ * de devolver la respuesta.
+ *
+ * Falla silenciosa por contrato: si el insert rompe, el endpoint
+ * continúa normal con `rawId = null` y los taggers downstream son
+ * no-op. La pérdida de observabilidad es preferible a romper el
+ * happy path.
+ */
+async function recordProductiveIngress(
+  headers: Headers,
+  bodyBuf: Buffer,
+): Promise<string | null> {
+  try {
+    const headerMap: Record<string, string> = {};
+    headers.forEach((v, k) => {
+      headerMap[k] = v;
+    });
+    const rawBody = bodyBuf.toString("utf8");
+    let body: unknown = null;
+    try {
+      body = JSON.parse(rawBody);
+    } catch {
+      body = null;
+    }
+    const { data, error } = await getSupabaseAdminClient()
+      .from("whaapy_raw_webhooks")
+      .insert({
+        headers: headerMap,
+        body,
+        raw_body: rawBody,
+        endpoint: "productive",
+      })
+      .select("id")
+      .single();
+    if (error) {
+      // eslint-disable-next-line no-console
+      console.error(
+        "whaapy_productive_ingress_insert_failed",
+        JSON.stringify({ message: error.message, code: error.code }),
+      );
+      return null;
+    }
+    return (data as { id: string }).id;
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error(
+      "whaapy_productive_ingress_threw",
+      JSON.stringify(err, Object.getOwnPropertyNames(err)),
+    );
+    return null;
+  }
+}
+
+/**
+ * Tagger de exit_reason. No-op si `rawId` es null (el insert inicial
+ * falló) o si el UPDATE rompe. Nunca lanza — el endpoint debe poder
+ * devolver la respuesta original sin importar el estado de la
+ * instrumentación.
+ */
+async function tagExitReason(
+  rawId: string | null,
+  reason: string,
+): Promise<void> {
+  if (!rawId) return;
+  try {
+    const { error } = await getSupabaseAdminClient()
+      .from("whaapy_raw_webhooks")
+      .update({ exit_reason: reason })
+      .eq("id", rawId);
+    if (error) {
+      // eslint-disable-next-line no-console
+      console.error(
+        "whaapy_productive_exit_tag_failed",
+        JSON.stringify({ rawId, reason, message: error.message }),
+      );
+    }
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error(
+      "whaapy_productive_exit_tag_threw",
+      JSON.stringify({ rawId, reason, err: (err as Error).message }),
+    );
+  }
 }
 
 /**
