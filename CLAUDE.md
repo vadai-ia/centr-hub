@@ -85,6 +85,53 @@ Whaapy expone una matriz de scopes al crear la api_key. La doctrina v5 (Sección
 
 Si un milestone futuro requiere alguno de los scopes no marcados, **regenerar la api_key con scopes ampliados y rotar en Vault** — no asumir que está disponible.
 
+### Operativa Whaapy — rotación de secret HMAC del webhook
+
+Documentado tras el cierre M4 inbound (22-may-2026) — ver entrada `ERRORES.md` "Secret HMAC de Whaapy desactualizado en Vault tras recrear el webhook" para el contexto del bug que lo originó.
+
+**Contexto:** Whaapy NO permite editar el webhook in-place desde el dashboard. Cualquier cambio (URL, eventos suscritos, scopes) obliga a **borrar + crear** el webhook. Cada creación genera un secret HMAC nuevo que se muestra UNA SOLA VEZ en el alert post-creación — no se puede consultar después. Esto significa que la rotación del secret ocurre silenciosamente desde la perspectiva del operador cada vez que se toca la configuración del webhook.
+
+**Sin rotar Vault tras recrear el webhook**, todos los eventos entrantes fallan HMAC verification y se descartan con `exit_reason: "invalid_hmac"`. El síntoma es indistinguible de "endpoint funciona, problema downstream" — HTTP 200 al proveedor, pero ningún contact aterriza en BD. Diagnóstico del bug consumió 8+ iteraciones de debugging hasta que la instrumentación de exit_reason lo expuso.
+
+**SOP de rotación — ejecutar como acción atómica, no como pasos independientes:**
+
+1. **Borrar webhook actual en Whaapy.** Dashboard → Settings → Webhooks → seleccionar webhook → Delete. Whaapy NO permite editar — borrar es el único path para cambiar cualquier configuración.
+
+2. **Crear webhook nuevo y copiar secret del alert.** Dashboard → Settings → Webhooks → Create webhook → configurar URL (`https://<dominio>/api/webhooks/whaapy`) + eventos (`contact.created`, `contact.updated`, `contact.deleted`, `conversation.created`, `conversation.assigned`, `conversation.closed`, `conversation.reopened`) → Save. El alert post-creación muestra el secret en formato `<32 chars hex>`. **Copiar inmediatamente** — el alert solo aparece una vez y no se puede recuperar.
+
+3. **Actualizar Vault con SQL** (Supabase SQL Editor, no migration):
+   ```sql
+   UPDATE organizations
+   SET vault_keys = jsonb_set(
+     vault_keys,
+     '{whaapy,webhook_secret}',
+     to_jsonb('<nuevo_secret_del_alert>'::text)
+   )
+   WHERE id = '<org_id>';
+   ```
+   Verificar con:
+   ```sql
+   SELECT vault_keys->'whaapy'->>'webhook_secret' FROM organizations WHERE id = '<org_id>';
+   ```
+
+4. **Disparar webhook test y validar exit_reason.** Desde el dashboard de Whaapy → Test webhook (o re-crear un contacto manualmente). Validar en Supabase:
+   ```sql
+   SELECT endpoint, exit_reason, created_at
+   FROM whaapy_raw_webhooks
+   ORDER BY created_at DESC
+   LIMIT 5;
+   ```
+   Esperar `exit_reason = 'enqueue_succeeded'` en el último insert. Si aparece `invalid_hmac`, el secret en Vault NO matchea con el del webhook activo — repetir paso 3.
+
+**Cuándo aplicar este SOP:**
+- Cambio de URL del webhook (ej. mover de URL temporal de tunnel a URL de producción).
+- Cambio de eventos suscritos (agregar o quitar eventos).
+- Cambio del owner del webhook en Whaapy.
+- Rotación periódica del secret por SOP de seguridad (90 días — alineado con rotación de api_key).
+- Sospecha de filtración del secret.
+
+**Anti-patrón a evitar:** recrear el webhook en Whaapy sin actualizar Vault en la misma ventana de trabajo. El sistema entra en estado "endpoint silencioso" que es muy costoso de diagnosticar a posteriori. La actualización a Vault y la validación con `whaapy_raw_webhooks` son OBLIGATORIAS — no opcionales.
+
 ## Skills aplicables y cuándo invocarlas
 
 | Skill | Cuándo invocarla |
