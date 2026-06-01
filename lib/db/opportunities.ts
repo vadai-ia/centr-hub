@@ -134,6 +134,147 @@ export async function listOpportunities(opts: {
   return data ?? [];
 }
 
+// ============================================================
+// Kanban (M5) — opp + contact embebido para card minimalista
+// ============================================================
+
+/**
+ * Subset del contact embebido que necesita la card del kanban
+ * (M5 — card minimalista + quick-view en popup sin fetch adicional).
+ */
+export interface KanbanContactEmbed {
+  id: UUID;
+  full_name: string | null;
+  phone: string | null;
+  email: string | null;
+  shopify_customer_id: string | null;
+  shopify_tags: string[];
+}
+
+/**
+ * Fila de opp tal como la consume el kanban + quick-view (M5).
+ * Incluye el contact embebido para no requerir fetch adicional al
+ * abrir el popup (regla del prompt: "el quick-view no debe disparar
+ * fetch adicional").
+ */
+export interface KanbanOpportunity {
+  id: UUID;
+  organization_id: UUID;
+  funnel: Funnel;
+  stage_id: UUID;
+  contact_id: UUID;
+  assigned_advisor_id: UUID | null;
+  shopify_draft_order_id: string | null;
+  shopify_order_id: string | null;
+  display_reference: string | null;
+  actual_amount: string | null;
+  estimated_amount: string | null;
+  currency: string;
+  updated_at: string;
+  last_modified_at: string;
+  last_modified_source: string;
+  cancelled_at: string | null;
+  contact: KanbanContactEmbed | null;
+}
+
+const KANBAN_OPPORTUNITY_SELECT = `
+  id,
+  organization_id,
+  funnel,
+  stage_id,
+  contact_id,
+  assigned_advisor_id,
+  shopify_draft_order_id,
+  shopify_order_id,
+  display_reference,
+  actual_amount,
+  estimated_amount,
+  currency,
+  updated_at,
+  last_modified_at,
+  last_modified_source,
+  cancelled_at,
+  contact:contacts!inner (
+    id,
+    full_name,
+    phone,
+    email,
+    shopify_customer_id,
+    shopify_tags
+  )
+`;
+
+/**
+ * Lista paginada de oportunidades activas para el kanban M5.
+ *
+ * Reglas críticas (CLAUDE.md "Cancelación de oportunidades"):
+ *  - Default excluye canceladas (cancelled_at IS NULL).
+ *  - El filtro de tenant explícito (organization_id) es la
+ *    barrera dura — no fiarse solo de RLS dado que el cliente
+ *    admin bypassea RLS (Sección 3.7 + R6).
+ *  - Para vendedor pasar `assignedAdvisorId = membershipId`.
+ *  - Para admin con filtro "Sin asignar" pasar `assignedAdvisorId = null`.
+ *  - Para admin sin filtro pasar `assignedAdvisorId = undefined`.
+ *
+ * Orden estable: `(last_modified_at DESC, id ASC)` para que la
+ * paginación por offset sea determinista incluso ante ties de
+ * timestamp (raro pero posible con auto-creación C2 en bulk).
+ */
+export async function listKanbanOpportunities(opts: {
+  funnel: Funnel;
+  stageId: UUID;
+  assignedAdvisorId?: UUID | null;
+  limit: number;
+  offset?: number;
+}): Promise<KanbanOpportunity[]> {
+  const { supabase, organizationId } = getTenantScopedClient();
+  let query = supabase
+    .from("opportunities")
+    .select(KANBAN_OPPORTUNITY_SELECT)
+    .eq("organization_id", organizationId)
+    .eq("funnel", opts.funnel)
+    .eq("stage_id", opts.stageId)
+    .is("cancelled_at", null);
+
+  if (opts.assignedAdvisorId !== undefined) {
+    if (opts.assignedAdvisorId === null) {
+      query = query.is("assigned_advisor_id", null);
+    } else {
+      query = query.eq("assigned_advisor_id", opts.assignedAdvisorId);
+    }
+  }
+
+  query = query
+    .order("last_modified_at", { ascending: false })
+    .order("id", { ascending: true });
+
+  const offset = opts.offset ?? 0;
+  if (opts.limit > 0) query = query.range(offset, offset + opts.limit - 1);
+
+  const { data, error } = await query;
+  if (error) throw error;
+  return (data ?? []) as unknown as KanbanOpportunity[];
+}
+
+/**
+ * Resuelve una sola opp con contact embebido — útil para refrescar
+ * una card específica tras un evento Realtime que solo trae el
+ * payload de la fila `opportunities` (sin join de contact).
+ */
+export async function getKanbanOpportunityById(
+  id: UUID,
+): Promise<KanbanOpportunity | null> {
+  const { supabase, organizationId } = getTenantScopedClient();
+  const { data, error } = await supabase
+    .from("opportunities")
+    .select(KANBAN_OPPORTUNITY_SELECT)
+    .eq("id", id)
+    .eq("organization_id", organizationId)
+    .maybeSingle();
+  if (error) throw error;
+  return (data ?? null) as unknown as KanbanOpportunity | null;
+}
+
 /**
  * Marca una oportunidad como cancelada sin transición de etapa.
  * NO crea entrada en `opportunity_stage_history` — la cancelación

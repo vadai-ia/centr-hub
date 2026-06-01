@@ -29,6 +29,30 @@
   - **(C) Eliminar completamente** — borrar `app/api/webhooks/whaapy-raw/`, `lib/services/whaapy-raw-webhooks.ts`, columnas `endpoint`/`exit_reason` de la tabla raw, y la tabla `whaapy_raw_webhooks` si no queda nada que la use. Reemplazar la señal de `exit_reason` con `console.log` estructurado + audit a nivel endpoint (cubierto por audit-at-edge una vez M4-DT-05 afloje la constraint). Costo: pérdida del recurso diagnóstico. Beneficio: superficie de código menor, menos infra que mantener.
   - **Recomendación pre-decisión:** opción (A) con TTL agresivo (15-30 días) parece el mejor trade-off — el costo operativo es marginal y el valor probado en este debugging justifica preservarlo. Pero la decisión final corresponde al operador en sesión posterior porque involucra: (i) política de retención de datos potencialmente sensibles (los bodies raw contienen PII de contactos hasta ser purgados); (ii) preferencia operativa entre "siempre observable" vs "código mínimo". Estimar implementación: 1.5h para opción A, 1h para opción B, 2h para opción C (incluye verificar que nada productivo dependa de las piezas eliminadas).
 
+## M5
+
+- **M5-DT-01 — Custom Access Token Hook de Supabase Auth para inyectar `organization_id` en JWT.** **CERRADO** en sesión de M5-DT-01 (mayo 2026). Migración `0017_custom_access_token_hook.sql` crea `public.custom_access_token_hook(event jsonb) returns jsonb` con resolución híbrida: lee `auth.users.raw_app_meta_data->>'active_organization_id'` validado contra `memberships` activos, fallback a la membership activa más antigua. `lib/actions/auth.ts:switchOrganization()` espeja el cambio en `app_metadata` vía admin client + fuerza `auth.refreshSession()`. Paso operativo manual en Supabase Dashboard documentado en `CLAUDE.md` ("Hook de claim organization_id en JWT"). Validación inline en la migración cubre el caso "user sin membership → event no mutado"; validación end-to-end (2 navegadores misma org, drag refleja <2s) cubierta por M5-CHK-01.
+
+  **Bloqueador del polling fallback:** sigue activo hasta M5-DT-03, que retira el `setInterval` incondicional tras validación empírica de delivery vía Realtime.
+
+- **M5-DT-02 — RPC `move_opportunity_stage_atomic` para sustituir emulación con compensating revert.** Hoy `lib/services/pipeline-move.ts` emula atomicidad con UPDATE + (audit/history) + revert si falla (ver ERRORES.md "Atomicidad del movimiento de oportunidad emulada en app, no transaccional en BD"). El peor caso teórico — el revert también falla — deja `opportunities` actualizado sin entrada de history. Probabilidad estimada <0.001%, pero observable solo via monitor externo. Fix propuesto: migración `0018_move_opportunity_stage_rpc.sql` con función PL/pgSQL en una sola transacción que (1) bloquea la fila con `SELECT ... FOR UPDATE` validando `last_modified_at = expected`, (2) UPDATE opp + INSERT history + INSERT audit en orden. `lib/services/pipeline-move.ts` se simplifica a un `.rpc(...)`. Aplicar junto con el trigger F1→F2 atómico de M7 — son problemas hermanos. Estimar 3h.
+
+- **M5-CHK-01 — Validación E2E aislamiento multi-tenant en Realtime (BLOQUEANTE de CHECKPOINT M5 item 4).** Requiere dos navegadores con users de organizaciones distintas Y el Auth Hook de M5-DT-01 activo. Sin el hook, el test no es válido porque Realtime no entrega eventos. Pasos: (a) login user A en org1; (b) login user B en org2 (otro navegador o incognito); (c) drag manual de card en navegador A; (d) confirmar que navegador B NO ve el cambio. Si B ve el cambio → fuga multi-tenant. Estimar 30min cuando M5-DT-01 esté hecho.
+
+- **M5-CHK-02 — Monitoreo de drift entre `opportunities.stage_id` y última entrada de `opportunity_stage_history`.** Detección preventiva del modo de falla residual de la emulación atómica. Query candidata para Inngest cron semanal:
+  ```sql
+  SELECT o.id, o.stage_id,
+         (SELECT to_stage_id FROM opportunity_stage_history
+           WHERE opportunity_id = o.id ORDER BY changed_at DESC LIMIT 1) AS last_history_to_stage
+    FROM opportunities o
+   WHERE cancelled_at IS NULL
+     AND (SELECT to_stage_id FROM opportunity_stage_history
+            WHERE opportunity_id = o.id ORDER BY changed_at DESC LIMIT 1) IS DISTINCT FROM o.stage_id;
+  ```
+  Si retorna filas → notificar al admin. Mover a M10 cuando se construya el dashboard de health interna. Estimar 1h.
+
+- **M5-DT-03 — Eliminar polling fallback tras M5-DT-01.** Una vez validado empíricamente que Realtime entrega eventos consistentemente, el polling de `usePipelineRealtime` consume bandwidth + DB sin valor agregado. Cambiar el polling a "solo cuando `status === 'disconnected' | 'stale'`" en lugar de incondicional. Estimar 1h.
+
 ## M6
 
 - **Validación E2E de defensa anti-bucle (R11)** — diferido desde M3 CHECKPOINT manual... 

@@ -77,3 +77,44 @@ export const PG_TENANT_SETTING = "app.current_organization_id" as const;
 
 /** Marker for outbound writes — used by R11 sync-loop defense (option A). */
 export const PLATFORM_ORIGIN_MARKER = "centrhub" as const;
+
+/**
+ * Pipeline kanban (M5).
+ *
+ * `PIPELINE_PAGE_SIZE`     — número de cards traídas por columna en
+ *                            cada page del scroll server-side. 50
+ *                            cubre la mayoría de etapas sin saturar
+ *                            la primera transferencia.
+ *
+ * `PIPELINE_VIRTUALIZATION_THRESHOLD` — a partir de cuántas cards
+ *                            por columna se activa virtualización con
+ *                            `@tanstack/react-virtual`. 50 = el page
+ *                            size: si una columna trae al menos un
+ *                            page completo, asumimos que puede crecer.
+ *
+ * `PIPELINE_REALTIME_DEBOUNCE_MS` — debounce para coalescer múltiples
+ *                            updates del mismo opportunity en cluster
+ *                            corto (ej. webhook + lww + last_modified).
+ *
+ * `PIPELINE_POLLING_FALLBACK_MS` — periodo del polling fallback que
+ *                            se activa cuando Supabase Realtime emite
+ *                            'CHANNEL_ERROR' o queda 'TIMED_OUT' tras
+ *                            varios intentos. Más alto que el de
+ *                            realtime puro porque solo cubre el peor
+ *                            caso operativo.
+ *
+ * `PIPELINE_REALTIME_RECONNECT_TIMEOUT_MS` — periodo tras el cual,
+ *                            si la reconexión no se ha establecido,
+ *                            se muestra al usuario el mensaje sugiriendo
+ *                            reload manual.
+ */
+export const PIPELINE_PAGE_SIZE = 50 as const;
+export const PIPELINE_VIRTUALIZATION_THRESHOLD = 50 as const;
+export const PIPELINE_REALTIME_DEBOUNCE_MS = 150 as const;
+export const PIPELINE_POLLING_FALLBACK_MS = 30_000 as const;
+export const PIPELINE_REALTIME_RECONNECT_TIMEOUT_MS = 30_000 as const;
+
+/** Cookie de preferencia del funnel activo del usuario en M5. */
+export const PIPELINE_FUNNEL_COOKIE = "centr_pipeline_funnel" as const;
+/** Cookie de preferencia del filtro admin "Sin asignar" en M5. */
+export const PIPELINE_UNASSIGNED_COOKIE = "centr_pipeline_unassigned" as const;

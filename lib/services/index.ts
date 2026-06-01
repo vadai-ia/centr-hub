@@ -17,3 +17,4 @@ export * as identityMatching from "./identity-matching";
 export * as lastWriteWins from "./last-write-wins";
 export * as rulesEngine from "./rules-engine";
 export * as f1ToF2Trigger from "./f1-to-f2-trigger";
+export * as pipelineMove from "./pipeline-move";

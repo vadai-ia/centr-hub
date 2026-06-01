@@ -293,6 +293,59 @@ Toda la lógica de fechas usa **America/Mexico_City** vía `luxon`. NUNCA usar `
 
 **Futureproofing DST:** Centr opera en México que no usa DST desde 2022. Si en V2 la plataforma se expande a países con DST (Argentina, Chile), luxon con la zona horaria correspondiente lo maneja automáticamente sin acción adicional. No bloqueante para MVP.
 
+## Hook de claim `organization_id` en JWT (M5-DT-01)
+
+Documentado tras el cierre M5-DT-01 (mayo 2026). Cierra la deuda registrada en `ERRORES.md` ("Supabase Realtime no entrega eventos al browser sin claim organization_id en el JWT").
+
+### Qué resuelve
+
+Sin este hook, `public.current_organization_id()` (migración 0001) devuelve NULL en sesiones de navegador porque el JWT estándar de Supabase Auth NO trae `organization_id` en el nivel raíz. Resultado: todas las RLS policies tenant-aware (migración 0009) se cierran, y Supabase Realtime descarta silenciosamente cada evento `postgres_changes` hacia el browser. El polling fallback de M5 (`PIPELINE_POLLING_FALLBACK_MS`, 30s) cubría el camino feliz pero no es real-time real — el hook lo es.
+
+### Cómo funciona
+
+- **Función SQL:** `public.custom_access_token_hook(event jsonb) returns jsonb` (migración 0017). Resuelve la org activa por precedencia: (1) `auth.users.raw_app_meta_data->>'active_organization_id'` validado contra `public.memberships` (debe ser una membership activa del usuario); (2) fallback a la membership activa más antigua del usuario (`ORDER BY created_at ASC LIMIT 1`); (3) sin membership activa → claims sin tocar (RLS bloquea, correcto).
+- **Claim emitido en RAÍZ del JWT**, no dentro de `app_metadata` ni `user_metadata`. La función SQL lee con `auth.jwt() ->> 'organization_id'` (mig. 0001 línea 59).
+- **Sincronización con switchOrganization:** `lib/actions/auth.ts` espeja `active_organization_id` en `auth.users.app_metadata` vía `admin.auth.admin.updateUserById()` y fuerza `auth.refreshSession()` para que el JWT se re-emita en el acto. El cookie SSR `centr_active_org` queda en sync (fast-path para `getSession()` server-side).
+- **Permisos:** la función es SECURITY DEFINER + EXECUTE concedido sólo a `supabase_auth_admin` (rol que invoca GoTrue). Revocado de public/anon/authenticated — NO es una RPC pública.
+
+### Paso operativo obligatorio post-deploy del hook (NO es código del repo)
+
+Tras aplicar la migración 0017, el hook debe **habilitarse manualmente en el Dashboard de Supabase** — sin este paso la función existe pero NO se invoca al emitir JWT:
+
+1. Supabase Dashboard → Authentication → Hooks → "Customize Access Token (JWT) Claims".
+2. Habilitar el hook (toggle).
+3. Seleccionar la función: schema `public`, función `custom_access_token_hook`.
+4. Guardar.
+
+A partir de ese momento cada nuevo JWT emitido por Supabase Auth lleva el claim `organization_id` en la raíz.
+
+### Invalidación de sesiones existentes
+
+JWT cacheado en navegadores con sesión activa NO recoge el claim hasta que se renueve el access_token (TTL configurable en Supabase, default ~1h) o el usuario haga logout/login. Para forzar la invalidación inmediata en el entorno actual (sin usuarios productivos — Centr no ha sido entregado todavía):
+
+```sql
+-- Invalida todos los refresh_tokens activos. Próxima request del navegador
+-- falla con 401, middleware redirige a /login, próximo login emite JWT con claim.
+DELETE FROM auth.refresh_tokens;
+```
+
+Si en futuras rotaciones del hook (cambio de lógica de resolución) hay usuarios productivos, este SQL es destructivo — usar en su lugar un flow de re-login coordinado o esperar a la rotación natural del TTL.
+
+### Validación end-to-end
+
+Una vez habilitado el hook + invalidadas las sesiones:
+
+1. **Login nuevo:** abrir `/login`, autenticarse. Verificar en Supabase Dashboard → Authentication → Users → ver el usuario → "View access token" (o decodificar el JWT del cookie sb-* en DevTools del navegador): el claim `organization_id` debe aparecer en la raíz.
+2. **Function SQL desde el browser context:** desde SQL Editor de Supabase, abrir como rol `authenticated` con el JWT del user → `SELECT public.current_organization_id();` → debe devolver la org del user, no NULL.
+3. **Realtime delivery:** dos navegadores con users de la misma org → drag manual de una card del pipeline en navegador A → navegador B refleja el cambio en <2s SIN esperar el polling fallback (30s). Es el test que M5-CHK-01 documenta.
+4. **Switch de org (sólo users multi-org):** desde el OrgSelector cambiar de org → recargar el pipeline → confirmar que se ven oportunidades de la nueva org y no de la anterior.
+5. **User sin membership activa:** crear un user sintético sin filas en `memberships`, intentar acceder al pipeline → RLS debe devolver vacío (no es bug, es comportamiento correcto).
+
+### Anti-patrón a evitar
+
+- **NO** modificar `current_organization_id()` para leer de `app_metadata.organization_id`. La función espera el claim en la raíz; cualquier cambio rompe la consistencia entre Barrera 1 (JWT) y Barrera 2 (setting de sesión server-side, que ya escribe a la raíz vía `set_config`). Si la lógica del hook necesita evolucionar, se cambia el hook, no la función de resolución.
+- **NO** retirar el polling fallback (`PIPELINE_POLLING_FALLBACK_MS`) hasta que M5-DT-03 se ejecute con validación empírica de que Realtime entrega eventos consistentemente. El hook habilita el camino feliz; el polling sigue como red de seguridad mientras tanto.
+
 ## Cambios al stack
 
 Cualquier modificación al stack documentado en `package.json` (agregar dependencia, subir versión mayor, cambiar provider externo) requiere aprobación explícita del operador antes de comitearse. Razón: el stack está fijado por experiencias previas (Kibah, FindMed, Hemenesy) y cualquier desviación inesperada introduce riesgo operacional.
