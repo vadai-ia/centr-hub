@@ -31,7 +31,7 @@ export interface PipelineInitialState {
 
 /**
  * Subset de membership + profile que pinta la card del kanban en
- * vista admin (asesor asignado) y el quick-view (toda vista).
+ * vista admin (asesor asignado).
  */
 export interface AdvisorOption {
   membershipId: UUID;

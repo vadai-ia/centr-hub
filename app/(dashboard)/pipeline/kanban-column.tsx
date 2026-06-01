@@ -7,7 +7,7 @@ import type {
   AdvisorOption,
   LoadPageActionResult,
 } from "@/lib/types/pipeline";
-import type { PipelineStageRow, UUID } from "@/lib/types/database";
+import type { PipelineStageRow } from "@/lib/types/database";
 import { PIPELINE_VIRTUALIZATION_THRESHOLD } from "@/lib/constants";
 import { KanbanCard } from "./kanban-card";
 
@@ -19,7 +19,6 @@ interface Props {
   showAdvisor: boolean;
   page: number;
   isOverlay?: boolean;
-  onOpenQuickView: (oppId: UUID) => void;
   onLoadMore: (
     stage: PipelineStageRow,
     page: number,
@@ -44,7 +43,6 @@ export function KanbanColumn({
   showAdvisor,
   page,
   isOverlay,
-  onOpenQuickView,
   onLoadMore,
 }: Props) {
   const droppable = useDroppable({
@@ -156,7 +154,6 @@ export function KanbanColumn({
                     opp={opp}
                     advisors={advisors}
                     showAdvisor={showAdvisor}
-                    onOpenQuickView={onOpenQuickView}
                   />
                 </div>
               );
@@ -170,7 +167,6 @@ export function KanbanColumn({
                 opp={opp}
                 advisors={advisors}
                 showAdvisor={showAdvisor}
-                onOpenQuickView={onOpenQuickView}
               />
             ))}
           </div>

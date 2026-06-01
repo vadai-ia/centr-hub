@@ -139,8 +139,9 @@ export async function listOpportunities(opts: {
 // ============================================================
 
 /**
- * Subset del contact embebido que necesita la card del kanban
- * (M5 — card minimalista + quick-view en popup sin fetch adicional).
+ * Subset del contact embebido que necesita la card del kanban.
+ * El popup de detalle de M6 reutiliza el mismo shape (sin fetch
+ * adicional al abrir la card desde una lista ya cargada).
  */
 export interface KanbanContactEmbed {
   id: UUID;
@@ -152,10 +153,10 @@ export interface KanbanContactEmbed {
 }
 
 /**
- * Fila de opp tal como la consume el kanban + quick-view (M5).
- * Incluye el contact embebido para no requerir fetch adicional al
- * abrir el popup (regla del prompt: "el quick-view no debe disparar
- * fetch adicional").
+ * Fila de opp tal como la consume el kanban (M5). Incluye el contact
+ * embebido para que la card no requiera fetch adicional. El popup
+ * único de detalle (M6) reutiliza el mismo shape como punto de
+ * partida cuando se abre desde una card ya cargada.
  */
 export interface KanbanOpportunity {
   id: UUID;

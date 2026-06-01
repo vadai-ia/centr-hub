@@ -16,7 +16,6 @@ interface Props {
   advisors: AdvisorOption[];
   showAdvisor: boolean;
   isDraggingDisabled?: boolean;
-  onOpenQuickView: (oppId: string) => void;
 }
 
 /**
@@ -27,8 +26,10 @@ interface Props {
  * sin Draft Order Shopify (caso "drag manual antes del DO").
  *
  * El doble click rápido se bloquea a nivel padre via idempotencia
- * del servicio `pipeline-move`. La card no tiene lógica propia más
- * que: arranca drag y abre quick-view.
+ * del servicio `pipeline-move`. La card es puramente draggable —
+ * el quick-view se eliminó tras CHECKPOINT M5 (decisión de producto:
+ * M6 trae popup único de detalle completo, sin preview intermedio).
+ * El click sobre la card no abre nada entre M5 y M6.
  *
  * Diseño funcional pero no pulido — F7 itera la estética.
  */
@@ -37,7 +38,6 @@ export function KanbanCard({
   advisors,
   showAdvisor,
   isDraggingDisabled,
-  onOpenQuickView,
 }: Props) {
   const draggable = useDraggable({
     id: opp.id,
@@ -74,22 +74,6 @@ export function KanbanCard({
       style={style}
       {...draggable.listeners}
       {...draggable.attributes}
-      onClick={(e) => {
-        // Cuando dnd-kit está arrastrando dispara onClick al final;
-        // filtramos los clicks "post-drag" comparando si transform
-        // está activo.
-        if (draggable.isDragging) return;
-        e.stopPropagation();
-        onOpenQuickView(opp.id);
-      }}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          onOpenQuickView(opp.id);
-        }
-      }}
-      role="button"
-      tabIndex={0}
       aria-label={`Oportunidad de ${name}`}
       className={[
         "group bg-white dark:bg-gray-800 rounded-md border border-gray-200 dark:border-gray-700",

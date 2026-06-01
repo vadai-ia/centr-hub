@@ -33,7 +33,6 @@ import { LossReasonModal } from "./loss-reason-modal";
 import { PipelineToolbar } from "./pipeline-toolbar";
 import { PipelineToastStack } from "./pipeline-toast";
 import { useToastStack } from "./use-toast-stack";
-import { QuickView } from "./quick-view";
 import { usePipelineRealtime, type RealtimeStatus } from "./use-pipeline-realtime";
 import {
   findStageContaining,
@@ -69,7 +68,8 @@ interface PendingLoss {
  * Funciones (ver checklist del prompt M5):
  *   - Holding state de cards por etapa + has-more + page index.
  *   - Drag-and-drop con optimistic UI + rollback en error/stale.
- *   - Quick-view popup + modal de motivo de pérdida.
+ *   - Modal de motivo de pérdida (sin quick-view — eliminado tras
+ *     CHECKPOINT M5; M6 trae popup único de detalle completo).
  *   - Toggle Venta/Post-venta con re-fetch del estado inicial.
  *   - Filtro admin "Sin asignar".
  *   - Real-time selectivo + polling fallback (hook).
@@ -107,7 +107,6 @@ export function PipelineBoard({
   >(initial.effectiveAdvisorId);
 
   const [activeDragId, setActiveDragId] = useState<UUID | null>(null);
-  const [quickViewId, setQuickViewId] = useState<UUID | null>(null);
   const [pendingLoss, setPendingLoss] = useState<PendingLoss | null>(null);
   const [pendingMoves, setPendingMoves] = useState<Set<UUID>>(new Set());
   const { toasts, push: pushToast, dismiss: dismissToast } = useToastStack();
@@ -118,20 +117,6 @@ export function PipelineBoard({
     for (const s of stages) map[s.id] = s;
     return map;
   }, [stages]);
-
-  // Quick-view sin fetch — busca la card ya cargada en estado.
-  const quickViewOpp = useMemo(() => {
-    if (!quickViewId) return null;
-    for (const list of Object.values(cardsByStage)) {
-      const found = list.find((o) => o.id === quickViewId);
-      if (found) return found;
-    }
-    return null;
-  }, [cardsByStage, quickViewId]);
-
-  const quickViewStage = quickViewOpp
-    ? stagesById[quickViewOpp.stage_id] ?? null
-    : null;
 
   const dndSensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
@@ -408,7 +393,6 @@ export function PipelineBoard({
                 advisors={advisors}
                 showAdvisor={isAdmin}
                 page={pageByStage[stage.id] ?? 0}
-                onOpenQuickView={setQuickViewId}
                 onLoadMore={loadMoreForStage}
               />
             ))}
@@ -421,18 +405,10 @@ export function PipelineBoard({
               opp={activeDragCard}
               advisors={advisors}
               showAdvisor={isAdmin}
-              onOpenQuickView={() => undefined}
             />
           ) : null}
         </DragOverlay>
       </DndContext>
-
-      <QuickView
-        opp={quickViewOpp}
-        stage={quickViewStage}
-        advisors={advisors}
-        onClose={() => setQuickViewId(null)}
-      />
 
       <LossReasonModal
         open={!!pendingLoss}

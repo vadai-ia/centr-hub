@@ -66,8 +66,9 @@ export function deriveOriginIndicator(opp: KanbanOpportunity): OriginIndicator {
 
 /**
  * Resuelve el nombre del asesor para pintar en la card (vista admin)
- * o en el quick-view (siempre). Devuelve "Sin asignar" cuando la opp
- * no tiene `assigned_advisor_id` — caso real validado en CHECKPOINT M4.
+ * o en cualquier vista futura que lo consuma. Devuelve "Sin asignar"
+ * cuando la opp no tiene `assigned_advisor_id` — caso real validado
+ * en CHECKPOINT M4.
  */
 export interface ResolvedAdvisor {
   fullName: string;

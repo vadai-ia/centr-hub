@@ -43,6 +43,16 @@ export default async function PipelinePage() {
 
   return (
     <PipelineBoard
+      // El `key` por org activa fuerza unmount + remount del board
+      // cuando el operador cambia de organización vía OrgSelector
+      // (que llama switchOrganization + router.refresh). Sin esto,
+      // el client component retiene el estado (cards, stages, filtros)
+      // de la org anterior aunque el server haya re-renderizado este
+      // page con el snapshot nuevo — el usuario ve datos obsoletos
+      // hasta navegar a otra ruta y volver. El backend ya bloquea
+      // cualquier move cross-tenant (RLS + optimistic lock), pero
+      // la UI debe reflejar la org activa de inmediato.
+      key={session.data.activeOrg.id}
       initial={initial.state}
       role={role}
       userId={session.data.userId}
