@@ -3,6 +3,7 @@ import { useDraggable } from "@dnd-kit/core";
 import { CSS } from "@dnd-kit/utilities";
 import type { KanbanOpportunity } from "@/lib/db/opportunities";
 import type { AdvisorOption } from "@/lib/types/pipeline";
+import type { UUID } from "@/lib/types/database";
 import {
   contactDisplayName,
   contactIsCustomer,
@@ -16,6 +17,17 @@ interface Props {
   advisors: AdvisorOption[];
   showAdvisor: boolean;
   isDraggingDisabled?: boolean;
+  /**
+   * Handler de click sobre la card (M6 — B5). El padre conecta esto
+   * a la URL `?opp=<id>` que el `OpportunityDialog` observa. Cuando
+   * no se provee (DragOverlay), el click no hace nada.
+   *
+   * dnd-kit distingue click vs drag por la activationConstraint del
+   * PointerSensor (6px en pipeline-board): si el pointer no se movió,
+   * React dispara `click` normalmente. Si se inició drag, el click
+   * no se emite.
+   */
+  onSelect?: (opportunityId: UUID) => void;
 }
 
 /**
@@ -38,6 +50,7 @@ export function KanbanCard({
   advisors,
   showAdvisor,
   isDraggingDisabled,
+  onSelect,
 }: Props) {
   const draggable = useDraggable({
     id: opp.id,
@@ -68,17 +81,32 @@ export function KanbanCard({
   const lacksDraftOrder =
     opp.funnel === "venta" && !opp.shopify_draft_order_id;
 
+  // Click vs drag: si dnd-kit no inició el drag (pointer no se movió
+  // > activationConstraint), React dispara `click` normalmente. Si
+  // se inició drag, el click no se emite — el navegador no produce
+  // click después de un dragstart. Por eso onClick es seguro al lado
+  // de los listeners de drag.
+  const handleClick = onSelect
+    ? () => {
+        if (draggable.isDragging) return;
+        onSelect(opp.id);
+      }
+    : undefined;
+
   return (
     <div
       ref={draggable.setNodeRef}
       style={style}
       {...draggable.listeners}
       {...draggable.attributes}
+      onClick={handleClick}
       aria-label={`Oportunidad de ${name}`}
+      role={onSelect ? "button" : undefined}
       className={[
         "group bg-white dark:bg-gray-800 rounded-md border border-gray-200 dark:border-gray-700",
-        "p-3 cursor-grab active:cursor-grabbing select-none shadow-sm hover:shadow-md transition-shadow",
+        "p-3 select-none shadow-sm hover:shadow-md transition-shadow",
         "focus:outline-none focus:ring-2 focus:ring-indigo-400",
+        onSelect ? "cursor-pointer active:cursor-grabbing" : "cursor-grab active:cursor-grabbing",
       ].join(" ")}
     >
       <div className="flex items-start justify-between gap-2 mb-1">

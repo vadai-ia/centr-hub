@@ -21,6 +21,13 @@ import { z } from "zod";
 const clientSchema = z.object({
   NEXT_PUBLIC_SUPABASE_URL: z.string().url(),
   NEXT_PUBLIC_SUPABASE_ANON_KEY: z.string().min(1),
+  /**
+   * URL del dashboard de Whaapy embebida en la pestaña Whaapy (M6 — B10).
+   * Default seguro `https://app.whaapy.com` (URL canónica documentada
+   * por Whaapy). Override por organización futura vive en Vault si V2
+   * lo requiere; en MVP single-org un env var es suficiente.
+   */
+  NEXT_PUBLIC_WHAAPY_DASHBOARD_URL: z.string().url().optional(),
 });
 
 const serverSchema = clientSchema.extend({
@@ -43,6 +50,7 @@ function parseClient() {
   const parsed = clientSchema.safeParse({
     NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL,
     NEXT_PUBLIC_SUPABASE_ANON_KEY: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+    NEXT_PUBLIC_WHAAPY_DASHBOARD_URL: process.env.NEXT_PUBLIC_WHAAPY_DASHBOARD_URL,
   });
   if (!parsed.success) {
     throw new Error(

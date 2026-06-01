@@ -55,7 +55,21 @@ export interface OutboundRetryEnvelope {
 export interface WhaapyContactSyncEnvelope {
   organizationId: UUID;
   contactId: UUID;
-  reason: "create_from_shopify" | "update_from_shopify";
+  /**
+   * Disparadores admitidos por el worker `whaapyOutboundContactSync`:
+   *   - `create_from_shopify`     — sync inicial cuando Shopify crea un
+   *     customer y no existe contraparte Whaapy (Sección 3.6).
+   *   - `update_from_shopify`     — Shopify cambió un customer enlazado
+   *     y propagamos campos actualizables a Whaapy.
+   *   - `update_from_platform_ui` — edición o reasignación manual del
+   *     contacto desde Centr Hub (M6 — B7/B8). Mismo flujo de PATCH
+   *     que `update_from_shopify`, pero el motivo del audit diferencia
+   *     el origen y deja claro que NO es eco de Shopify.
+   */
+  reason:
+    | "create_from_shopify"
+    | "update_from_shopify"
+    | "update_from_platform_ui";
   contactSnapshot: {
     shopifyCustomerId: string | null;
     whaapyContactId: string | null;
@@ -74,6 +88,34 @@ export interface WhaapyContactSyncEnvelope {
 }
 
 export const WHAAPY_OUTBOUND_CONTACT_SYNC_EVENT = "whaapy/outbound.contact_sync_requested" as const;
+
+/**
+ * Envelope para propagación outbound Shopify desde edición manual
+ * del contacto en la plataforma (M6 — B8).
+ *
+ * El worker consume el snapshot completo del contact y llama a
+ * `updateCustomer` con los campos editables. R11 (defensa anti-bucle)
+ * se aplica dentro de `updateCustomer` vía `markOutboundWrite` ANTES
+ * del PUT — el webhook eco subsiguiente de Shopify se descarta por
+ * `discardIfOwnEcho`. Sin necesidad de un evento separado por campo:
+ * si el caller emite cambios > una vez, Inngest dedup natural lo
+ * consolida (el último gana en LWW).
+ */
+export interface ShopifyContactUpdateEnvelope {
+  organizationId: UUID;
+  contactId: UUID;
+  reason: "update_from_platform_ui";
+  contactSnapshot: {
+    shopifyCustomerId: string;
+    fullName: string | null;
+    email: string | null;
+    phone: string | null;
+    address: Json | null;
+    internalNote: string | null;
+  };
+}
+
+export const SHOPIFY_OUTBOUND_CONTACT_UPDATE_EVENT = "shopify/outbound.contact_update_requested" as const;
 
 /**
  * Envelope inbound Whaapy → workers.

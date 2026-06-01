@@ -6,12 +6,13 @@ import { dlqFunctions } from "./dlq";
 import { whaapyContactFunctions } from "./whaapy-contacts";
 import { whaapyConversationFunctions } from "./whaapy-conversations";
 import { whaapyOutboundFunctions } from "./whaapy-outbound";
+import { shopifyOutboundFunctions } from "./shopify-outbound";
 
 /**
  * Registro completo de funciones Inngest para servir desde
  * `/api/inngest`.
  *
- * M3 (Shopify): customers, draft-orders, orders, dlq.
+ * M3 (Shopify): customers, draft-orders, orders, dlq, outbound (M6 — B8).
  * M4 (Whaapy):  contact.*, conversation.*, outbound.
  */
 export const allFunctions = [
@@ -22,4 +23,5 @@ export const allFunctions = [
   ...whaapyContactFunctions,
   ...whaapyConversationFunctions,
   ...whaapyOutboundFunctions,
+  ...shopifyOutboundFunctions,
 ];

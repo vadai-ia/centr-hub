@@ -118,3 +118,71 @@ export async function sumPaidRevenueBetween(
   if (error) throw error;
   return (data ?? []).reduce((acc, row) => acc + Number(row.total_amount), 0);
 }
+
+/**
+ * Indicadores históricos del contacto para M6: cantidad de órdenes
+ * ganadas (pagadas y no canceladas) y suma de revenue. La moneda se
+ * deja al caller — Centr opera con MXN (default org), pero si una
+ * orden histórica fue en otra divisa, el agregado puro pierde la
+ * dimensión. Aceptable para indicadores de "monto total con este
+ * cliente" en MVP donde todos los datos son MXN.
+ *
+ * R5: cancelado ≠ perdido — `cancelled_at IS NULL` excluye órdenes
+ * que Shopify revocó administrativamente.
+ */
+export interface ContactOrderIndicators {
+  paidOrdersCount: number;
+  paidRevenueTotal: number;
+  currency: string;
+}
+
+export async function sumPaidOrdersForContact(
+  contactId: UUID,
+): Promise<ContactOrderIndicators> {
+  const { supabase, organizationId } = getTenantScopedClient();
+  const { data, error } = await supabase
+    .from("orders")
+    .select("total_amount, currency")
+    .eq("organization_id", organizationId)
+    .eq("contact_id", contactId)
+    .eq("financial_status", "paid")
+    .is("cancelled_at", null);
+  if (error) throw error;
+  const rows = (data ?? []) as Array<{ total_amount: string; currency: string }>;
+  let total = 0;
+  let currency = "MXN";
+  for (const row of rows) {
+    total += Number(row.total_amount);
+    if (row.currency) currency = row.currency;
+  }
+  return {
+    paidOrdersCount: rows.length,
+    paidRevenueTotal: total,
+    currency,
+  };
+}
+
+/**
+ * Lista órdenes de un contacto ordenadas por `paid_at DESC` (con
+ * fallback `created_at`). Usada por el timeline del detalle de
+ * contacto (M6) para emitir eventos `order_paid` / `order_cancelled`.
+ *
+ * Default excluye nada — el caller decide qué financial_status mostrar.
+ * Para "órdenes ganadas" del header de indicadores, usar
+ * `sumPaidOrdersForContact` que filtra paid + not-cancelled.
+ */
+export async function listOrdersForContact(
+  contactId: UUID,
+  limit = 100,
+): Promise<OrderRow[]> {
+  const { supabase, organizationId } = getTenantScopedClient();
+  const { data, error } = await supabase
+    .from("orders")
+    .select("*")
+    .eq("organization_id", organizationId)
+    .eq("contact_id", contactId)
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+  return data ?? [];
+}

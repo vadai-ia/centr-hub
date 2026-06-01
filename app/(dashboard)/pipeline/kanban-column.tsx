@@ -7,7 +7,7 @@ import type {
   AdvisorOption,
   LoadPageActionResult,
 } from "@/lib/types/pipeline";
-import type { PipelineStageRow } from "@/lib/types/database";
+import type { PipelineStageRow, UUID } from "@/lib/types/database";
 import { PIPELINE_VIRTUALIZATION_THRESHOLD } from "@/lib/constants";
 import { KanbanCard } from "./kanban-card";
 
@@ -23,6 +23,8 @@ interface Props {
     stage: PipelineStageRow,
     page: number,
   ) => Promise<LoadPageActionResult>;
+  /** Click sobre una card (M6 — B5) → abre popup vía URL ?opp=<id>. */
+  onSelectOpportunity?: (opportunityId: UUID) => void;
 }
 
 /**
@@ -44,6 +46,7 @@ export function KanbanColumn({
   page,
   isOverlay,
   onLoadMore,
+  onSelectOpportunity,
 }: Props) {
   const droppable = useDroppable({
     id: stage.id,
@@ -154,6 +157,7 @@ export function KanbanColumn({
                     opp={opp}
                     advisors={advisors}
                     showAdvisor={showAdvisor}
+                    onSelect={onSelectOpportunity}
                   />
                 </div>
               );
@@ -167,6 +171,7 @@ export function KanbanColumn({
                 opp={opp}
                 advisors={advisors}
                 showAdvisor={showAdvisor}
+                onSelect={onSelectOpportunity}
               />
             ))}
           </div>

@@ -118,3 +118,20 @@ export const PIPELINE_REALTIME_RECONNECT_TIMEOUT_MS = 30_000 as const;
 export const PIPELINE_FUNNEL_COOKIE = "centr_pipeline_funnel" as const;
 /** Cookie de preferencia del filtro admin "Sin asignar" en M5. */
 export const PIPELINE_UNASSIGNED_COOKIE = "centr_pipeline_unassigned" as const;
+
+/**
+ * Listado de Contactos (M6).
+ *
+ * `CONTACTS_PAGE_SIZE` — número de contactos por page del listado
+ *                       paginado. 50 = ~3 viewports en desktop sin
+ *                       saturar la primera transferencia.
+ * `CONTACT_SEARCH_DEBOUNCE_MS` — debounce del input de búsqueda. 300ms
+ *                       cubre tipeo humano normal sin saturar la BD.
+ * `TIMELINE_DEFAULT_LIMIT` — eventos por fuente al construir el
+ *                       timeline unificado (contacto y oportunidad).
+ *                       Cada fuente trae N; el merger ordena por ts
+ *                       y deja los más recientes. Default conservador.
+ */
+export const CONTACTS_PAGE_SIZE = 50 as const;
+export const CONTACT_SEARCH_DEBOUNCE_MS = 300 as const;
+export const TIMELINE_DEFAULT_LIMIT = 50 as const;

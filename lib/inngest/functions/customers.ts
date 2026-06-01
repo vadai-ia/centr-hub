@@ -128,7 +128,10 @@ async function persistMissingPhoneFlag(
  */
 export async function recordWhaapySyncIntent(
   contact: ContactRow,
-  reason: "create_from_shopify" | "update_from_shopify",
+  reason:
+    | "create_from_shopify"
+    | "update_from_shopify"
+    | "update_from_platform_ui",
 ): Promise<void> {
   // 1) Audit log paralelo (trazabilidad histórica — Sección 3.3.7).
   //    NO reemplaza el evento Inngest; sirve para auditar "se intentó

@@ -1,5 +1,6 @@
 "use client";
 import { useCallback, useMemo, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   DndContext,
   DragOverlay,
@@ -17,6 +18,7 @@ import {
   loadKanbanPageAction,
   moveStageAction,
 } from "@/lib/actions/pipeline";
+import { OpportunityDialog } from "@/components/opportunity/opportunity-dialog";
 import type { KanbanOpportunity } from "@/lib/db/opportunities";
 import type {
   PipelineInitialState,
@@ -84,6 +86,26 @@ export function PipelineBoard({
 }: Props) {
   void userId;
   const isAdmin = role === "admin" || role === "superadmin";
+
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  /**
+   * Handler de selección de card (M6 — B5). La card es un drag-source
+   * de dnd-kit; el click solo se dispara si NO se inició drag (regla
+   * estándar del browser tras un dragstart). Cuando dispara, navegamos
+   * con `?opp=<id>` preservando los demás params; el `OpportunityDialog`
+   * montado abajo escucha ese param y abre el popup.
+   */
+  const handleSelectOpportunity = useCallback(
+    (oppId: UUID) => {
+      const next = new URLSearchParams(searchParams.toString());
+      next.set("opp", oppId);
+      const qs = next.toString();
+      router.push(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+    },
+    [pathname, router, searchParams],
+  );
 
   const [funnel, setFunnel] = useState<Funnel>(initial.funnel);
   const [unassignedFilter, setUnassignedFilter] = useState<boolean>(
@@ -394,6 +416,7 @@ export function PipelineBoard({
                 showAdvisor={isAdmin}
                 page={pageByStage[stage.id] ?? 0}
                 onLoadMore={loadMoreForStage}
+                onSelectOpportunity={handleSelectOpportunity}
               />
             ))}
           </div>
@@ -416,6 +439,8 @@ export function PipelineBoard({
         onCancel={cancelLoss}
         onConfirm={confirmLoss}
       />
+
+      <OpportunityDialog />
 
       <PipelineToastStack toasts={toasts} onDismiss={dismissToast} />
     </div>
