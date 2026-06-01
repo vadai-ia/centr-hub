@@ -11,6 +11,7 @@ import {
 import { parseShopifyTags } from "@/lib/services/tag-parser";
 import { matchContactIdentity } from "@/lib/services/identity-matching";
 import { shouldApplyRecordUpdate } from "@/lib/services/last-write-wins";
+import { hydrateContactFromEmbeddedShopifyCustomer } from "@/lib/inngest/functions/customers";
 import {
   createContact,
   findContactByShopifyCustomerId,
@@ -52,6 +53,27 @@ async function resolveContactIdForOrder(
   const existing = await findContactByShopifyCustomerId(normalized.shopifyCustomerId);
   if (existing) return existing.id;
 
+  // Fix M3 (ver ERRORES.md): el payload de orders/* trae el OBJETO
+  // customer completo (no solo el id). Si llegamos acá significa que
+  // todavía no hay contacto local — usamos esos datos para hidratarlo
+  // en vez de crear un stub vacío. El helper aplica identity match
+  // por phone/email + LWW por campo, así que reusa la misma lógica
+  // que `customers/create`.
+  if (normalized.embeddedCustomer) {
+    const customerUpdatedAt =
+      normalized.embeddedCustomer.updatedAt
+      ?? normalized.embeddedCustomer.createdAt
+      ?? effectiveUpdatedAt;
+    const hydrated = await hydrateContactFromEmbeddedShopifyCustomer(
+      normalized.embeddedCustomer,
+      customerUpdatedAt,
+    );
+    return hydrated.id;
+  }
+
+  // Fallback defensivo: customer.id presente pero el objeto venía sin
+  // datos (caso atípico — Shopify normalmente incluye el body). Mismo
+  // path antiguo: identity match por id + stub vacío si no hay match.
   const match = await matchContactIdentity({
     source: "shopify",
     shopifyCustomerId: normalized.shopifyCustomerId,

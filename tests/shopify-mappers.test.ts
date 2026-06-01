@@ -130,6 +130,74 @@ describe("mapDraftOrderWebhookToNormalized", () => {
     expect(result.lineItems[0].shopifyProductId).toBe(null);
     expect(result.lineItems[0].title).toBe("Custom item");
   });
+
+  it("embeddedCustomer hidratado cuando el payload trae customer completo (fix M3)", () => {
+    const result = mapDraftOrderWebhookToNormalized({
+      id: 999,
+      customer: {
+        id: 12345,
+        first_name: "Ana",
+        last_name: "Pérez",
+        email: "ana@example.com",
+        phone: "+5215555555555",
+        tags: "Gina, Anticipo 50%",
+        state: "enabled",
+        note: "VIP",
+        default_address: { city: "CDMX", country: "MX" },
+        updated_at: "2026-05-15T08:00:00Z",
+        created_at: "2026-05-10T08:00:00Z",
+      },
+      line_items: [],
+      total_price: "0",
+    });
+    expect(result.shopifyCustomerId).toBe("12345");
+    expect(result.embeddedCustomer).not.toBe(null);
+    expect(result.embeddedCustomer?.shopifyCustomerId).toBe("12345");
+    expect(result.embeddedCustomer?.fullName).toBe("Ana Pérez");
+    expect(result.embeddedCustomer?.email).toBe("ana@example.com");
+    expect(result.embeddedCustomer?.phone).toBe("+5215555555555");
+    expect(result.embeddedCustomer?.tags).toEqual(["Gina", "Anticipo 50%"]);
+    expect(result.embeddedCustomer?.state).toBe("enabled");
+    expect(result.embeddedCustomer?.note).toBe("VIP");
+    expect(result.embeddedCustomer?.address).toMatchObject({ city: "CDMX" });
+    expect(result.embeddedCustomer?.updatedAt).toBe("2026-05-15T08:00:00Z");
+    expect(result.embeddedCustomer?.createdAt).toBe("2026-05-10T08:00:00Z");
+  });
+
+  it("embeddedCustomer = null cuando el payload no trae customer", () => {
+    const result = mapDraftOrderWebhookToNormalized({
+      id: 1,
+      line_items: [],
+      total_price: "0",
+    });
+    expect(result.shopifyCustomerId).toBe(null);
+    expect(result.embeddedCustomer).toBe(null);
+  });
+
+  it("embeddedCustomer = null cuando customer existe pero sin id", () => {
+    const result = mapDraftOrderWebhookToNormalized({
+      id: 1,
+      customer: { first_name: "Sin Id" },
+      line_items: [],
+      total_price: "0",
+    });
+    expect(result.shopifyCustomerId).toBe(null);
+    expect(result.embeddedCustomer).toBe(null);
+  });
+
+  it("embeddedCustomer mínimo cuando solo viene customer.id (fallback)", () => {
+    const result = mapDraftOrderWebhookToNormalized({
+      id: 1,
+      customer: { id: 12345 },
+      line_items: [],
+      total_price: "0",
+    });
+    expect(result.shopifyCustomerId).toBe("12345");
+    expect(result.embeddedCustomer).not.toBe(null);
+    expect(result.embeddedCustomer?.fullName).toBe(null);
+    expect(result.embeddedCustomer?.email).toBe(null);
+    expect(result.embeddedCustomer?.phone).toBe(null);
+  });
 });
 
 describe("mapOrderWebhookToNormalized", () => {
@@ -162,5 +230,52 @@ describe("mapOrderWebhookToNormalized", () => {
     expect(result.paidAt).toBe("2026-05-10T12:00:00Z");
     expect(result.shippingAmount).toBe("50.00");
     expect(result.discountAmount).toBe("10.00");
+  });
+
+  it("embeddedCustomer hidratado cuando el payload trae customer completo (fix M3)", () => {
+    const result = mapOrderWebhookToNormalized({
+      id: 5555,
+      customer: {
+        id: 99,
+        first_name: "Bruno",
+        last_name: "Díaz",
+        email: "bruno@example.com",
+        phone: "+5215566778899",
+        default_address: { city: "GDL" },
+        updated_at: "2026-05-10T12:00:00Z",
+      },
+      line_items: [],
+      total_price: "0",
+    });
+    expect(result.shopifyCustomerId).toBe("99");
+    expect(result.embeddedCustomer).not.toBe(null);
+    expect(result.embeddedCustomer?.fullName).toBe("Bruno Díaz");
+    expect(result.embeddedCustomer?.email).toBe("bruno@example.com");
+    expect(result.embeddedCustomer?.phone).toBe("+5215566778899");
+    expect(result.embeddedCustomer?.address).toMatchObject({ city: "GDL" });
+    expect(result.embeddedCustomer?.updatedAt).toBe("2026-05-10T12:00:00Z");
+  });
+
+  it("embeddedCustomer = null si el order es guest checkout (sin customer)", () => {
+    const result = mapOrderWebhookToNormalized({
+      id: 1,
+      line_items: [],
+      total_price: "0",
+    });
+    expect(result.shopifyCustomerId).toBe(null);
+    expect(result.embeddedCustomer).toBe(null);
+  });
+
+  it("embeddedCustomer parcial cuando solo viene first_name (sin email/phone)", () => {
+    const result = mapOrderWebhookToNormalized({
+      id: 1,
+      customer: { id: 42, first_name: "Solo Nombre" },
+      line_items: [],
+      total_price: "0",
+    });
+    expect(result.shopifyCustomerId).toBe("42");
+    expect(result.embeddedCustomer?.fullName).toBe("Solo Nombre");
+    expect(result.embeddedCustomer?.email).toBe(null);
+    expect(result.embeddedCustomer?.phone).toBe(null);
   });
 });

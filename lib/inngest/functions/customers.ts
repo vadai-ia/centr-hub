@@ -121,6 +121,83 @@ async function persistMissingPhoneFlag(
 }
 
 /**
+ * Hidrata o crea un contacto local a partir de un `NormalizedCustomer`
+ * embebido en otro payload de Shopify (orders/*, draft_orders/*).
+ *
+ * Antes de este helper (fix M3 — ver ERRORES.md), los workers de
+ * order/draft_order creaban stubs vacíos cuando el customer no
+ * existía localmente, descartando los datos que SÍ venían en el
+ * payload. Resultado: ~74 de 127 contactos Shopify quedaron sin
+ * nombre/email/phone. El helper reusa el mismo flujo de
+ * `customersCreate` (identity match → create-or-link → LWW por
+ * campo) para que el contacto nazca hidratado.
+ *
+ * Diferencias intencionales con `customersCreate`:
+ *   - NO ejecuta `applyAssignmentFromTags` — el order/draft_order
+ *     tiene sus propias tags atributivas a nivel entidad; las
+ *     tags del customer se preservan en `contacts.shopify_tags`
+ *     vía LWW. La primera vez que llegue un `customers/*` webhook
+ *     real, ese flujo aplicará la asignación.
+ *   - NO invoca `recordWhaapySyncIntent` — la asimetría v5.1
+ *     dispara la creación en Whaapy desde el customer flow, no
+ *     desde el order/draft_order flow.
+ */
+export async function hydrateContactFromEmbeddedShopifyCustomer(
+  normalized: NormalizedCustomer,
+  effectiveUpdatedAt: string,
+): Promise<ContactRow> {
+  const match = await matchContactIdentity({
+    source: "shopify",
+    shopifyCustomerId: normalized.shopifyCustomerId,
+    phone: normalized.phone,
+    email: normalized.email,
+  });
+
+  let contact: ContactRow;
+  let isInitialMatch = false;
+
+  if (match.match) {
+    contact = match.match;
+    const patch: Record<string, unknown> = {};
+    if (!contact.shopify_customer_id) {
+      patch.shopify_customer_id = normalized.shopifyCustomerId;
+      isInitialMatch = true;
+    }
+    if (Object.keys(patch).length > 0) {
+      contact = await updateContact(contact.id, patch);
+    }
+  } else if (
+    match.recommendation === "create_new" ||
+    match.recommendation === "conflict_create_new"
+  ) {
+    contact = await createContact(
+      buildContactInsert(normalized, match, effectiveUpdatedAt),
+    );
+  } else {
+    const found = await findContactByShopifyCustomerId(normalized.shopifyCustomerId);
+    if (!found) {
+      throw new Error(
+        "hydrateContactFromEmbeddedShopifyCustomer: match recomendó update pero contact ausente",
+      );
+    }
+    contact = found;
+  }
+
+  const proposals = buildFieldProposals(normalized, "shopify", effectiveUpdatedAt);
+  const reconciled = reconcileContactFields(contact, proposals, { isInitialMatch });
+
+  const finalPatch: Record<string, unknown> = {
+    ...reconciled.patch,
+    field_metadata: reconciled.nextFieldMetadata,
+    last_modified_at: effectiveUpdatedAt,
+    last_modified_source: "shopify",
+  };
+  const updated = await updateContact(contact.id, finalPatch);
+  await persistMissingPhoneFlag(updated.id, match.normalizedPhone);
+  return updated;
+}
+
+/**
  * Exportada para tests sintéticos. El caller dentro del worker es
  * el único uso de producción — se llama solo si la guardia de
  * asimetría v5.1 lo permite (ver llamadas en customersCreate y

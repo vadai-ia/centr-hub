@@ -113,6 +113,66 @@ export function mapCustomerWebhookToNormalized(
 }
 
 // ============================================================
+// Customer embebido en payloads de Order / Draft Order
+// ============================================================
+//
+// Shopify incluye el OBJETO completo del customer (no solo el id)
+// dentro de los webhooks de orders/* y draft_orders/*. Antes del fix
+// (M3 post-entrega) los schemas tipaban únicamente `customer.id`,
+// descartando `first_name`, `last_name`, `email`, `phone`,
+// `default_address`, etc. Resultado: cuando un order/draft_order
+// llegaba antes que un customers/create, el contacto local nacía
+// como stub vacío y nunca se rellenaba (Shopify no reenvía
+// customers/create retroactivo). Ver ERRORES.md.
+
+const embeddedCustomerSchema = z
+  .object({
+    id: z.union([z.number(), z.string()]).nullable().optional(),
+    first_name: z.string().nullable().optional(),
+    last_name: z.string().nullable().optional(),
+    email: z.string().nullable().optional(),
+    phone: z.string().nullable().optional(),
+    tags: z.union([z.string(), z.array(z.string())]).nullable().optional(),
+    state: z.string().nullable().optional(),
+    note: z.string().nullable().optional(),
+    default_address: customerAddressSchema.nullable().optional(),
+    updated_at: z.string().nullable().optional(),
+    created_at: z.string().nullable().optional(),
+  })
+  .passthrough();
+
+/**
+ * Convierte el customer embebido (puede venir null, undefined, o sin
+ * `id`) a `NormalizedCustomer | null`. Devuelve null si no hay id
+ * extraíble — sin id no podemos enlazar a la entidad Shopify, así
+ * que se descarta cualquier hidratación.
+ */
+function mapEmbeddedCustomer(raw: unknown): NormalizedCustomer | null {
+  if (raw === null || raw === undefined) return null;
+  const parsed = embeddedCustomerSchema.safeParse(raw);
+  if (!parsed.success) return null;
+  const data = parsed.data;
+  const id = shopifyIdToString(data.id ?? null);
+  if (!id) return null;
+  const fullName = [data.first_name, data.last_name]
+    .filter((s) => s && s.trim().length > 0)
+    .join(" ")
+    .trim();
+  return {
+    shopifyCustomerId: id,
+    fullName: fullName.length > 0 ? fullName : null,
+    email: data.email ?? null,
+    phone: data.phone ?? null,
+    tags: shopifyTagsCsvToArray(data.tags ?? null),
+    state: data.state ?? null,
+    note: data.note ?? null,
+    address: data.default_address ?? null,
+    updatedAt: data.updated_at ?? null,
+    createdAt: data.created_at ?? null,
+  };
+}
+
+// ============================================================
 // Line items (compartido entre Draft Order y Order)
 // ============================================================
 
@@ -241,13 +301,7 @@ export const shopifyDraftOrderWebhookSchema = z
     name: z.string().nullable().optional(),
     note: z.string().nullable().optional(),
     tags: z.union([z.string(), z.array(z.string())]).nullable().optional(),
-    customer: z
-      .object({
-        id: z.union([z.number(), z.string()]).nullable().optional(),
-      })
-      .passthrough()
-      .nullable()
-      .optional(),
+    customer: embeddedCustomerSchema.nullable().optional(),
     line_items: z.array(z.unknown()).default([]),
     total_price: moneyLikeSchema,
     subtotal_price: moneyLikeSchema,
@@ -269,6 +323,14 @@ export interface NormalizedDraftOrder {
   note: string | null;
   tags: string[];
   shopifyCustomerId: string | null;
+  /**
+   * Datos del customer extraídos del payload de la Draft Order
+   * (Shopify incluye el objeto completo, no solo el id). Permite
+   * que el worker hidrate el contacto local sin esperar a un
+   * customers/* webhook. `null` si el payload no trae customer o
+   * trae uno sin `id`.
+   */
+  embeddedCustomer: NormalizedCustomer | null;
   lineItems: NormalizedLineItem[];
   totalAmount: string;
   subtotalAmount: string;
@@ -285,12 +347,14 @@ export function mapDraftOrderWebhookToNormalized(raw: unknown): NormalizedDraftO
   const data = shopifyDraftOrderWebhookSchema.parse(raw);
   const id = shopifyIdToString(data.id);
   if (!id) throw new Error("mapDraftOrderWebhook: id ausente");
+  const embeddedCustomer = mapEmbeddedCustomer(data.customer ?? null);
   return {
     shopifyDraftOrderId: id,
     displayReference: data.name ?? null,
     note: data.note ?? null,
     tags: shopifyTagsCsvToArray(data.tags ?? null),
-    shopifyCustomerId: shopifyIdToString(data.customer?.id ?? null),
+    shopifyCustomerId: embeddedCustomer?.shopifyCustomerId ?? null,
+    embeddedCustomer,
     lineItems: data.line_items.map(mapDraftLineItem),
     totalAmount: moneyToString(data.total_price),
     subtotalAmount: moneyToString(data.subtotal_price),
@@ -314,13 +378,7 @@ export const shopifyOrderWebhookSchema = z
     name: z.string().nullable().optional(),
     note: z.string().nullable().optional(),
     tags: z.union([z.string(), z.array(z.string())]).nullable().optional(),
-    customer: z
-      .object({
-        id: z.union([z.number(), z.string()]).nullable().optional(),
-      })
-      .passthrough()
-      .nullable()
-      .optional(),
+    customer: embeddedCustomerSchema.nullable().optional(),
     line_items: z.array(z.unknown()).default([]),
     total_price: moneyLikeSchema,
     subtotal_price: moneyLikeSchema,
@@ -353,6 +411,14 @@ export interface NormalizedOrder {
   shopifyName: string | null;
   tags: string[];
   shopifyCustomerId: string | null;
+  /**
+   * Datos del customer extraídos del payload del Order (Shopify
+   * incluye el objeto completo, no solo el id). Permite que el
+   * worker hidrate el contacto local sin esperar a un customers/*
+   * webhook. `null` si el payload no trae customer o trae uno sin
+   * `id`.
+   */
+  embeddedCustomer: NormalizedCustomer | null;
   shopifyDraftOrderId: string | null;
   lineItems: NormalizedLineItem[];
   totalAmount: string;
@@ -377,11 +443,13 @@ export function mapOrderWebhookToNormalized(raw: unknown): NormalizedOrder {
   if (!id) throw new Error("mapOrderWebhook: id ausente");
   const shipping =
     data.total_shipping_price_set?.shop_money?.amount ?? null;
+  const embeddedCustomer = mapEmbeddedCustomer(data.customer ?? null);
   return {
     shopifyOrderId: id,
     shopifyName: data.name ?? null,
     tags: shopifyTagsCsvToArray(data.tags ?? null),
-    shopifyCustomerId: shopifyIdToString(data.customer?.id ?? null),
+    shopifyCustomerId: embeddedCustomer?.shopifyCustomerId ?? null,
+    embeddedCustomer,
     shopifyDraftOrderId: shopifyIdToString(data.draft_order_id ?? null),
     lineItems: data.line_items.map(mapOrderLineItem),
     totalAmount: moneyToString(data.total_price),
@@ -460,6 +528,9 @@ export function mapOrderGraphqlToNormalized(node: unknown): NormalizedOrder {
       ? (n.tags as string[]).map((t) => t.trim()).filter((t) => t.length > 0)
       : shopifyTagsCsvToArray((n.tags as string | null) ?? null),
     shopifyCustomerId: customer ? shopifyIdToString(customer.id) : null,
+    // GraphQL backfill (M11) hidrata el customer via GET /customers/{id}.json
+    // por separado, así que aquí dejamos null para no asumir shape camelCase.
+    embeddedCustomer: null,
     shopifyDraftOrderId: null,
     lineItems: lineItemsNodes.map((raw) => {
       const li = raw as Record<string, unknown>;

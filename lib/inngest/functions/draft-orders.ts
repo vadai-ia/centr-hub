@@ -11,6 +11,7 @@ import {
 import { parseShopifyTags } from "@/lib/services/tag-parser";
 import { matchContactIdentity } from "@/lib/services/identity-matching";
 import { shouldApplyRecordUpdate } from "@/lib/services/last-write-wins";
+import { hydrateContactFromEmbeddedShopifyCustomer } from "@/lib/inngest/functions/customers";
 import {
   createContact,
   findContactByShopifyCustomerId,
@@ -68,7 +69,24 @@ async function resolveOrCreateContactForDraftOrder(
   const existing = await findContactByShopifyCustomerId(normalized.shopifyCustomerId);
   if (existing) return existing;
 
-  // Si llega DO antes que customers/create, crear shell mínimo.
+  // Fix M3 (ver ERRORES.md): el payload de draft_orders/* trae el
+  // OBJETO customer completo. Si el DO llega antes que customers/*,
+  // hidratamos el contacto con los datos del payload en vez de un
+  // stub vacío. El helper aplica identity match por phone/email +
+  // LWW por campo (mismo flujo que customers/create).
+  if (normalized.embeddedCustomer) {
+    const customerUpdatedAt =
+      normalized.embeddedCustomer.updatedAt
+      ?? normalized.embeddedCustomer.createdAt
+      ?? effectiveUpdatedAt;
+    return await hydrateContactFromEmbeddedShopifyCustomer(
+      normalized.embeddedCustomer,
+      customerUpdatedAt,
+    );
+  }
+
+  // Fallback defensivo: customer.id presente pero objeto sin datos.
+  // Same path antiguo: identity match por id + stub vacío.
   const match = await matchContactIdentity({
     source: "shopify",
     shopifyCustomerId: normalized.shopifyCustomerId,
