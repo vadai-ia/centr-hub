@@ -450,3 +450,63 @@ Cada entrada documenta UN bug o lección con la siguiente estructura:
   
   La opción (1) es estándar y reversible (si algo sale mal, el SQL deja la columna `phone` igual; solo borra la entrada de meta, que es lo que estaba bloqueando). Pendiente de autorización del operador para ejecutarla. El mismo razonamiento aplica a `email` y `full_name` si surgen casos sellados — el SQL puede extenderse para limpiar múltiples keys del meta en una sola corrida.
 
+### `normalizePhone` perdía teléfonos en silencio bajo tsx por bug de bundling de `libphonenumber-js`
+
+- **Milestone donde se detectó:** M3 (post-fix anti-sealing + cleanup de los 104 contactos sellados, junio 2026).
+- **Síntoma:** después de aplicar el fix anti-sealing y limpiar `field_metadata.phone` de los 104 contactos sellados, una re-corrida de `npm run shopify:rehydrate-empty-contacts` reportó "enriched" para todos los contactos PERO la columna `phone` quedó `NULL` para TODOS. El audit log decía `had_phone: true` (Shopify SÍ devolvía teléfono válido — verificado con `inspect-get-customer` para Sergio: `+528115708848` top-level + `+52 81 1570 8848` en address). Tests sintéticos de `normalizePhone` bajo Vitest pasaban perfecto (`normalizePhone("5512345678") → "+525512345678"`). El bug solo se manifestaba bajo el runtime real del script.
+- **Causa raíz:** combinación de tres factores que se enmascaraban entre sí:
+  1. **`libphonenumber-js@1.11.20` es un paquete "dual" con `"type": "module"` en `package.json` Y exports CJS** (`"exports": {".": { "import": "./index.js", "require": "./index.cjs" }}`). El bundle CJS (`index.cjs` → `min/index.cjs.js`) carga la metadata vía `var metadata = require('../metadata.min.json')` al evaluarse el módulo, y la pasa como tercer argumento a cada función mediante un wrapper `call(func, args)`.
+  2. **`tsx@4.19.2` bajo Node 24 tiene un bug en el loader CJS/ESM** para JSON requeridos desde paquetes con `"type": "module"`. El `require('../metadata.min.json')` devuelve `undefined` en lugar del objeto JSON parseado. Cuando el wrapper push-ea `metadata = undefined` y la librería interna hace `metadata.countries.hasOwnProperty(country)`, explota con `TypeError: Cannot read properties of undefined (reading 'hasOwnProperty')` en `source/metadata.js:510:28`. Reproducible con `npx tsx -e 'require("libphonenumber-js").parsePhoneNumberFromString("+528115708848","MX")'`. Plain `node -e ...` y Vitest cargan el mismo bundle sin problemas — el bug es exclusivo de tsx.
+  3. **`normalizePhone` tenía un `try { ... } catch { return null; }` que se tragaba TODA excepción.** El TypeError inesperado se convertía en `null` silenciosamente. El proposal del reconciler quedaba `{ value: null, ... }`, la rama anti-sealing del fix previo lo descartaba como `noop_both_empty`, y el teléfono nunca llegaba a la BD. Indistinguible de "Shopify no devolvió teléfono" o "número genuinamente inválido" — exactamente la clase de fallo silencioso que el catch debía prevenir.
+
+  **Por qué los tests no lo detectaron:** Vitest usa Vite (esbuild) con un loader diferente. Vitest cargaba `libphonenumber-js` y la metadata correctamente, y los 8 tests de `normalizePhone` pasaban siempre. El código productivo (webhooks bajo Inngest + Next.js) tampoco lo sufría — Next.js usa webpack/SWC que también carga la metadata bien. Solo los scripts `tsx` (operación manual del operador) estaban rotos. Los tests cubrían dos runtimes pero NO el tercero donde vivían los scripts.
+
+- **Workaround / fix:**
+  1. **Bypass del auto-loader de metadata** — `lib/services/identity-matching.ts` reemplaza los imports:
+     ```ts
+     // Antes (top-level — usa require dinámico de metadata):
+     import { parsePhoneNumberFromString, type CountryCode } from "libphonenumber-js";
+     // Después (core + import explícito del JSON):
+     import { parsePhoneNumberFromString, type CountryCode, type MetadataJson } from "libphonenumber-js/core";
+     import metadata from "libphonenumber-js/metadata.min.json";
+     ```
+     `parsePhoneNumberFromString` ahora se invoca con `(trimmed, defaultCountry, metadata as MetadataJson)`. Los tres runtimes (Next.js, Vitest, tsx) cargan el JSON vía import ESM estándar — no hay `require` dinámico, no hay interop bug.
+  2. **`normalizePhone` distingue invalid-number-silencioso de excepción-inesperada-ruidosa:**
+     ```ts
+     let phone: ReturnType<typeof parsePhoneNumberFromString>;
+     try {
+       phone = parsePhoneNumberFromString(trimmed, defaultCountry, metadata);
+     } catch (err) {
+       // parsePhoneNumberFromString NO debería tirar — devuelve undefined
+       // para inputs inparseables. Si llegamos acá es bug del bundler,
+       // metadata corrupta, o regresión de la librería. NO se debe tragar.
+       console.error("normalizePhone: excepción inesperada de parsePhoneNumberFromString", {
+         rawSample: trimmed.slice(0, 32),
+         defaultCountry,
+         error: (err as Error)?.message ?? String(err),
+       });
+       throw err;
+     }
+     if (!phone) return null;          // input inparseable (silencioso, correcto)
+     if (!phone.isValid()) return null; // número inválido (silencioso, correcto)
+     return phone.number;               // E.164 válido
+     ```
+     Bajo el fix anterior + cualquier futura regresión: las excepciones GRITAN por stderr y se propagan al caller. Bajo Inngest, eso significa run en DLQ visible. Bajo el script, crash con stack trace. Nunca más null silencioso por exception runtime.
+  3. **Tests sintéticos nuevos** — `tests/identity-matching-normalization.test.ts`:
+     - `MX 10 dígitos válido (regresión: bug de loader tsx perdía teléfonos en silencio)` con el número exacto de Sergio (`+528115708848` y `+52 81 1570 8848`).
+     - `legacy MX mobile prefix '1' es inválido — devuelve null silencioso` con `+5218115708848`. Verifica que un input genuinamente inválido sigue cayendo en la rama silenciosa (`isValid()=false` → null), no en la ruidosa (exception → log + throw). Esa distinción es el corazón del fix.
+  4. **Smoke test bajo tsx (fuera de Vitest)** — confirmado 10/10 verde con un script one-shot `.tmp-verify-tsx.ts` corrido vía `npx tsx --tsconfig scripts/tsconfig.json`. Cubre: Sergio en ambos formatos, MX 10-dígitos de varias LADAs (CDMX 55, GDL 33), formatos con paréntesis/guiones, empty/null inputs, inválidos (`abc`, `123`), legacy `1` prefix. Es el test crítico porque Vitest no exhibe el bug. Archivo borrado después de validar (no es código permanente).
+
+- **Lección (los tests verdes bajo un runtime NO garantizan que el código funcione bajo otro runtime, especialmente con paquetes dual-ESM/CJS):** este bug vivió oculto porque el código pasaba por dos runtimes (Next.js + Vitest) que cargaban `libphonenumber-js` correctamente. El runtime donde sí fallaba (tsx) no tenía cobertura sintética. **Patrón anti-bug:** para código que se ejecuta en MÚLTIPLES runtimes (producción + tests + scripts de operaciones), agregar al menos un smoke test que ejercite el camino crítico bajo el runtime de scripts. Para Centr Hub esto significa: cualquier función importada por un script en `scripts/` debe tener al menos un caso ejercitado bajo `tsx` antes de declarar el fix completo. El smoke test no necesita ser parte de la suite — basta con un `npx tsx -e "..."` o un `.tmp-*.ts` corrido y borrado durante la validación. Pero debe correrse explícitamente, no inferirse a partir de Vitest.
+
+- **Lección (catch silencioso es un anti-patrón de seguridad/debugging — el catch DEBE distinguir esperado de inesperado):** el `try { ... } catch { return null; }` original era idiomático y se sentía defensivo, pero convertía CUALQUIER error (incluyendo TypeErrors de bundling, OutOfMemory, ReferenceError) en `null` silencioso. La distinción correcta es: si la función llamada está documentada para NO lanzar excepciones en condiciones de uso normal (como `parsePhoneNumberFromString` que devuelve `undefined` para inputs inparseables), entonces un `catch` significa "algo del runtime está mal, no del input". Esos catches deben loguear + propagar, NO tragar. **Patrón:** cuando una función documenta su forma de comunicar fallos esperados (return null, return undefined, return Result type), el try/catch debe asumir que solo atrapará lo INESPERADO — y lo inesperado merece visibilidad, no silencio. El `try/catch` se reserva para auténticos errores de runtime que no son parte del contrato.
+
+- **Lección (paquetes con `"type": "module"` y exports CJS son una fuente recurrente de bugs de loader — preferir subpaths explícitos o imports parciales):** el bundle top-level de `libphonenumber-js` confía en un require dinámico de JSON que distintos loaders manejan distinto (Node CJS clásico funciona, Vite funciona, Next.js webpack funciona, tsx 4.19.x rompe). Cuando una librería ofrece subpaths como `/core` que evitan el auto-loader y permiten import explícito del recurso (en este caso `metadata.min.json`), preferir ese path. Es más verboso pero elimina la dependencia del comportamiento del loader. **Patrón:** ante cualquier paquete con `"type": "module"` que también ofrezca exports CJS y carga recursos no-JS internamente (JSON, .wasm, .node), investigar si tiene un subpath "core" o "without-metadata" antes de usar el top-level. El extra verbosity se paga una vez al integrar; el debugging de un bug de loader se paga muchas veces.
+
+- **Verificación end-to-end (NO se re-corre el script todavía, queda a criterio del operador):** el fix se validó con tres capas:
+  1. Vitest suite completa: 250/250 verdes (incluyendo los 2 tests nuevos).
+  2. `npm run build`: ✓ Next.js production build limpio.
+  3. Smoke test bajo `tsx` con el número exacto de Sergio: ✓ devuelve `+528115708848`.
+  
+  El re-run de `npm run shopify:rehydrate-empty-contacts -- --org-slug centr` queda pendiente de autorización del operador. Para los 104 contactos cuya metadata ya fue limpiada (SQL `field_metadata - 'phone'`), la próxima corrida del script ahora SÍ va a poblar el `phone` correctamente: `pickCustomerPhone` lee Shopify, `normalizePhone` lo procesa sin caer en el catch silencioso, la propuesta llega no-vacía al reconciler, y el branch `first_value` lo aplica.
+

@@ -41,4 +41,22 @@ describe("normalizePhone (default MX)", () => {
     // no valida ese number — toleramos pero esperamos string si valida.
     if (result !== null) expect(result.startsWith("+")).toBe(true);
   });
+
+  it("MX 10 dígitos válido (regresión: bug de loader tsx perdía teléfonos en silencio)", () => {
+    // Caso Sergio Guerra (customer 9759438635284). El bundle top-level
+    // de libphonenumber-js tira TypeError bajo tsx por bug de
+    // metadata loading. El fix usa /core + import explícito del JSON.
+    // Este test ya pasaba bajo Vitest (Vite carga el top-level bien),
+    // pero ahora también pasa bajo tsx (smoke test fuera de Vitest).
+    expect(normalizePhone("+528115708848")).toBe("+528115708848");
+    expect(normalizePhone("+52 81 1570 8848")).toBe("+528115708848");
+  });
+
+  it("legacy MX mobile prefix '1' es inválido — devuelve null silencioso", () => {
+    // Mexico unificó a 10 dígitos en 2019; el prefijo `1` legacy
+    // (13 dígitos: +52 1 XX XXXX XXXX) ya no valida. Debe caer al
+    // path silencioso de null, NO al path ruidoso de exception.
+    expect(normalizePhone("+5218115708848")).toBe(null);
+    expect(normalizePhone("+52 1 81 1570 8848")).toBe(null);
+  });
 });

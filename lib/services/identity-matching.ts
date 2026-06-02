@@ -1,5 +1,24 @@
 import "server-only";
-import { parsePhoneNumberFromString, type CountryCode } from "libphonenumber-js";
+// IMPORTANTE: importamos de `libphonenumber-js/core` con metadata
+// pasada explícita, NO del top-level `libphonenumber-js`. Razón:
+// el bundle top-level usa un require dinámico de `metadata.min.json`
+// que tsx 4.19.x rompe silenciosamente bajo Node 24 (dual ESM/CJS
+// interop bug — el require devuelve undefined). Productive code en
+// Next.js y Vitest cargan el top-level sin problema, pero el script
+// de operaciones (`scripts/shopify/rehydrate-empty-contacts.ts`)
+// corre bajo tsx y todo `parsePhoneNumberFromString` tiraba un
+// TypeError silencioso. Ver ERRORES.md "normalizePhone perdía
+// teléfonos en silencio bajo tsx por bug de bundling…".
+//
+// Usar `/core` + import directo del JSON evita el require dinámico
+// — los tres runtimes (Next.js, Vitest, tsx) ahora cargan metadata
+// del mismo modo y `parsePhoneNumberFromString` funciona en todos.
+import {
+  parsePhoneNumberFromString,
+  type CountryCode,
+  type MetadataJson,
+} from "libphonenumber-js/core";
+import metadata from "libphonenumber-js/metadata.min.json";
 import { getTenantScopedClient } from "@/lib/db/client";
 import { requireTenantContext } from "@/lib/tenant/context";
 import { recordAuditEvent } from "@/lib/db/operational";
@@ -51,14 +70,46 @@ export function normalizePhone(
   if (!raw) return null;
   const trimmed = raw.trim();
   if (!trimmed) return null;
+  let phone: ReturnType<typeof parsePhoneNumberFromString>;
   try {
-    const phone = parsePhoneNumberFromString(trimmed, defaultCountry);
-    if (!phone) return null;
-    if (!phone.isValid()) return null;
-    return phone.number; // E.164
-  } catch {
-    return null;
+    phone = parsePhoneNumberFromString(
+      trimmed,
+      defaultCountry,
+      metadata as unknown as MetadataJson,
+    );
+  } catch (err) {
+    // `parsePhoneNumberFromString` está documentado para NO tirar
+    // excepciones (devuelve `undefined` para inputs inparseables y
+    // un objeto con `isValid()=false` para números inválidos). Si
+    // llegamos acá es una excepción inesperada del runtime — bug
+    // del bundler, metadata corrupta, o regresión de la librería.
+    // NO se debe tragar: gritamos por stderr (Inngest/Vercel logs
+    // lo capturan) y re-lanzamos para que el caller falle en lugar
+    // de persistir `null` en silencio.
+    //
+    // El silencio era exactamente el modo de falla del bug previo
+    // bajo tsx (`Cannot read properties of undefined…`). Toda
+    // llamada devolvía null, la rama empty-on-empty del reconciler
+    // descartaba el proposal, y los teléfonos se perdían sin trace.
+    // Ver ERRORES.md "normalizePhone perdía teléfonos en silencio
+    // bajo tsx".
+    // eslint-disable-next-line no-console
+    console.error(
+      "normalizePhone: excepción inesperada de parsePhoneNumberFromString",
+      {
+        rawSample: trimmed.slice(0, 32),
+        defaultCountry,
+        error: (err as Error)?.message ?? String(err),
+      },
+    );
+    throw err;
   }
+  // Inputs inparseables o números inválidos → null silencioso
+  // (comportamiento documentado: el caller decide qué hacer con
+  // un teléfono no normalizable).
+  if (!phone) return null;
+  if (!phone.isValid()) return null;
+  return phone.number; // E.164
 }
 
 export function normalizeEmail(email: string | null | undefined): string | null {
