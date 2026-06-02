@@ -149,6 +149,7 @@ export interface KanbanContactEmbed {
   phone: string | null;
   email: string | null;
   shopify_customer_id: string | null;
+  whaapy_contact_id: string | null;
   shopify_tags: string[];
 }
 
@@ -201,6 +202,7 @@ const KANBAN_OPPORTUNITY_SELECT = `
     phone,
     email,
     shopify_customer_id,
+    whaapy_contact_id,
     shopify_tags
   )
 `;
@@ -217,6 +219,11 @@ const KANBAN_OPPORTUNITY_SELECT = `
  *  - Para admin con filtro "Sin asignar" pasar `assignedAdvisorId = null`.
  *  - Para admin sin filtro pasar `assignedAdvisorId = undefined`.
  *
+ * Filtros adicionales (lote de polish M6):
+ *  - `dateFrom`/`dateTo` filtran por `last_modified_at` (rango inclusivo).
+ *  - `query` es búsqueda parcial sobre display_reference, contact name,
+ *    contact phone y contact email (case-insensitive).
+ *
  * Orden estable: `(last_modified_at DESC, id ASC)` para que la
  * paginación por offset sea determinista incluso ante ties de
  * timestamp (raro pero posible con auto-creación C2 en bulk).
@@ -227,6 +234,9 @@ export async function listKanbanOpportunities(opts: {
   assignedAdvisorId?: UUID | null;
   limit: number;
   offset?: number;
+  dateFrom?: string;
+  dateTo?: string;
+  query?: string;
 }): Promise<KanbanOpportunity[]> {
   const { supabase, organizationId } = getTenantScopedClient();
   let query = supabase
@@ -244,6 +254,16 @@ export async function listKanbanOpportunities(opts: {
       query = query.eq("assigned_advisor_id", opts.assignedAdvisorId);
     }
   }
+  if (opts.dateFrom) query = query.gte("last_modified_at", opts.dateFrom);
+  if (opts.dateTo) query = query.lte("last_modified_at", opts.dateTo);
+  if (opts.query && opts.query.trim().length > 0) {
+    const sanitized = opts.query.trim().replace(/[,.()*%\\]/g, " ").slice(0, 80);
+    if (sanitized.length > 0) {
+      query = query.or(
+        `display_reference.ilike.%${sanitized}%,contact.full_name.ilike.%${sanitized}%,contact.phone.ilike.%${sanitized}%,contact.email.ilike.%${sanitized}%`,
+      );
+    }
+  }
 
   query = query
     .order("last_modified_at", { ascending: false })
@@ -255,6 +275,57 @@ export async function listKanbanOpportunities(opts: {
   const { data, error } = await query;
   if (error) throw error;
   return (data ?? []) as unknown as KanbanOpportunity[];
+}
+
+/**
+ * Cuenta exacta de opps activas por etapa para un funnel. Misma
+ * semántica que `listKanbanOpportunities` (filtros opcionales)
+ * pero retorna sólo conteos — usado por el kanban para mostrar el
+ * número real en cada columna (no "50+").
+ */
+export async function countKanbanOpportunitiesByStage(opts: {
+  funnel: Funnel;
+  assignedAdvisorId?: UUID | null;
+  /** ISO date inclusive. Filtra por last_modified_at >= dateFrom. */
+  dateFrom?: string;
+  /** ISO date inclusive. Filtra por last_modified_at <= dateTo. */
+  dateTo?: string;
+  /** Texto libre — buscar en display_reference y contact name/phone. */
+  query?: string;
+}): Promise<Record<UUID, number>> {
+  const { supabase, organizationId } = getTenantScopedClient();
+  let query = supabase
+    .from("opportunities")
+    .select("stage_id, contact:contacts!inner(full_name, phone, email)", { count: "exact" })
+    .eq("organization_id", organizationId)
+    .eq("funnel", opts.funnel)
+    .is("cancelled_at", null);
+
+  if (opts.assignedAdvisorId !== undefined) {
+    if (opts.assignedAdvisorId === null) {
+      query = query.is("assigned_advisor_id", null);
+    } else {
+      query = query.eq("assigned_advisor_id", opts.assignedAdvisorId);
+    }
+  }
+  if (opts.dateFrom) query = query.gte("last_modified_at", opts.dateFrom);
+  if (opts.dateTo) query = query.lte("last_modified_at", opts.dateTo);
+  if (opts.query && opts.query.trim().length > 0) {
+    const sanitized = opts.query.trim().replace(/[,.()*%\\]/g, " ").slice(0, 80);
+    if (sanitized.length > 0) {
+      query = query.or(
+        `display_reference.ilike.%${sanitized}%,contact.full_name.ilike.%${sanitized}%,contact.phone.ilike.%${sanitized}%,contact.email.ilike.%${sanitized}%`,
+      );
+    }
+  }
+
+  const { data, error } = await query;
+  if (error) throw error;
+  const counts: Record<UUID, number> = {};
+  for (const row of (data ?? []) as Array<{ stage_id: UUID }>) {
+    counts[row.stage_id] = (counts[row.stage_id] ?? 0) + 1;
+  }
+  return counts;
 }
 
 /**

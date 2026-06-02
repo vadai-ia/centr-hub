@@ -24,6 +24,11 @@ export interface PipelineInitialState {
   stages: PipelineStageRow[];
   cardsByStage: Record<UUID, KanbanOpportunity[]>;
   hasMoreByStage: Record<UUID, boolean>;
+  /** Conteo exacto por etapa (lote polish M6). Reemplaza al "50+"
+   *  derivado de cards.length + hasMore. */
+  countsByStage: Record<UUID, number>;
+  /** Conteo de tareas pendientes por opportunity_id (lote polish M6). */
+  pendingTasksByOpp: Record<UUID, number>;
   effectiveAdvisorId: UUID | null | undefined;
   advisors: AdvisorOption[];
   lossReasons: LossReasonOption[];

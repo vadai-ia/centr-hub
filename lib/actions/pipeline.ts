@@ -4,10 +4,12 @@ import { z } from "zod";
 import { getSession } from "@/lib/auth/session";
 import { withTenantContext } from "@/lib/tenant/context";
 import {
+  countKanbanOpportunitiesByStage,
   getKanbanOpportunityById,
   listKanbanOpportunities,
   type KanbanOpportunity,
 } from "@/lib/db/opportunities";
+import { listPendingTaskCountsByOpportunity } from "@/lib/db/operational";
 import { listLossReasons, listPipelineStages } from "@/lib/db/pipeline";
 import { getMembership, listActiveRealVendors } from "@/lib/db/users";
 import {
@@ -117,6 +119,9 @@ const loadPageSchema = z.object({
    * - UUID → vendedor (sus propias) o admin filtrando por advisor
    */
   assignedAdvisorId: z.union([z.string().uuid(), z.null()]).optional(),
+  dateFrom: z.string().optional(),
+  dateTo: z.string().optional(),
+  query: z.string().max(200).optional(),
 });
 
 /**
@@ -171,6 +176,9 @@ export async function loadKanbanPageAction(
       funnel: input.funnel,
       stageId: input.stageId,
       assignedAdvisorId: effectiveAdvisorId,
+      dateFrom: input.dateFrom,
+      dateTo: input.dateTo,
+      query: input.query,
       limit: PIPELINE_PAGE_SIZE + 1,
       offset: input.page * PIPELINE_PAGE_SIZE,
     });
@@ -251,6 +259,16 @@ export async function setUnassignedFilterPreference(
   });
 }
 
+export interface PipelineFilters {
+  /** ISO date string (yyyy-mm-dd o full ISO) inclusivo. */
+  dateFrom?: string;
+  dateTo?: string;
+  /** Filtra por asesor (UUID de membership). Solo admin/superadmin. */
+  advisorId?: UUID;
+  /** Búsqueda libre sobre display_reference y contact name/phone. */
+  query?: string;
+}
+
 /**
  * Server-side helper: arma el snapshot inicial del pipeline para
  * pintar en el primer render del Server Component. Carga (en
@@ -260,6 +278,7 @@ export async function setUnassignedFilterPreference(
 export async function loadInitialPipelineState(opts: {
   funnel: Funnel;
   unassignedFilter: boolean;
+  filters?: PipelineFilters;
 }): Promise<{ ok: true; state: PipelineInitialState } | { ok: false; reason: string }> {
   const session = await getSession();
   if (session.status !== "ok") {
@@ -278,13 +297,31 @@ export async function loadInitialPipelineState(opts: {
       }
       effectiveAdvisorId = membership.id;
     } else {
-      effectiveAdvisorId = opts.unassignedFilter ? null : undefined;
+      // Filtro admin: si pasa advisorId explícito, prevalece sobre unassigned.
+      if (opts.filters?.advisorId) {
+        effectiveAdvisorId = opts.filters.advisorId;
+      } else if (opts.unassignedFilter) {
+        effectiveAdvisorId = null;
+      } else {
+        effectiveAdvisorId = undefined;
+      }
     }
 
-    const [allStages, vendors, lossReasons] = await Promise.all([
+    const filterDateFrom = opts.filters?.dateFrom;
+    const filterDateTo = opts.filters?.dateTo;
+    const filterQuery = opts.filters?.query;
+
+    const [allStages, vendors, lossReasons, countsByStage] = await Promise.all([
       listPipelineStages(opts.funnel),
       listActiveRealVendors(orgId),
       listLossReasons({ activeOnly: true }),
+      countKanbanOpportunitiesByStage({
+        funnel: opts.funnel,
+        assignedAdvisorId: effectiveAdvisorId,
+        dateFrom: filterDateFrom,
+        dateTo: filterDateTo,
+        query: filterQuery,
+      }),
     ]);
     const activeStages = allStages.filter((s) => s.is_active);
 
@@ -294,6 +331,9 @@ export async function loadInitialPipelineState(opts: {
           funnel: opts.funnel,
           stageId: stage.id,
           assignedAdvisorId: effectiveAdvisorId,
+          dateFrom: filterDateFrom,
+          dateTo: filterDateTo,
+          query: filterQuery,
           limit: PIPELINE_PAGE_SIZE + 1,
         });
         return { stageId: stage.id, items };
@@ -302,11 +342,18 @@ export async function loadInitialPipelineState(opts: {
 
     const cardsByStage: Record<UUID, KanbanOpportunity[]> = {};
     const hasMoreByStage: Record<UUID, boolean> = {};
+    const allOppIds: UUID[] = [];
     for (const { stageId, items } of pageResults) {
       const hasMore = items.length > PIPELINE_PAGE_SIZE;
-      cardsByStage[stageId] = hasMore ? items.slice(0, PIPELINE_PAGE_SIZE) : items;
+      const sliced = hasMore ? items.slice(0, PIPELINE_PAGE_SIZE) : items;
+      cardsByStage[stageId] = sliced;
       hasMoreByStage[stageId] = hasMore;
+      for (const o of sliced) allOppIds.push(o.id);
     }
+
+    const pendingMap = await listPendingTaskCountsByOpportunity(allOppIds);
+    const pendingTasksByOpp: Record<UUID, number> = {};
+    pendingMap.forEach((count, oppId) => { pendingTasksByOpp[oppId] = count; });
 
     return {
       ok: true,
@@ -315,6 +362,8 @@ export async function loadInitialPipelineState(opts: {
         stages: activeStages,
         cardsByStage,
         hasMoreByStage,
+        countsByStage,
+        pendingTasksByOpp,
         effectiveAdvisorId,
         advisors: vendors.map((v) => ({
           membershipId: v.id,

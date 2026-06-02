@@ -176,6 +176,14 @@ export function OpportunityDialog({ paramName = "opp" }: Props) {
             onCreateTask={() => setTaskOpen(true)}
             onReassign={() => setReassignOpen(true)}
             onCreateInShopify={() => setShopifyDialogOpen(true)}
+            onTasksChanged={() => {
+              if (oppId) {
+                void loadOpportunityDetailForDialog({ opportunityId: oppId }).then((res) => {
+                  if (res.ok) setBundle(res.bundle);
+                });
+              }
+              router.refresh();
+            }}
           />
         )}
       </div>

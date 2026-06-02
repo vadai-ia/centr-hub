@@ -39,6 +39,7 @@ function makeOpp(overrides: Partial<KanbanOpportunity> = {}): KanbanOpportunity 
       phone: "+525555555555",
       email: "ana@example.com",
       shopify_customer_id: "sc-123",
+      whaapy_contact_id: null,
       shopify_tags: ["pepe"],
     },
     ...overrides,
@@ -141,6 +142,7 @@ describe("contactDisplayName / contactIsCustomer", () => {
         phone: "+5255",
         email: "a@b",
         shopify_customer_id: null,
+        whaapy_contact_id: null,
         shopify_tags: [],
       }),
     ).toBe("Ana");
@@ -154,6 +156,7 @@ describe("contactDisplayName / contactIsCustomer", () => {
         phone: "+5251234",
         email: null,
         shopify_customer_id: null,
+        whaapy_contact_id: null,
         shopify_tags: [],
       }),
     ).toBe("+5251234");
@@ -171,6 +174,7 @@ describe("contactDisplayName / contactIsCustomer", () => {
         phone: "+5251",
         email: null,
         shopify_customer_id: "sc-1",
+        whaapy_contact_id: null,
         shopify_tags: [],
       }),
     ).toBe(true);
@@ -184,6 +188,7 @@ describe("contactDisplayName / contactIsCustomer", () => {
         phone: "+5251",
         email: null,
         shopify_customer_id: null,
+        whaapy_contact_id: null,
         shopify_tags: [],
       }),
     ).toBe(false);

@@ -14,10 +14,15 @@ import { getOpportunityById } from "@/lib/db/opportunities";
 import { getMembership, listActiveRealVendors } from "@/lib/db/users";
 import {
   createTask,
+  deleteTask,
+  getTaskById,
+  listTasksForOpportunity,
   recordActivity,
   recordAuditEvent,
+  updateTask,
 } from "@/lib/db/operational";
-import type { Role, UUID } from "@/lib/types/database";
+import { getOrganizationById } from "@/lib/db/organizations";
+import type { Role, TaskRow, UUID } from "@/lib/types/database";
 import type { AdvisorOption } from "@/lib/actions/contacts";
 
 /**
@@ -29,15 +34,38 @@ import type { AdvisorOption } from "@/lib/actions/contacts";
  * vez que el URL ?opp=<id> cambia.
  */
 
+export interface OpportunityTaskItem {
+  id: UUID;
+  title: string;
+  description: string | null;
+  task_type: string;
+  status: string;
+  due_at: string | null;
+  completed_at: string | null;
+  created_at: string;
+  assigned_user_id: UUID;
+  assignedUserName: string | null;
+}
+
 export interface OpportunityDialogBundle {
   detail: OpportunityDetail;
   timeline: TimelineEvent[];
+  tasks: OpportunityTaskItem[];
   advisors: AdvisorOption[];
   role: Role;
   selfMembershipId: UUID | null;
+  /** URL absoluta al customer en Shopify Admin, si el contacto tiene
+   *  identidad enlazada y la org tiene shopify_store_domain configurado.
+   *  Reemplaza al "Ver link de cobro" pedido en el lote polish M6. */
+  shopifyCustomerUrl: string | null;
+  /** Subtotal de productos = sum(final_price * quantity). Para
+   *  desambiguar contra el total del header (incluye envío + impuestos). */
+  lineItemsSubtotal: number;
   /** Vendedor asignado o admin pueden añadir nota / crear tarea. */
   canAddNote: boolean;
   canCreateTask: boolean;
+  /** Permite cualquier acción sobre las tasks de esta opp (completar, editar, borrar). */
+  canManageTasks: boolean;
   /** Solo admin reasigna. */
   canReassign: boolean;
   /** Lead + (vendedor asignado o admin) habilita "Crear en Shopify". */
@@ -125,22 +153,61 @@ export async function loadOpportunityDetailForDialog(
       }
     }
 
-    const [timeline, vendors] = await Promise.all([
+    const [timeline, vendors, tasks, org] = await Promise.all([
       getOpportunityTimeline(parsed.data.opportunityId),
       listActiveRealVendors(orgId),
+      listTasksForOpportunity(parsed.data.opportunityId),
+      getOrganizationById(orgId),
     ]);
 
     const canAct = isAdmin || detail.opportunity.assigned_advisor_id === membership?.id;
+
+    // Subtotal de productos para etiqueta de monto del popup. Se calcula
+    // server-side para que el header pueda mostrar la diferencia entre
+    // "total de la orden Shopify" (incluye envío + impuestos) y "subtotal
+    // de productos" sin que la UI tenga que sumar.
+    const lineItemsSubtotal = detail.lineItems.reduce(
+      (acc, it) => acc + Number(it.final_price) * it.quantity,
+      0,
+    );
+
+    // URL del customer en Shopify Admin. Reemplaza al botón "link de
+    // cobro" pedido en el lote polish — el vendedor quiere ir al cliente
+    // en Shopify, no al cobro.
+    let shopifyCustomerUrl: string | null = null;
+    if (org?.shopify_store_domain && detail.contact.shopify_customer_id) {
+      shopifyCustomerUrl = `https://${org.shopify_store_domain}/admin/customers/${detail.contact.shopify_customer_id}`;
+    }
+
+    // Enriquecer tasks con nombre del usuario asignado en una sola
+    // pasada (anti N+1). Usa el set de vendors ya cargado.
+    const vendorById = new Map(vendors.map((v) => [v.user_id, v.profile.full_name] as const));
+    const taskItems: OpportunityTaskItem[] = tasks.map((t) => ({
+      id: t.id,
+      title: t.title,
+      description: t.description,
+      task_type: t.task_type,
+      status: t.status,
+      due_at: t.due_at,
+      completed_at: t.completed_at,
+      created_at: t.created_at,
+      assigned_user_id: t.assigned_user_id,
+      assignedUserName: vendorById.get(t.assigned_user_id) ?? null,
+    }));
 
     return {
       ok: true,
       bundle: {
         detail,
         timeline,
+        tasks: taskItems,
         role,
         selfMembershipId: membership?.id ?? null,
+        shopifyCustomerUrl,
+        lineItemsSubtotal,
         canAddNote: canAct,
         canCreateTask: canAct,
+        canManageTasks: canAct,
         canReassign: isAdmin,
         canCreateInShopify:
           canAct &&
@@ -379,3 +446,228 @@ export async function createTaskForOpportunityAction(
   }, { source: "user_session" });
 }
 
+
+// ============================================================
+// Acciones sobre tareas existentes (lote polish M6)
+// ============================================================
+
+const taskIdSchema = z.object({
+  taskId: z.string().uuid(),
+});
+
+const editTaskSchema = z.object({
+  taskId: z.string().uuid(),
+  title: z.string().trim().min(1).max(200),
+  description: z.string().trim().max(2000).optional().or(z.literal("")),
+  dueAt: z.string().datetime().optional().or(z.literal("")).nullable(),
+  taskType: z.enum(TASK_TYPES).optional(),
+});
+
+export type TaskActionResult =
+  | { ok: true; taskId: UUID }
+  | {
+      ok: false;
+      reason:
+        | "no_session"
+        | "forbidden"
+        | "invalid_input"
+        | "not_found"
+        | "internal_error";
+      message: string;
+    };
+
+async function loadTaskWithAccess(
+  taskId: UUID,
+): Promise<
+  | { ok: true; task: TaskRow; orgId: UUID; userId: UUID; isAdmin: boolean; membershipId: UUID | null }
+  | { ok: false; result: TaskActionResult }
+> {
+  const session = await getSession();
+  if (session.status !== "ok") {
+    return {
+      ok: false,
+      result: { ok: false, reason: "no_session", message: "Sesión expirada." },
+    };
+  }
+  const orgId = session.data.activeOrg.id;
+  const role = session.data.activeOrg.role;
+  const userId = session.data.userId;
+  const isAdmin = role === "admin" || role === "superadmin";
+
+  const inner = await withTenantContext(orgId, async () => {
+    const membership = await getMembership(userId, orgId);
+    const task = await getTaskById(taskId);
+    if (!task) {
+      return {
+        kind: "not_found" as const,
+      };
+    }
+    // Acceso: admin, o usuario asignado a la tarea, o asesor asignado
+    // a la oportunidad de la tarea.
+    if (!isAdmin) {
+      const isAssignedToTask = task.assigned_user_id === userId;
+      let isAssignedToOpp = false;
+      if (!isAssignedToTask && task.opportunity_id) {
+        const opp = await getOpportunityById(task.opportunity_id);
+        isAssignedToOpp =
+          !!opp && !!membership && opp.assigned_advisor_id === membership.id;
+      }
+      if (!isAssignedToTask && !isAssignedToOpp) {
+        return { kind: "forbidden" as const };
+      }
+    }
+    return {
+      kind: "ok" as const,
+      task,
+      orgId,
+      userId,
+      isAdmin,
+      membershipId: membership?.id ?? null,
+    };
+  }, { source: "user_session" });
+
+  if (inner.kind === "not_found") {
+    return {
+      ok: false,
+      result: { ok: false, reason: "not_found", message: "La tarea ya no existe." },
+    };
+  }
+  if (inner.kind === "forbidden") {
+    return {
+      ok: false,
+      result: { ok: false, reason: "forbidden", message: "No tienes acceso a esta tarea." },
+    };
+  }
+  return {
+    ok: true,
+    task: inner.task,
+    orgId: inner.orgId,
+    userId: inner.userId,
+    isAdmin: inner.isAdmin,
+    membershipId: inner.membershipId,
+  };
+}
+
+/** Marca una tarea como completada (o la reabre si ya estaba). */
+export async function toggleTaskCompletedAction(
+  raw: unknown,
+): Promise<TaskActionResult> {
+  const parsed = taskIdSchema.safeParse(raw);
+  if (!parsed.success) {
+    return { ok: false, reason: "invalid_input", message: "Parámetros inválidos." };
+  }
+  const access = await loadTaskWithAccess(parsed.data.taskId);
+  if (!access.ok) return access.result;
+
+  return withTenantContext(access.orgId, async () => {
+    const target = access.task;
+    const isCompleting = target.status !== "completed";
+    try {
+      await updateTask(target.id, {
+        status: isCompleting ? "completed" : "pending",
+        completed_at: isCompleting ? new Date().toISOString() : null,
+      });
+      try {
+        await recordAuditEvent({
+          actorUserId: access.userId,
+          eventType: isCompleting ? "opportunity_task_completed" : "opportunity_task_reopened",
+          entityType: "opportunity",
+          entityId: target.opportunity_id ?? target.id,
+          payload: { task_id: target.id },
+        });
+      } catch {
+        // best-effort
+      }
+      return { ok: true, taskId: target.id };
+    } catch (e) {
+      return {
+        ok: false,
+        reason: "internal_error",
+        message: e instanceof Error ? e.message : "No se pudo actualizar la tarea.",
+      };
+    }
+  }, { source: "user_session" });
+}
+
+/** Edita campos de una tarea existente. */
+export async function editTaskAction(raw: unknown): Promise<TaskActionResult> {
+  const parsed = editTaskSchema.safeParse(raw);
+  if (!parsed.success) {
+    return {
+      ok: false,
+      reason: "invalid_input",
+      message: "Datos inválidos. Revisa título y fecha.",
+    };
+  }
+  const access = await loadTaskWithAccess(parsed.data.taskId);
+  if (!access.ok) return access.result;
+
+  return withTenantContext(access.orgId, async () => {
+    const dueAt = parsed.data.dueAt && parsed.data.dueAt.length > 0
+      ? parsed.data.dueAt
+      : null;
+    const description = parsed.data.description && parsed.data.description.length > 0
+      ? parsed.data.description
+      : null;
+    try {
+      await updateTask(parsed.data.taskId, {
+        title: parsed.data.title.trim(),
+        description,
+        due_at: dueAt,
+        task_type: parsed.data.taskType ?? access.task.task_type,
+      });
+      try {
+        await recordAuditEvent({
+          actorUserId: access.userId,
+          eventType: "opportunity_task_edited",
+          entityType: "opportunity",
+          entityId: access.task.opportunity_id ?? access.task.id,
+          payload: { task_id: parsed.data.taskId },
+        });
+      } catch {
+        // best-effort
+      }
+      return { ok: true, taskId: parsed.data.taskId };
+    } catch (e) {
+      return {
+        ok: false,
+        reason: "internal_error",
+        message: e instanceof Error ? e.message : "No se pudo editar la tarea.",
+      };
+    }
+  }, { source: "user_session" });
+}
+
+/** Elimina una tarea. */
+export async function deleteTaskAction(raw: unknown): Promise<TaskActionResult> {
+  const parsed = taskIdSchema.safeParse(raw);
+  if (!parsed.success) {
+    return { ok: false, reason: "invalid_input", message: "Parámetros inválidos." };
+  }
+  const access = await loadTaskWithAccess(parsed.data.taskId);
+  if (!access.ok) return access.result;
+
+  return withTenantContext(access.orgId, async () => {
+    try {
+      await deleteTask(parsed.data.taskId);
+      try {
+        await recordAuditEvent({
+          actorUserId: access.userId,
+          eventType: "opportunity_task_deleted",
+          entityType: "opportunity",
+          entityId: access.task.opportunity_id ?? access.task.id,
+          payload: { task_id: parsed.data.taskId },
+        });
+      } catch {
+        // best-effort
+      }
+      return { ok: true, taskId: parsed.data.taskId };
+    } catch (e) {
+      return {
+        ok: false,
+        reason: "internal_error",
+        message: e instanceof Error ? e.message : "No se pudo eliminar la tarea.",
+      };
+    }
+  }, { source: "user_session" });
+}

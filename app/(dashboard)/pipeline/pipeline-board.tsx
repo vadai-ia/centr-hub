@@ -49,6 +49,7 @@ import {
   type HasMoreByStage,
   type PageByStage,
 } from "./pipeline-state";
+import { PipelineFiltersBar, type ActiveFilters } from "./pipeline-filters-bar";
 
 interface Props {
   initial: PipelineInitialState;
@@ -118,9 +119,21 @@ export function PipelineBoard({
   const [hasMoreByStage, setHasMoreByStage] = useState<HasMoreByStage>(
     initial.hasMoreByStage,
   );
+  const [countsByStage, setCountsByStage] = useState<Record<UUID, number>>(
+    initial.countsByStage,
+  );
+  const [pendingTasksByOpp, setPendingTasksByOpp] = useState<Record<UUID, number>>(
+    initial.pendingTasksByOpp,
+  );
   const [pageByStage, setPageByStage] = useState<PageByStage>(() =>
     initialPageByStage(initial.stages),
   );
+  const [filters, setFilters] = useState<ActiveFilters>({
+    dateFrom: null,
+    dateTo: null,
+    advisorId: null,
+    query: "",
+  });
 
   const [advisors] = useState(initial.advisors);
   const [lossReasons] = useState(initial.lossReasons);
@@ -186,6 +199,8 @@ export function PipelineBoard({
       setStages(state.stages);
       setCardsByStage(state.cardsByStage);
       setHasMoreByStage(state.hasMoreByStage);
+      setCountsByStage(state.countsByStage);
+      setPendingTasksByOpp(state.pendingTasksByOpp);
       setPageByStage(() => initialPageByStage(state.stages));
       if (updateAdvisor) setEffectiveAdvisorId(state.effectiveAdvisorId);
     },
@@ -196,9 +211,10 @@ export function PipelineBoard({
     const res = await loadInitialPipelineState({
       funnel,
       unassignedFilter: isAdmin && unassignedFilter,
+      filters: filtersToPayload(filters),
     });
     if (res.ok) applyState(res.state, false);
-  }, [applyState, funnel, isAdmin, unassignedFilter]);
+  }, [applyState, funnel, isAdmin, unassignedFilter, filters]);
 
   const realtimeStatus: RealtimeStatus = usePipelineRealtime({
     organizationId,
@@ -225,6 +241,7 @@ export function PipelineBoard({
     const res = await loadInitialPipelineState({
       funnel: next,
       unassignedFilter: isAdmin && unassignedFilter,
+      filters: filtersToPayload(filters),
     });
     if (res.ok) applyState(res.state, true);
   }
@@ -234,17 +251,32 @@ export function PipelineBoard({
     const res = await loadInitialPipelineState({
       funnel,
       unassignedFilter: isAdmin && next,
+      filters: filtersToPayload(filters),
+    });
+    if (res.ok) applyState(res.state, true);
+  }
+
+  async function changeFilters(next: ActiveFilters) {
+    setFilters(next);
+    const res = await loadInitialPipelineState({
+      funnel,
+      unassignedFilter: isAdmin && unassignedFilter,
+      filters: filtersToPayload(next),
     });
     if (res.ok) applyState(res.state, true);
   }
 
   // ----- Paginación por columna -----
   async function loadMoreForStage(stage: PipelineStageRow, page: number) {
+    const payload = filtersToPayload(filters);
     const res = await loadKanbanPageAction({
       funnel,
       stageId: stage.id,
       page,
       assignedAdvisorId: effectiveAdvisorId,
+      dateFrom: payload.dateFrom,
+      dateTo: payload.dateTo,
+      query: payload.query,
     });
     if (!res.ok) {
       pushToast(res.message, "error");
@@ -398,6 +430,13 @@ export function PipelineBoard({
         onUnassignedToggle={changeUnassignedFilter}
       />
 
+      <PipelineFiltersBar
+        filters={filters}
+        advisors={advisors}
+        showAdvisorFilter={isAdmin}
+        onChange={changeFilters}
+      />
+
       <DndContext
         sensors={dndSensors}
         collisionDetection={closestCenter}
@@ -415,6 +454,8 @@ export function PipelineBoard({
                 advisors={advisors}
                 showAdvisor={isAdmin}
                 page={pageByStage[stage.id] ?? 0}
+                totalCount={countsByStage[stage.id]}
+                pendingTasksByOpp={pendingTasksByOpp}
                 onLoadMore={loadMoreForStage}
                 onSelectOpportunity={handleSelectOpportunity}
               />
@@ -447,3 +488,17 @@ export function PipelineBoard({
   );
 }
 
+
+function filtersToPayload(filters: ActiveFilters): {
+  dateFrom?: string;
+  dateTo?: string;
+  advisorId?: UUID;
+  query?: string;
+} {
+  return {
+    dateFrom: filters.dateFrom ? `${filters.dateFrom}T00:00:00.000Z` : undefined,
+    dateTo: filters.dateTo ? `${filters.dateTo}T23:59:59.999Z` : undefined,
+    advisorId: filters.advisorId ?? undefined,
+    query: filters.query.trim().length > 0 ? filters.query.trim() : undefined,
+  };
+}

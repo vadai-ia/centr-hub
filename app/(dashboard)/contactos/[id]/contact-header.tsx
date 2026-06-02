@@ -2,6 +2,7 @@
 import Link from "next/link";
 import type { ContactDetail } from "@/lib/db/contacts-detail";
 import type { AdvisorOption } from "@/lib/actions/contacts";
+import type { UUID } from "@/lib/types/database";
 import {
   contactDisplayName,
   formatRelative,
@@ -18,6 +19,23 @@ interface Props {
   onEdit?: () => void;
   onReassign?: () => void;
   onCreateInShopify?: () => void;
+}
+
+interface DerivedAdvisorState {
+  advisorId: UUID | null;
+  conflict: boolean;
+}
+
+function deriveAdvisorFromOpps(detail: ContactDetail): DerivedAdvisorState | null {
+  if (detail.contact.assigned_advisor_id !== null) return null;
+  const all = [...detail.opportunities.venta, ...detail.opportunities.postVenta]
+    .filter((o) => o.cancelled_at === null)
+    .map((o) => o.assigned_advisor_id)
+    .filter((id): id is UUID => id !== null);
+  const unique = Array.from(new Set(all));
+  if (unique.length === 0) return null;
+  if (unique.length === 1) return { advisorId: unique[0], conflict: false };
+  return { advisorId: null, conflict: true };
 }
 
 /**
@@ -43,7 +61,11 @@ export function ContactHeader({
   const { contact, contactType } = detail;
   const name = contactDisplayName(contact);
   const indicators = systemIndicators(contact);
-  const advisor = resolveAdvisor(contact.assigned_advisor_id, advisors);
+  const ownAdvisor = resolveAdvisor(contact.assigned_advisor_id, advisors);
+  const derived = deriveAdvisorFromOpps(detail);
+  const displayAdvisor = derived && !derived.conflict
+    ? resolveAdvisor(derived.advisorId, advisors)
+    : ownAdvisor;
   const lastActivity = formatRelative(lastActivityISO(contact));
   const isLead = contactType === "lead";
 
@@ -88,13 +110,35 @@ export function ContactHeader({
             )}
           </div>
           <div className="mt-3 flex items-center gap-4 text-xs text-gray-500 dark:text-gray-400 flex-wrap">
-            <span className="flex items-center gap-1.5">
+            {derived?.conflict ? (
               <span
-                className="inline-block w-2 h-2 rounded-full"
-                style={{ backgroundColor: advisor.color }}
-              />
-              {advisor.fullName}
-            </span>
+                className="inline-flex items-center gap-1 text-amber-700 dark:text-amber-300 font-medium"
+                title="Las oportunidades de este contacto están asignadas a asesores distintos. Asigna manualmente para clarificar."
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <circle cx="12" cy="12" r="10"/>
+                  <line x1="12" y1="8" x2="12" y2="12"/>
+                  <line x1="12" y1="16" x2="12.01" y2="16"/>
+                </svg>
+                Asesores múltiples (en sus oportunidades)
+              </span>
+            ) : (
+              <span className="flex items-center gap-1.5">
+                <span
+                  className="inline-block w-2 h-2 rounded-full"
+                  style={{ backgroundColor: displayAdvisor.color }}
+                />
+                {displayAdvisor.fullName}
+                {derived && !derived.conflict && (
+                  <span
+                    className="text-[9px] uppercase tracking-wide font-medium px-1 py-0.5 rounded bg-blue-100 text-blue-700 dark:bg-blue-500/15 dark:text-blue-300"
+                    title="Asesor heredado de las oportunidades del contacto"
+                  >
+                    Heredado
+                  </span>
+                )}
+              </span>
+            )}
             <span>Última actividad: {lastActivity}</span>
           </div>
           {isLead && (

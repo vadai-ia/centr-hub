@@ -170,6 +170,10 @@ export interface SearchContactsOpts {
   query?: string | null;
   /** Vendedor: pasar membershipId. Admin sin filtro: undefined. */
   assignedAdvisorId?: UUID | null;
+  /** Filtros adicionales (lote de polish M6). */
+  filterAdvisorId?: UUID | null;
+  dateFrom?: string;
+  dateTo?: string;
   limit: number;
   offset?: number;
 }
@@ -194,6 +198,71 @@ function sanitizeOrFragment(raw: string): string {
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, 80);
+}
+
+/**
+ * Para el lote de polish M6: dado un set de IDs de contacto, devuelve
+ * los asesores derivados de sus oportunidades ACTIVAS.
+ *
+ * Si todas las opps del contacto apuntan al mismo asesor → derivado.
+ * Si hay varios distintos → `conflict = true` (no se elige uno).
+ * Si no hay opps activas con asesor → no aparece en el mapa.
+ *
+ * R2: la asignación de contacto y opp son independientes. Esto es
+ * DERIVACIÓN VISUAL, no asignación real. La UI muestra el asesor
+ * derivado solo cuando el contacto NO tiene `assigned_advisor_id`
+ * explícito — sin sobrescribir nada en BD.
+ */
+export interface DerivedAdvisor {
+  advisorId: UUID | null;
+  conflict: boolean;
+  sourceCount: number;
+}
+
+export async function getDerivedAdvisorsForContacts(
+  contactIds: UUID[],
+): Promise<Map<UUID, DerivedAdvisor>> {
+  const out = new Map<UUID, DerivedAdvisor>();
+  if (contactIds.length === 0) return out;
+  const { supabase, organizationId } = getTenantScopedClient();
+  const { data, error } = await supabase
+    .from("opportunities")
+    .select("contact_id, assigned_advisor_id")
+    .eq("organization_id", organizationId)
+    .in("contact_id", contactIds)
+    .is("cancelled_at", null)
+    .not("assigned_advisor_id", "is", null);
+  if (error) throw error;
+  // contact_id → set distinct advisor IDs
+  const byContact = new Map<UUID, Set<UUID>>();
+  for (const row of (data ?? []) as Array<{
+    contact_id: UUID;
+    assigned_advisor_id: UUID;
+  }>) {
+    let set = byContact.get(row.contact_id);
+    if (!set) {
+      set = new Set();
+      byContact.set(row.contact_id, set);
+    }
+    set.add(row.assigned_advisor_id);
+  }
+  byContact.forEach((set, contactId) => {
+    const advisorList = Array.from(set);
+    if (advisorList.length === 1) {
+      out.set(contactId, {
+        advisorId: advisorList[0] as UUID,
+        conflict: false,
+        sourceCount: 1,
+      });
+    } else if (advisorList.length > 1) {
+      out.set(contactId, {
+        advisorId: null,
+        conflict: true,
+        sourceCount: advisorList.length,
+      });
+    }
+  });
+  return out;
 }
 
 /**
@@ -243,6 +312,17 @@ export async function searchContactsForList(
       query = query.eq("assigned_advisor_id", opts.assignedAdvisorId);
     }
   }
+  // Filtros adicionales del lote de polish M6. Sólo aplican cuando el
+  // caller ya tiene permiso (admin) — la action enforce el role.
+  if (opts.filterAdvisorId !== undefined && opts.assignedAdvisorId === undefined) {
+    if (opts.filterAdvisorId === null) {
+      query = query.is("assigned_advisor_id", null);
+    } else {
+      query = query.eq("assigned_advisor_id", opts.filterAdvisorId);
+    }
+  }
+  if (opts.dateFrom) query = query.gte("last_modified_at", opts.dateFrom);
+  if (opts.dateTo) query = query.lte("last_modified_at", opts.dateTo);
 
   const raw = (opts.query ?? "").trim();
   if (raw.length > 0) {

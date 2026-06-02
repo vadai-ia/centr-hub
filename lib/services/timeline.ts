@@ -72,8 +72,14 @@ export interface TimelineEvent {
   /** Payload semi-estructurado para drill-down o badge meta. */
   meta: Record<string, unknown>;
   actorUserId: UUID | null;
+  /** Nombre del actor resuelto desde user_profiles (lote polish M6). */
+  actorName: string | null;
   /** Opp asociada — útil para enlazar al popup desde el timeline. */
   opportunityId: UUID | null;
+  /** Display reference de la opportunity (lote polish M6).
+   *  Útil cuando un contacto tiene varias opps activas y el timeline
+   *  unificado mezcla eventos de todas. */
+  opportunityReference: string | null;
 }
 
 export interface TimelineQuery {
@@ -143,7 +149,64 @@ async function buildTimeline(q: TimelineQuery): Promise<TimelineEvent[]> {
     ...audits,
   ];
   merged.sort((a, b) => (b.occurredAt < a.occurredAt ? -1 : 1));
-  return merged.slice(0, limit);
+  const limited = merged.slice(0, limit);
+
+  // Enriquecimiento del lote polish M6: resuelve actor names y opp
+  // references en una sola pasada por timeline (no N+1).
+  await enrichTimelineEvents(limited);
+  return limited;
+}
+
+async function enrichTimelineEvents(events: TimelineEvent[]): Promise<void> {
+  const userIds = new Set<UUID>();
+  const oppIds = new Set<UUID>();
+  for (const ev of events) {
+    if (ev.actorUserId) userIds.add(ev.actorUserId);
+    if (ev.opportunityId) oppIds.add(ev.opportunityId);
+  }
+  const [userMap, oppMap] = await Promise.all([
+    userIds.size > 0 ? loadUserNamesMap(Array.from(userIds)) : Promise.resolve(new Map<UUID, string>()),
+    oppIds.size > 0 ? loadOpportunityReferenceMap(Array.from(oppIds)) : Promise.resolve(new Map<UUID, string>()),
+  ]);
+  for (const ev of events) {
+    if (ev.actorUserId) {
+      ev.actorName = userMap.get(ev.actorUserId) ?? null;
+    }
+    if (ev.opportunityId) {
+      ev.opportunityReference = oppMap.get(ev.opportunityId) ?? null;
+    }
+  }
+}
+
+async function loadUserNamesMap(userIds: UUID[]): Promise<Map<UUID, string>> {
+  const { supabase } = getTenantScopedClient();
+  const { data, error } = await supabase
+    .from("user_profiles")
+    .select("id, full_name")
+    .in("id", userIds);
+  if (error) throw error;
+  const map = new Map<UUID, string>();
+  for (const row of (data ?? []) as Array<{ id: UUID; full_name: string }>) {
+    map.set(row.id, row.full_name);
+  }
+  return map;
+}
+
+async function loadOpportunityReferenceMap(
+  oppIds: UUID[],
+): Promise<Map<UUID, string>> {
+  const { supabase, organizationId } = getTenantScopedClient();
+  const { data, error } = await supabase
+    .from("opportunities")
+    .select("id, display_reference")
+    .eq("organization_id", organizationId)
+    .in("id", oppIds);
+  if (error) throw error;
+  const map = new Map<UUID, string>();
+  for (const row of (data ?? []) as Array<{ id: UUID; display_reference: string | null }>) {
+    if (row.display_reference) map.set(row.id, row.display_reference);
+  }
+  return map;
 }
 
 async function loadStageNameMap(): Promise<Map<UUID, PipelineStageRow>> {
@@ -214,7 +277,9 @@ async function fetchStageHistory(
         is_lost: toStage?.is_lost ?? false,
       },
       actorUserId: row.changed_by_user_id,
+      actorName: null,
       opportunityId: row.opportunity_id,
+      opportunityReference: null,
     };
   });
 }
@@ -264,7 +329,9 @@ async function fetchOrderEvents(
           financial_status: row.financial_status,
         },
         actorUserId: null,
+        actorName: null,
         opportunityId: row.opportunity_id,
+        opportunityReference: null,
       });
     }
     if (row.cancelled_at) {
@@ -281,7 +348,9 @@ async function fetchOrderEvents(
           cancellation_reason: row.cancellation_reason,
         },
         actorUserId: null,
+        actorName: null,
         opportunityId: row.opportunity_id,
+        opportunityReference: null,
       });
     }
   }
@@ -331,7 +400,9 @@ async function fetchTaskEvents(
         assigned_user_id: row.assigned_user_id,
       },
       actorUserId: row.assigned_user_id,
+      actorName: null,
       opportunityId: row.opportunity_id,
+      opportunityReference: null,
     });
     if (row.completed_at) {
       events.push({
@@ -343,7 +414,9 @@ async function fetchTaskEvents(
         description: null,
         meta: { task_id: row.id, task_type: row.task_type },
         actorUserId: row.assigned_user_id,
+        actorName: null,
         opportunityId: row.opportunity_id,
+        opportunityReference: null,
       });
     }
   }
@@ -396,7 +469,9 @@ function activityToEvent(row: ActivityRow): TimelineEvent {
         : {}),
     },
     actorUserId: row.triggered_by_user_id,
+    actorName: null,
     opportunityId: row.opportunity_id,
+    opportunityReference: null,
   };
 }
 
@@ -460,7 +535,9 @@ function auditToEvent(row: AuditLogRow): TimelineEvent {
     description: null,
     meta: { event_type: row.event_type, ...payload },
     actorUserId: row.actor_user_id,
+    actorName: null,
     opportunityId,
+    opportunityReference: null,
   };
 }
 

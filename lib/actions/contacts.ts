@@ -6,7 +6,9 @@ import {
   getContactById,
   updateContact,
   searchContactsForList,
+  getDerivedAdvisorsForContacts,
   type ContactListRow,
+  type DerivedAdvisor,
 } from "@/lib/db/contacts";
 import {
   getContactDetail,
@@ -78,6 +80,9 @@ export interface ContactsBoardState {
   /** Membership del usuario activo (null si admin). Usado por la UI
    *  para destacar "tus contactos" en futuras iteraciones. */
   selfMembershipId: UUID | null;
+  /** Lote polish M6: asesor derivado por contacto (solo si el contacto
+   *  no tiene asesor propio pero sí lo tienen sus opps). */
+  derivedAdvisors: Record<UUID, DerivedAdvisor>;
 }
 
 export type LoadContactsActionResult =
@@ -85,12 +90,22 @@ export type LoadContactsActionResult =
   | { ok: false; reason: string; message: string };
 
 export type SearchContactsActionResult =
-  | { ok: true; rows: ContactListRow[]; hasMore: boolean; page: number }
+  | {
+      ok: true;
+      rows: ContactListRow[];
+      hasMore: boolean;
+      page: number;
+      derivedAdvisors: Record<UUID, DerivedAdvisor>;
+    }
   | { ok: false; reason: string; message: string };
 
 const searchSchema = z.object({
   query: z.string().max(200).optional(),
   page: z.number().int().nonnegative().default(0),
+  /** Lote polish M6: filtros adicionales. */
+  filterAdvisorId: z.string().uuid().nullable().optional(),
+  dateFrom: z.string().optional(),
+  dateTo: z.string().optional(),
 });
 
 async function resolveEffectiveAdvisor(
@@ -148,6 +163,12 @@ export async function loadInitialContactsState(opts: {
       listActiveRealVendors(orgId),
     ]);
 
+    // Asesores derivados sólo para contactos sin asignación explícita.
+    const unassignedIds = rows.filter((r) => r.assigned_advisor_id === null).map((r) => r.id);
+    const derivedMap = await getDerivedAdvisorsForContacts(unassignedIds);
+    const derivedAdvisors: Record<UUID, DerivedAdvisor> = {};
+    derivedMap.forEach((v, k) => { derivedAdvisors[k] = v; });
+
     return {
       ok: true,
       state: {
@@ -157,6 +178,7 @@ export async function loadInitialContactsState(opts: {
         query: opts.query ?? "",
         role,
         selfMembershipId: membership,
+        derivedAdvisors,
         advisors: vendors.map((v) => ({
           membershipId: v.id,
           userId: v.user_id,
@@ -207,14 +229,24 @@ export async function searchContactsAction(
       };
     }
 
+    const isAdmin = role === "admin" || role === "superadmin";
     const { rows, hasMore } = await searchContactsForList({
       query: parsed.data.query ?? "",
       assignedAdvisorId: effectiveAdvisorId,
+      // Admin puede filtrar por asesor adicionalmente (lote polish M6).
+      filterAdvisorId: isAdmin ? parsed.data.filterAdvisorId ?? undefined : undefined,
+      dateFrom: parsed.data.dateFrom,
+      dateTo: parsed.data.dateTo,
       limit: CONTACTS_PAGE_SIZE,
       offset: parsed.data.page * CONTACTS_PAGE_SIZE,
     });
 
-    return { ok: true, rows, hasMore, page: parsed.data.page };
+    const unassignedIds = rows.filter((r) => r.assigned_advisor_id === null).map((r) => r.id);
+    const derivedMap = await getDerivedAdvisorsForContacts(unassignedIds);
+    const derivedAdvisors: Record<UUID, DerivedAdvisor> = {};
+    derivedMap.forEach((v, k) => { derivedAdvisors[k] = v; });
+
+    return { ok: true, rows, hasMore, page: parsed.data.page, derivedAdvisors };
   }, { source: "user_session" });
 }
 

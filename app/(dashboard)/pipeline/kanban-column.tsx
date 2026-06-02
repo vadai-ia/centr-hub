@@ -19,11 +19,15 @@ interface Props {
   showAdvisor: boolean;
   page: number;
   isOverlay?: boolean;
+  /** Conteo total de opps activas en esta etapa (lote polish M6).
+   *  Si no se provee, fallback al cards.length + "+" anterior. */
+  totalCount?: number;
+  /** Conteo de tareas pendientes por opportunity_id (lote polish M6). */
+  pendingTasksByOpp?: Record<UUID, number>;
   onLoadMore: (
     stage: PipelineStageRow,
     page: number,
   ) => Promise<LoadPageActionResult>;
-  /** Click sobre una card (M6 — B5) → abre popup vía URL ?opp=<id>. */
   onSelectOpportunity?: (opportunityId: UUID) => void;
 }
 
@@ -45,6 +49,8 @@ export function KanbanColumn({
   showAdvisor,
   page,
   isOverlay,
+  totalCount,
+  pendingTasksByOpp,
   onLoadMore,
   onSelectOpportunity,
 }: Props) {
@@ -106,10 +112,13 @@ export function KanbanColumn({
       ].join(" ")}
       data-testid={`kanban-column-${stage.id}`}
     >
-      <div className="px-3 pt-3 pb-2 flex items-center justify-between gap-2">
+      <div
+        className="px-3 pt-3 pb-2 flex items-center justify-between gap-2 border-t-2 rounded-t-lg"
+        style={{ borderTopColor: stage.color }}
+      >
         <div className="flex items-center gap-2 min-w-0">
           <span
-            className="inline-block w-2.5 h-2.5 rounded-full flex-shrink-0"
+            className="inline-block w-2.5 h-2.5 rounded-full flex-shrink-0 ring-2 ring-white dark:ring-gray-800"
             style={{ backgroundColor: stage.color }}
             aria-hidden
           />
@@ -117,9 +126,14 @@ export function KanbanColumn({
             {stage.name}
           </h3>
         </div>
-        <span className="text-xs text-gray-500 dark:text-gray-400 tabular-nums flex-shrink-0">
-          {cards.length}
-          {hasMore ? "+" : ""}
+        <span
+          className="text-xs font-semibold tabular-nums flex-shrink-0 px-1.5 py-0.5 rounded-full"
+          style={{
+            color: stage.color,
+            backgroundColor: `${stage.color}22`,
+          }}
+        >
+          {totalCount ?? (hasMore ? `${cards.length}+` : cards.length)}
         </span>
       </div>
 
@@ -157,6 +171,7 @@ export function KanbanColumn({
                     opp={opp}
                     advisors={advisors}
                     showAdvisor={showAdvisor}
+                    pendingTasksCount={pendingTasksByOpp?.[opp.id]}
                     onSelect={onSelectOpportunity}
                   />
                 </div>
@@ -171,6 +186,7 @@ export function KanbanColumn({
                 opp={opp}
                 advisors={advisors}
                 showAdvisor={showAdvisor}
+                pendingTasksCount={pendingTasksByOpp?.[opp.id]}
                 onSelect={onSelectOpportunity}
               />
             ))}
@@ -182,7 +198,7 @@ export function KanbanColumn({
             type="button"
             onClick={() => void handleLoadMore()}
             disabled={isLoadingMore}
-            className="w-full mt-2 py-2 text-xs text-indigo-600 dark:text-indigo-400 hover:bg-white dark:hover:bg-gray-700 rounded transition-colors disabled:opacity-50"
+            className="w-full mt-2 py-2 text-xs font-medium text-amber-700 dark:text-amber-300 hover:bg-white dark:hover:bg-gray-700 rounded transition-colors disabled:opacity-50"
           >
             {isLoadingMore ? "Cargando..." : "Cargar más"}
           </button>

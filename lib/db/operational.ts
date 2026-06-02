@@ -109,6 +109,75 @@ export async function listTasksForUser(userId: UUID): Promise<TaskRow[]> {
   return data ?? [];
 }
 
+export async function getTaskById(id: UUID): Promise<TaskRow | null> {
+  const { supabase, organizationId } = getTenantScopedClient();
+  const { data, error } = await supabase
+    .from("tasks")
+    .select("*")
+    .eq("id", id)
+    .eq("organization_id", organizationId)
+    .maybeSingle();
+  if (error) throw error;
+  return data ?? null;
+}
+
+export async function deleteTask(id: UUID): Promise<void> {
+  const { supabase, organizationId } = getTenantScopedClient();
+  const { error } = await supabase
+    .from("tasks")
+    .delete()
+    .eq("id", id)
+    .eq("organization_id", organizationId);
+  if (error) throw error;
+}
+
+/**
+ * Lista todas las tareas de una oportunidad ordenadas por estado y due_at.
+ * Pendientes primero (por due_at asc — más próximas arriba), después las
+ * completadas/snoozeadas más recientes.
+ */
+export async function listTasksForOpportunity(
+  opportunityId: UUID,
+): Promise<TaskRow[]> {
+  const { supabase, organizationId } = getTenantScopedClient();
+  const { data, error } = await supabase
+    .from("tasks")
+    .select("*")
+    .eq("organization_id", organizationId)
+    .eq("opportunity_id", opportunityId)
+    .order("status", { ascending: true })
+    .order("due_at", { ascending: true, nullsFirst: false })
+    .order("created_at", { ascending: false });
+  if (error) throw error;
+  return data ?? [];
+}
+
+/**
+ * Cuenta tareas pendientes por oportunidad para un set de IDs.
+ * Usado por el kanban (M6 polish) para mostrar contador en cards.
+ * Si no hay opps, devuelve mapa vacío.
+ */
+export async function listPendingTaskCountsByOpportunity(
+  opportunityIds: UUID[],
+): Promise<Map<UUID, number>> {
+  const result = new Map<UUID, number>();
+  if (opportunityIds.length === 0) return result;
+  const { supabase, organizationId } = getTenantScopedClient();
+  const { data, error } = await supabase
+    .from("tasks")
+    .select("opportunity_id")
+    .eq("organization_id", organizationId)
+    .eq("status", "pending")
+    .in("opportunity_id", opportunityIds);
+  if (error) throw error;
+  for (const row of data ?? []) {
+    const oppId = (row as { opportunity_id: UUID | null }).opportunity_id;
+    if (!oppId) continue;
+    result.set(oppId, (result.get(oppId) ?? 0) + 1);
+  }
+  return result;
+}
+
 // ============================================================
 // notifications
 // ============================================================
