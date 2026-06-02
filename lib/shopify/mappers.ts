@@ -57,6 +57,32 @@ const customerAddressSchema = z
   })
   .passthrough();
 
+/**
+ * Extrae el teléfono del customer respetando el orden de precedencia
+ * observado en Shopify: primero el campo top-level del customer; si
+ * está vacío o ausente, cae a `default_address.phone`.
+ *
+ * Motivo (ver ERRORES.md): muchos customers de Shopify guardan el
+ * teléfono SOLO en la dirección — especialmente los creados vía
+ * checkout sin que el merchant edite manualmente el perfil. Leer
+ * únicamente el campo top-level descartaba esos teléfonos.
+ *
+ * Mantiene strings tal cual (incluso si no son E.164) — la
+ * normalización vía libphonenumber-js corre downstream en el helper
+ * de identity-matching (`normalizePhone`), no acá.
+ */
+function pickCustomerPhone(
+  profilePhone: string | null | undefined,
+  address: { phone?: string | null } | null | undefined,
+): string | null {
+  const profileTrimmed = (profilePhone ?? "").trim();
+  if (profileTrimmed.length > 0) return profilePhone ?? null;
+  const addressPhone = address?.phone;
+  const addressTrimmed = (addressPhone ?? "").trim();
+  if (addressTrimmed.length > 0) return addressPhone ?? null;
+  return null;
+}
+
 export const shopifyCustomerWebhookSchema = z
   .object({
     id: z.union([z.number(), z.string()]),
@@ -102,7 +128,7 @@ export function mapCustomerWebhookToNormalized(
     shopifyCustomerId: id,
     fullName: fullName.length > 0 ? fullName : null,
     email: data.email ?? null,
-    phone: data.phone ?? null,
+    phone: pickCustomerPhone(data.phone ?? null, data.default_address ?? null),
     tags: shopifyTagsCsvToArray(data.tags ?? null),
     state: data.state ?? null,
     note: data.note ?? null,
@@ -162,7 +188,7 @@ function mapEmbeddedCustomer(raw: unknown): NormalizedCustomer | null {
     shopifyCustomerId: id,
     fullName: fullName.length > 0 ? fullName : null,
     email: data.email ?? null,
-    phone: data.phone ?? null,
+    phone: pickCustomerPhone(data.phone ?? null, data.default_address ?? null),
     tags: shopifyTagsCsvToArray(data.tags ?? null),
     state: data.state ?? null,
     note: data.note ?? null,
@@ -490,11 +516,13 @@ export function mapCustomerGraphqlToNormalized(node: unknown): NormalizedCustome
   const firstName = (n.firstName as string | null) ?? null;
   const lastName = (n.lastName as string | null) ?? null;
   const fullName = [firstName, lastName].filter((s) => s && s.trim()).join(" ").trim();
+  const defaultAddress =
+    (n.defaultAddress as { phone?: string | null } | null | undefined) ?? null;
   return {
     shopifyCustomerId: id,
     fullName: fullName.length > 0 ? fullName : null,
     email: (n.email as string | null) ?? null,
-    phone: (n.phone as string | null) ?? null,
+    phone: pickCustomerPhone((n.phone as string | null) ?? null, defaultAddress),
     tags: Array.isArray(n.tags)
       ? (n.tags as string[]).map((t) => t.trim()).filter((t) => t.length > 0)
       : shopifyTagsCsvToArray((n.tags as string | null) ?? null),

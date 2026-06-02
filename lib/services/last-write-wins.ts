@@ -84,7 +84,15 @@ export interface FieldDecision {
     | "initial_match_shopify_priority"
     | "initial_match_preserve_value"
     | "empty_overwrite"
-    | "blocked_external_id";
+    | "blocked_external_id"
+    /**
+     * Campo local YA vacío + propuesta vacía → no se escribe ni
+     * patch ni metadata. Evita "sellar" un campo vacío con un
+     * timestamp que después bloquearía propuestas legítimas
+     * con el mismo `updated_at` (older_ignored). Ver ERRORES.md
+     * "LWW seal por proposals vacíos…".
+     */
+    | "noop_both_empty";
   finalValue?: unknown;
 }
 
@@ -148,8 +156,30 @@ export function reconcileContactFields(
 
     const meta = readMeta(current.field_metadata, field);
     const currentValue = (current as unknown as Record<string, unknown>)[field];
+    const currentEmpty = isEmptyValue(currentValue);
     const proposalEmpty = isEmptyValue(proposal.value);
     const normalizedValue = proposalEmpty ? emptyValueFor(field) : proposal.value;
+
+    // Anti-sealing: si el campo local YA está vacío y la propuesta
+    // también, NO escribimos patch ni metadata. Escribir metadata
+    // aquí sella el campo para LWW: una propuesta posterior con el
+    // mismo `updated_at` (común en re-fetches del mismo recurso o
+    // re-emisión de webhooks) se rechazaría como `older_ignored` y
+    // el campo quedaría vacío de forma permanente aunque el dato
+    // real esté disponible en la fuente.
+    //
+    // R3 (borrados intencionales propagados) queda intacto: cuando
+    // el campo local TIENE valor y la propuesta vacía es MÁS
+    // RECIENTE, abajo cae en `empty_overwrite` que sí escribe meta
+    // + patch para que un valor viejo no pueda refile-arlo.
+    //
+    // Ver ERRORES.md "LWW seal por proposals vacíos…" para el
+    // caso productivo (104 contactos con phone=null sellados por
+    // field_metadata.phone={source:shopify}).
+    if (currentEmpty && proposalEmpty) {
+      decisions.push({ field, applied: false, reason: "noop_both_empty" });
+      continue;
+    }
 
     // Caso especial: match inicial (v5.1)
     if (options.isInitialMatch && proposal.source === "shopify") {

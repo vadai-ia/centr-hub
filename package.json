@@ -11,6 +11,8 @@
     "shopify:configure-webhooks": "tsx --tsconfig scripts/tsconfig.json scripts/shopify/configure-webhooks.ts",
     "shopify:backfill-incremental": "tsx --tsconfig scripts/tsconfig.json scripts/shopify/backfill-incremental.ts",
     "shopify:harness-create-customer": "tsx --tsconfig scripts/tsconfig.json scripts/shopify/harness-create-customer.ts",
+    "shopify:rehydrate-empty-contacts": "tsx --tsconfig scripts/tsconfig.json scripts/shopify/rehydrate-empty-contacts.ts",
+    "shopify:inspect-get-customer": "tsx --tsconfig scripts/tsconfig.json scripts/shopify/inspect-get-customer.ts",
     "whaapy:configure-webhook": "tsx --tsconfig scripts/tsconfig.json scripts/whaapy/configure-webhook.ts",
     "whaapy:inspect-get-contact": "tsx --tsconfig scripts/tsconfig.json scripts/whaapy/inspect-get-contact.ts",
     "whaapy:inspect-webhook-headers": "tsx --tsconfig scripts/tsconfig.json scripts/whaapy/inspect-webhook-headers.ts"

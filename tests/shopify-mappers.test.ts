@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  mapCustomerGraphqlToNormalized,
   mapCustomerWebhookToNormalized,
   mapDraftOrderWebhookToNormalized,
   mapOrderWebhookToNormalized,
@@ -77,6 +78,67 @@ describe("mapCustomerWebhookToNormalized", () => {
     expect(result.shopifyCustomerId).toBe("1");
     expect(result.fullName).toBe(null);
     expect(result.tags).toEqual([]);
+  });
+
+  describe("phone con fallback a default_address.phone (fix bug rehidratación)", () => {
+    it("usa customer.phone cuando está presente", () => {
+      const result = mapCustomerWebhookToNormalized({
+        id: 1,
+        phone: "+5215555555555",
+        default_address: { phone: "+5215566778899" },
+      });
+      // Perfil gana sobre dirección cuando ambos están.
+      expect(result.phone).toBe("+5215555555555");
+    });
+
+    it("cae a default_address.phone cuando customer.phone es null", () => {
+      const result = mapCustomerWebhookToNormalized({
+        id: 1,
+        phone: null,
+        default_address: { phone: "+5215566778899" },
+      });
+      expect(result.phone).toBe("+5215566778899");
+    });
+
+    it("cae a default_address.phone cuando customer.phone está ausente", () => {
+      const result = mapCustomerWebhookToNormalized({
+        id: 1,
+        default_address: { phone: "+5215566778899" },
+      });
+      expect(result.phone).toBe("+5215566778899");
+    });
+
+    it("cae a default_address.phone cuando customer.phone es string vacío", () => {
+      const result = mapCustomerWebhookToNormalized({
+        id: 1,
+        phone: "",
+        default_address: { phone: "+5215566778899" },
+      });
+      expect(result.phone).toBe("+5215566778899");
+    });
+
+    it("devuelve null cuando perfil y dirección NO tienen phone", () => {
+      const result = mapCustomerWebhookToNormalized({
+        id: 1,
+        phone: null,
+        default_address: { city: "CDMX" },
+      });
+      expect(result.phone).toBe(null);
+    });
+
+    it("devuelve null cuando perfil y dirección tienen phone vacío", () => {
+      const result = mapCustomerWebhookToNormalized({
+        id: 1,
+        phone: "  ",
+        default_address: { phone: "" },
+      });
+      expect(result.phone).toBe(null);
+    });
+
+    it("devuelve null cuando default_address está ausente y perfil no tiene phone", () => {
+      const result = mapCustomerWebhookToNormalized({ id: 1 });
+      expect(result.phone).toBe(null);
+    });
   });
 });
 
@@ -277,5 +339,51 @@ describe("mapOrderWebhookToNormalized", () => {
     expect(result.embeddedCustomer?.fullName).toBe("Solo Nombre");
     expect(result.embeddedCustomer?.email).toBe(null);
     expect(result.embeddedCustomer?.phone).toBe(null);
+  });
+
+  it("embeddedCustomer toma phone de default_address cuando perfil no lo trae (fix rehidratación)", () => {
+    const result = mapOrderWebhookToNormalized({
+      id: 1,
+      customer: {
+        id: 42,
+        first_name: "Lola",
+        email: "lola@example.com",
+        phone: null,
+        default_address: { phone: "+5215511223344", city: "CDMX" },
+      },
+      line_items: [],
+      total_price: "0",
+    });
+    expect(result.embeddedCustomer?.phone).toBe("+5215511223344");
+  });
+});
+
+describe("mapCustomerGraphqlToNormalized — phone fallback a defaultAddress.phone", () => {
+  it("usa node.phone cuando está presente", () => {
+    const result = mapCustomerGraphqlToNormalized({
+      id: "gid://shopify/Customer/1",
+      firstName: "Ana",
+      phone: "+5215555555555",
+      defaultAddress: { phone: "+5215566778899" },
+    });
+    expect(result.phone).toBe("+5215555555555");
+  });
+
+  it("cae a defaultAddress.phone cuando node.phone es null", () => {
+    const result = mapCustomerGraphqlToNormalized({
+      id: "gid://shopify/Customer/1",
+      firstName: "Ana",
+      phone: null,
+      defaultAddress: { phone: "+5215566778899" },
+    });
+    expect(result.phone).toBe("+5215566778899");
+  });
+
+  it("devuelve null sin phone ni defaultAddress.phone", () => {
+    const result = mapCustomerGraphqlToNormalized({
+      id: "gid://shopify/Customer/1",
+      firstName: "Ana",
+    });
+    expect(result.phone).toBe(null);
   });
 });
