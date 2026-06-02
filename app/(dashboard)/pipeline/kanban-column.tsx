@@ -104,30 +104,31 @@ export function KanbanColumn({
     <div
       ref={droppable.setNodeRef}
       className={[
-        "flex flex-col w-72 flex-shrink-0 rounded-lg",
+        // Ronda 2 #11: ancho reducido de w-72 (288px) a w-60 (240px = 83%).
+        "flex flex-col w-60 flex-shrink-0 rounded-lg",
         "bg-gray-100 dark:bg-gray-800/60",
         droppable.isOver
-          ? "ring-2 ring-indigo-400 ring-offset-2 ring-offset-gray-50 dark:ring-offset-gray-900"
+          ? "ring-2 ring-amber-400 ring-offset-2 ring-offset-gray-50 dark:ring-offset-gray-900"
           : "",
       ].join(" ")}
       data-testid={`kanban-column-${stage.id}`}
     >
       <div
-        className="px-3 pt-3 pb-2 flex items-center justify-between gap-2 border-t-2 rounded-t-lg"
+        className="px-2.5 pt-2 pb-1.5 flex items-center justify-between gap-1.5 border-t-2 rounded-t-lg"
         style={{ borderTopColor: stage.color }}
       >
-        <div className="flex items-center gap-2 min-w-0">
+        <div className="flex items-center gap-1.5 min-w-0">
           <span
-            className="inline-block w-2.5 h-2.5 rounded-full flex-shrink-0 ring-2 ring-white dark:ring-gray-800"
+            className="inline-block w-2 h-2 rounded-full flex-shrink-0 ring-1 ring-white dark:ring-gray-800"
             style={{ backgroundColor: stage.color }}
             aria-hidden
           />
-          <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-200 truncate">
+          <h3 className="text-[12px] font-semibold text-gray-700 dark:text-gray-200 truncate">
             {stage.name}
           </h3>
         </div>
         <span
-          className="text-xs font-semibold tabular-nums flex-shrink-0 px-1.5 py-0.5 rounded-full"
+          className="text-[11px] font-semibold tabular-nums flex-shrink-0 px-1.5 py-0.5 rounded-full"
           style={{
             color: stage.color,
             backgroundColor: `${stage.color}22`,
@@ -139,8 +140,8 @@ export function KanbanColumn({
 
       <div
         ref={scrollRef}
-        className="flex-1 overflow-y-auto px-2 pb-2"
-        style={{ maxHeight: "calc(100vh - 14rem)" }}
+        className="flex-1 overflow-y-auto px-1.5 pb-1.5 centr-scrollbar"
+        style={{ maxHeight: "calc(100vh - 12rem)" }}
       >
         {cards.length === 0 ? (
           <EmptyState />
@@ -179,7 +180,7 @@ export function KanbanColumn({
             })}
           </div>
         ) : (
-          <div className="space-y-2">
+          <div className="space-y-1.5">
             {cards.map((opp) => (
               <KanbanCard
                 key={opp.id}

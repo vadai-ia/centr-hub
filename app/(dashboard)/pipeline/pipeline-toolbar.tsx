@@ -52,7 +52,7 @@ export function PipelineToolbar({
   }
 
   return (
-    <div className="flex flex-wrap items-center gap-3 mb-4 pb-3 border-b border-gray-200 dark:border-gray-700">
+    <div className="flex flex-wrap items-center gap-2 mb-2 pb-2 border-b border-gray-200 dark:border-gray-700">
       <div
         role="tablist"
         aria-label="Funnel activo"

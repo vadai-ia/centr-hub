@@ -7,6 +7,7 @@ import {
   countKanbanOpportunitiesByStage,
   getKanbanOpportunityById,
   listKanbanOpportunities,
+  searchContactIdsForQuery,
   type KanbanOpportunity,
 } from "@/lib/db/opportunities";
 import { listPendingTaskCountsByOpportunity } from "@/lib/db/operational";
@@ -172,6 +173,11 @@ export async function loadKanbanPageAction(
       effectiveAdvisorId = input.assignedAdvisorId;
     }
 
+    const matchingContactIds: UUID[] | null =
+      input.query && input.query.trim().length > 0
+        ? await searchContactIdsForQuery(input.query)
+        : null;
+
     const items = await listKanbanOpportunities({
       funnel: input.funnel,
       stageId: input.stageId,
@@ -179,6 +185,7 @@ export async function loadKanbanPageAction(
       dateFrom: input.dateFrom,
       dateTo: input.dateTo,
       query: input.query,
+      matchingContactIds,
       limit: PIPELINE_PAGE_SIZE + 1,
       offset: input.page * PIPELINE_PAGE_SIZE,
     });
@@ -311,6 +318,14 @@ export async function loadInitialPipelineState(opts: {
     const filterDateTo = opts.filters?.dateTo;
     const filterQuery = opts.filters?.query;
 
+    // Pre-resolve contact_ids that match the search query ONCE. Both
+    // the count query and the per-stage list queries reuse this set
+    // — sin esto, cada stage volvía a correr la sub-query de contacts.
+    const matchingContactIds: UUID[] | null =
+      filterQuery && filterQuery.trim().length > 0
+        ? await searchContactIdsForQuery(filterQuery)
+        : null;
+
     const [allStages, vendors, lossReasons, countsByStage] = await Promise.all([
       listPipelineStages(opts.funnel),
       listActiveRealVendors(orgId),
@@ -321,6 +336,7 @@ export async function loadInitialPipelineState(opts: {
         dateFrom: filterDateFrom,
         dateTo: filterDateTo,
         query: filterQuery,
+        matchingContactIds,
       }),
     ]);
     const activeStages = allStages.filter((s) => s.is_active);
@@ -334,6 +350,7 @@ export async function loadInitialPipelineState(opts: {
           dateFrom: filterDateFrom,
           dateTo: filterDateTo,
           query: filterQuery,
+          matchingContactIds,
           limit: PIPELINE_PAGE_SIZE + 1,
         });
         return { stageId: stage.id, items };

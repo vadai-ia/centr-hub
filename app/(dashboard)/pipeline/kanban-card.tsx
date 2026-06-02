@@ -81,17 +81,20 @@ export function KanbanCard({
       aria-label={`Oportunidad de ${name}`}
       role={onSelect ? "button" : undefined}
       className={[
-        "group relative bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700",
-        "p-3 pl-3.5 select-none shadow-sm hover:shadow-md hover:border-gray-300 dark:hover:border-gray-600 transition-all",
-        "focus:outline-none focus:ring-2 focus:ring-amber-400",
+        // Ronda 2 #9: sin outline amber al focus (el dnd-kit ya marca
+        // visualmente la card durante el drag con el opacity 0.4).
+        // Ronda 2 #11: escala ~80% — paddings y font-sizes reducidos.
+        "group relative bg-white dark:bg-gray-800 rounded-md border border-gray-200 dark:border-gray-700",
+        "p-2 pl-2.5 select-none shadow-sm hover:shadow-md hover:border-gray-300 dark:hover:border-gray-600 transition-all",
+        "outline-none",
         onSelect ? "cursor-pointer active:cursor-grabbing" : "cursor-grab active:cursor-grabbing",
       ].join(" ")}
     >
-      <div className="flex items-start justify-between gap-2 mb-1">
-        <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 truncate">
+      <div className="flex items-start justify-between gap-1.5 mb-0.5">
+        <p className="text-[13px] font-semibold text-gray-900 dark:text-gray-100 truncate leading-snug">
           {name}
         </p>
-        <div className="flex items-center gap-1.5 flex-shrink-0">
+        <div className="flex items-center gap-1 flex-shrink-0">
           {pendingTasksCount !== undefined && pendingTasksCount > 0 && (
             <TasksBadge count={pendingTasksCount} />
           )}
@@ -100,24 +103,24 @@ export function KanbanCard({
       </div>
 
       {opp.display_reference && (
-        <p className="text-[11px] font-mono text-gray-400 dark:text-gray-500 truncate">
+        <p className="text-[10px] font-mono text-gray-400 dark:text-gray-500 truncate">
           {opp.display_reference}
         </p>
       )}
 
-      <div className="flex items-baseline justify-between mt-2 gap-2">
+      <div className="flex items-baseline justify-between mt-1.5 gap-2">
         {noAmount && phone ? (
           <a
             href={`tel:${phone}`}
             onClick={(e) => e.stopPropagation()}
-            className="text-sm font-medium text-blue-700 dark:text-blue-300 hover:underline truncate"
+            className="text-[12px] font-medium text-blue-700 dark:text-blue-300 hover:underline truncate"
           >
             {phone}
           </a>
         ) : (
           <span
             className={[
-              "text-base font-bold tabular-nums",
+              "text-[14px] font-bold tabular-nums leading-none",
               amount.isMissing
                 ? "text-gray-300 dark:text-gray-600 italic"
                 : amount.isEstimated
@@ -131,15 +134,15 @@ export function KanbanCard({
       </div>
 
       {showAdvisor && (
-        <div className="flex items-center gap-2 mt-2 pt-2 border-t border-gray-100 dark:border-gray-700">
+        <div className="flex items-center gap-1.5 mt-1.5 pt-1.5 border-t border-gray-100 dark:border-gray-700">
           <span
-            className="inline-block w-2 h-2 rounded-full flex-shrink-0"
+            className="inline-block w-1.5 h-1.5 rounded-full flex-shrink-0"
             style={{ backgroundColor: advisor.color }}
             aria-hidden
           />
           <span
             className={[
-              "text-xs truncate",
+              "text-[11px] truncate",
               advisor.isUnassigned
                 ? "text-amber-700 dark:text-amber-300 italic"
                 : "text-gray-600 dark:text-gray-400",
@@ -156,10 +159,10 @@ export function KanbanCard({
 function TasksBadge({ count }: { count: number }) {
   return (
     <span
-      className="inline-flex items-center gap-0.5 text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-blue-600 text-white flex-shrink-0"
+      className="inline-flex items-center gap-0.5 text-[9px] font-bold px-1 py-px rounded-full bg-blue-600 text-white flex-shrink-0"
       title={`${count} tarea${count === 1 ? "" : "s"} pendiente${count === 1 ? "" : "s"}`}
     >
-      <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <svg xmlns="http://www.w3.org/2000/svg" width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
         <polyline points="9 11 12 14 22 4"/>
         <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
       </svg>
@@ -172,7 +175,7 @@ function ContactTypeBadge({ isCustomer }: { isCustomer: boolean }) {
   return (
     <span
       className={[
-        "text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded font-medium flex-shrink-0",
+        "text-[9px] uppercase tracking-wide px-1 py-px rounded font-medium flex-shrink-0",
         isCustomer
           ? "bg-purple-100 text-purple-700 dark:bg-purple-500/15 dark:text-purple-300"
           : "bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300",

@@ -443,8 +443,8 @@ export function PipelineBoard({
         onDragStart={onDragStart}
         onDragEnd={onDragEnd}
       >
-        <div className="flex-1 overflow-x-auto">
-          <div className="flex gap-3 pb-2 min-w-min">
+        <div className="flex-1 overflow-x-auto centr-scrollbar">
+          <div className="flex gap-2 pb-2 min-w-min">
             {stages.map((stage) => (
               <KanbanColumn
                 key={stage.id}

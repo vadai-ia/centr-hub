@@ -171,12 +171,19 @@ export async function loadOpportunityDetailForDialog(
       0,
     );
 
-    // URL del customer en Shopify Admin. Reemplaza al botón "link de
-    // cobro" pedido en el lote polish — el vendedor quiere ir al cliente
-    // en Shopify, no al cobro.
+    // URL del customer en Shopify Admin (correcciones ronda 2 — bug 4).
+    // El formato correcto es `https://admin.shopify.com/store/{handle}/customers/{id}`,
+    // donde `handle` es el slug del store (parte antes de `.myshopify.com`
+    // en `shopify_store_domain`). El formato anterior usando el dominio
+    // crudo lleva a una página genérica de la tienda, no al cliente.
     let shopifyCustomerUrl: string | null = null;
     if (org?.shopify_store_domain && detail.contact.shopify_customer_id) {
-      shopifyCustomerUrl = `https://${org.shopify_store_domain}/admin/customers/${detail.contact.shopify_customer_id}`;
+      const handle = org.shopify_store_domain.endsWith(".myshopify.com")
+        ? org.shopify_store_domain.slice(0, -".myshopify.com".length)
+        : org.shopify_store_domain;
+      if (handle.length > 0) {
+        shopifyCustomerUrl = `https://admin.shopify.com/store/${handle}/customers/${detail.contact.shopify_customer_id}`;
+      }
     }
 
     // Enriquecer tasks con nombre del usuario asignado en una sola

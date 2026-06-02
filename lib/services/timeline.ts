@@ -180,14 +180,65 @@ async function enrichTimelineEvents(events: TimelineEvent[]): Promise<void> {
 
 async function loadUserNamesMap(userIds: UUID[]): Promise<Map<UUID, string>> {
   const { supabase } = getTenantScopedClient();
-  const { data, error } = await supabase
+  // Trae user_profiles para el lookup base.
+  const { data: profileData, error: profileError } = await supabase
     .from("user_profiles")
-    .select("id, full_name")
+    .select("id, full_name, is_system_user")
     .in("id", userIds);
-  if (error) throw error;
+  if (profileError) throw profileError;
+
   const map = new Map<UUID, string>();
-  for (const row of (data ?? []) as Array<{ id: UUID; full_name: string }>) {
+  for (const row of (profileData ?? []) as Array<{
+    id: UUID;
+    full_name: string;
+    is_system_user: boolean;
+  }>) {
     map.set(row.id, row.full_name);
+  }
+
+  // Correcciones ronda 2 — bug 5: el name declarado por el operador
+  // vía `auth.users.raw_user_meta_data.full_name` se prioriza sobre
+  // `user_profiles.full_name` si está presente. Esto permite que el
+  // operador real "controle" cómo se le ve sin depender de un proceso
+  // manual de UPDATE en user_profiles.
+  try {
+    // Cast a `any` para acceder al schema auth — los tipos de Database
+    // hand-written no incluyen auth.users porque PostgREST lo expone
+    // sólo bajo el rol service_role.
+    const supabaseAny = supabase as unknown as {
+      schema: (s: string) => {
+        from: (t: string) => {
+          select: (q: string) => {
+            in: (
+              col: string,
+              ids: UUID[],
+            ) => Promise<{
+              data: Array<{
+                id: UUID;
+                raw_user_meta_data: Record<string, unknown> | null;
+              }> | null;
+              error: unknown;
+            }>;
+          };
+        };
+      };
+    };
+    const { data: authData, error: authError } = await supabaseAny
+      .schema("auth")
+      .from("users")
+      .select("id, raw_user_meta_data")
+      .in("id", userIds);
+    if (!authError && Array.isArray(authData)) {
+      for (const row of authData) {
+        const metaName = row.raw_user_meta_data?.full_name;
+        if (typeof metaName === "string" && metaName.trim().length > 0) {
+          map.set(row.id, metaName.trim());
+        }
+      }
+    }
+  } catch {
+    // Fallback silencioso: si auth no es accesible, seguimos con
+    // user_profiles. Bug 5 documenta el SQL de actualización manual.
   }
   return map;
 }

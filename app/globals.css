@@ -22,3 +22,60 @@ body {
     text-wrap: balance;
   }
 }
+
+/* ---------------------------------------------------------------
+ * Scrollbars modernas (lote polish M6 ronda 2 — #10).
+ *
+ * Adopta los estilos en todas las superficies con scroll (kanban
+ * columns, área principal del dashboard, popups). La clase
+ * `centr-scrollbar` se aplica en componentes con scroll local; el
+ * `*` cubre la barra default del browser de forma menos invasiva.
+ *
+ * Webkit: customizable. Firefox: scrollbar-color + scrollbar-width.
+ * En dark mode tomamos las variables apropiadas (gray-600 thumb sobre
+ * track casi transparente).
+ * --------------------------------------------------------------- */
+@layer base {
+  /* Default: aplicar a TODA superficie con scroll (browser-wide). */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(156, 163, 175, 0.5) transparent;
+  }
+  .dark * {
+    scrollbar-color: rgba(75, 85, 99, 0.7) transparent;
+  }
+  *::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  *::-webkit-scrollbar-thumb {
+    background-color: rgba(156, 163, 175, 0.5);
+    border-radius: 9999px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+  *::-webkit-scrollbar-thumb:hover {
+    background-color: rgba(107, 114, 128, 0.7);
+  }
+  .dark *::-webkit-scrollbar-thumb {
+    background-color: rgba(75, 85, 99, 0.7);
+  }
+  .dark *::-webkit-scrollbar-thumb:hover {
+    background-color: rgba(107, 114, 128, 0.9);
+  }
+  *::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+}
+
+/* Variante "overlay" más fina para superficies estrechas (kanban). */
+.centr-scrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.centr-scrollbar {
+  scrollbar-width: thin;
+}

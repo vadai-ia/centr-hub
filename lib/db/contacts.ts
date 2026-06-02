@@ -219,6 +219,40 @@ export interface DerivedAdvisor {
   sourceCount: number;
 }
 
+/**
+ * Para el lote polish M6 ronda 2 (bug 3 — filtro asesor incluye
+ * heredado): dado un advisor membership_id, devuelve los `contact_id`
+ * que (a) tienen `assigned_advisor_id IS NULL` propio Y (b) tienen al
+ * menos una oportunidad activa asignada a ese asesor.
+ *
+ * Estos son los contactos "heredados" — visualmente aparecen con el
+ * asesor del opp, así que el filtro debe encontrarlos también.
+ *
+ * Cap defensivo: 10k IDs (URL/PostgREST `in.()`). Org realista del
+ * MVP queda muy por debajo.
+ */
+export async function getContactIdsWithDerivedAdvisor(
+  advisorMembershipId: UUID,
+): Promise<UUID[]> {
+  const { supabase, organizationId } = getTenantScopedClient();
+  // Trae opps activas asignadas a ese advisor, agrupadas por contact_id
+  // luego filtra a aquellos contacts que NO tienen advisor propio.
+  const { data, error } = await supabase
+    .from("opportunities")
+    .select("contact_id, contacts!inner(id, assigned_advisor_id)")
+    .eq("organization_id", organizationId)
+    .eq("assigned_advisor_id", advisorMembershipId)
+    .is("cancelled_at", null)
+    .is("contacts.assigned_advisor_id", null)
+    .limit(10000);
+  if (error) throw error;
+  const ids = new Set<UUID>();
+  for (const row of (data ?? []) as Array<{ contact_id: UUID }>) {
+    ids.add(row.contact_id);
+  }
+  return Array.from(ids);
+}
+
 export async function getDerivedAdvisorsForContacts(
   contactIds: UUID[],
 ): Promise<Map<UUID, DerivedAdvisor>> {
@@ -312,13 +346,24 @@ export async function searchContactsForList(
       query = query.eq("assigned_advisor_id", opts.assignedAdvisorId);
     }
   }
-  // Filtros adicionales del lote de polish M6. Sólo aplican cuando el
-  // caller ya tiene permiso (admin) — la action enforce el role.
+  // Filtros adicionales del lote polish M6 ronda 2. Sólo aplican cuando
+  // el caller es admin — la action enforce el role.
   if (opts.filterAdvisorId !== undefined && opts.assignedAdvisorId === undefined) {
     if (opts.filterAdvisorId === null) {
       query = query.is("assigned_advisor_id", null);
     } else {
-      query = query.eq("assigned_advisor_id", opts.filterAdvisorId);
+      // Bug 3: el filtro de asesor debe incluir los heredados — contactos
+      // sin assigned_advisor_id propio cuyas opps activas están asignadas
+      // a ese asesor. Pre-resolvemos esos contact_ids y los OR-eamos.
+      const derivedIds = await getContactIdsWithDerivedAdvisor(opts.filterAdvisorId);
+      if (derivedIds.length === 0) {
+        query = query.eq("assigned_advisor_id", opts.filterAdvisorId);
+      } else {
+        const inList = derivedIds.join(",");
+        query = query.or(
+          `assigned_advisor_id.eq.${opts.filterAdvisorId},id.in.(${inList})`,
+        );
+      }
     }
   }
   if (opts.dateFrom) query = query.gte("last_modified_at", opts.dateFrom);

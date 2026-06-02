@@ -219,14 +219,15 @@ const KANBAN_OPPORTUNITY_SELECT = `
  *  - Para admin con filtro "Sin asignar" pasar `assignedAdvisorId = null`.
  *  - Para admin sin filtro pasar `assignedAdvisorId = undefined`.
  *
- * Filtros adicionales (lote de polish M6):
- *  - `dateFrom`/`dateTo` filtran por `last_modified_at` (rango inclusivo).
- *  - `query` es búsqueda parcial sobre display_reference, contact name,
- *    contact phone y contact email (case-insensitive).
+ * Filtros adicionales (lote de polish M6 + correcciones ronda 2):
+ *  - `dateFrom`/`dateTo` filtran por `created_at` (rango inclusivo) —
+ *    la fecha que el usuario percibe como "cuándo se creó la opp".
+ *  - `query` es búsqueda parcial sobre display_reference + contact
+ *    (name/phone/email). PostgREST no permite `.or()` mezclando parent
+ *    y embedded en un solo predicado, así que pre-resolvemos los
+ *    `contact_id` que matchean el query y los inyectamos como `in.()`.
  *
- * Orden estable: `(last_modified_at DESC, id ASC)` para que la
- * paginación por offset sea determinista incluso ante ties de
- * timestamp (raro pero posible con auto-creación C2 en bulk).
+ * Orden estable: `(last_modified_at DESC, id ASC)`.
  */
 export async function listKanbanOpportunities(opts: {
   funnel: Funnel;
@@ -237,8 +238,23 @@ export async function listKanbanOpportunities(opts: {
   dateFrom?: string;
   dateTo?: string;
   query?: string;
+  /** Pre-resolved contact_ids that match the query — caller can pass
+   *  this to avoid duplicate sub-queries when listing multiple stages
+   *  with the same search. */
+  matchingContactIds?: UUID[] | null;
 }): Promise<KanbanOpportunity[]> {
   const { supabase, organizationId } = getTenantScopedClient();
+
+  // Resuelve contact_ids para search si el caller no los pasó.
+  let contactIds = opts.matchingContactIds;
+  if (contactIds === undefined && opts.query && opts.query.trim().length > 0) {
+    contactIds = await searchContactIdsForQuery(opts.query);
+  }
+  const hasQuery = !!opts.query && opts.query.trim().length > 0;
+  const sanitized = hasQuery
+    ? opts.query!.trim().replace(/[,.()*%\\]/g, " ").slice(0, 80)
+    : "";
+
   let query = supabase
     .from("opportunities")
     .select(KANBAN_OPPORTUNITY_SELECT)
@@ -254,13 +270,22 @@ export async function listKanbanOpportunities(opts: {
       query = query.eq("assigned_advisor_id", opts.assignedAdvisorId);
     }
   }
-  if (opts.dateFrom) query = query.gte("last_modified_at", opts.dateFrom);
-  if (opts.dateTo) query = query.lte("last_modified_at", opts.dateTo);
-  if (opts.query && opts.query.trim().length > 0) {
-    const sanitized = opts.query.trim().replace(/[,.()*%\\]/g, " ").slice(0, 80);
-    if (sanitized.length > 0) {
+  if (opts.dateFrom) query = query.gte("created_at", opts.dateFrom);
+  if (opts.dateTo) query = query.lte("created_at", opts.dateTo);
+
+  if (hasQuery) {
+    const idsList = (contactIds ?? []).slice(0, 5000);
+    if (idsList.length === 0 && sanitized.length === 0) {
+      return [];
+    }
+    if (idsList.length === 0) {
+      // Solo display_reference puede matchear.
+      query = query.ilike("display_reference", `%${sanitized}%`);
+    } else {
+      const inList = idsList.join(",");
+      // PostgREST `.or()` con `in.(...)` requiere el set entre paréntesis.
       query = query.or(
-        `display_reference.ilike.%${sanitized}%,contact.full_name.ilike.%${sanitized}%,contact.phone.ilike.%${sanitized}%,contact.email.ilike.%${sanitized}%`,
+        `display_reference.ilike.%${sanitized}%,contact_id.in.(${inList})`,
       );
     }
   }
@@ -279,24 +304,40 @@ export async function listKanbanOpportunities(opts: {
 
 /**
  * Cuenta exacta de opps activas por etapa para un funnel. Misma
- * semántica que `listKanbanOpportunities` (filtros opcionales)
- * pero retorna sólo conteos — usado por el kanban para mostrar el
- * número real en cada columna (no "50+").
+ * semántica que `listKanbanOpportunities`.
+ *
+ * Optimización (correcciones ronda 2): ya NO hace un `!inner` join
+ * sobre contacts solo para contar. El search por contact se resuelve
+ * pre-fetcheando los `contact_id` que matchean y filtrando con `in.()`.
+ * Resultado: para una org con 10k opps, la query pasa de "trae 10k
+ * rows con join + contar en JS" a "trae solo {id, stage_id}".
  */
 export async function countKanbanOpportunitiesByStage(opts: {
   funnel: Funnel;
   assignedAdvisorId?: UUID | null;
-  /** ISO date inclusive. Filtra por last_modified_at >= dateFrom. */
+  /** ISO date inclusive. Filtra por `created_at >= dateFrom`. */
   dateFrom?: string;
-  /** ISO date inclusive. Filtra por last_modified_at <= dateTo. */
+  /** ISO date inclusive. Filtra por `created_at <= dateTo`. */
   dateTo?: string;
-  /** Texto libre — buscar en display_reference y contact name/phone. */
   query?: string;
+  /** Pre-resolved contact_ids — caller suele compartirlos con
+   *  `listKanbanOpportunities` para evitar la sub-query repetida. */
+  matchingContactIds?: UUID[] | null;
 }): Promise<Record<UUID, number>> {
   const { supabase, organizationId } = getTenantScopedClient();
+
+  let contactIds = opts.matchingContactIds;
+  if (contactIds === undefined && opts.query && opts.query.trim().length > 0) {
+    contactIds = await searchContactIdsForQuery(opts.query);
+  }
+  const hasQuery = !!opts.query && opts.query.trim().length > 0;
+  const sanitized = hasQuery
+    ? opts.query!.trim().replace(/[,.()*%\\]/g, " ").slice(0, 80)
+    : "";
+
   let query = supabase
     .from("opportunities")
-    .select("stage_id, contact:contacts!inner(full_name, phone, email)", { count: "exact" })
+    .select("stage_id")
     .eq("organization_id", organizationId)
     .eq("funnel", opts.funnel)
     .is("cancelled_at", null);
@@ -308,16 +349,28 @@ export async function countKanbanOpportunitiesByStage(opts: {
       query = query.eq("assigned_advisor_id", opts.assignedAdvisorId);
     }
   }
-  if (opts.dateFrom) query = query.gte("last_modified_at", opts.dateFrom);
-  if (opts.dateTo) query = query.lte("last_modified_at", opts.dateTo);
-  if (opts.query && opts.query.trim().length > 0) {
-    const sanitized = opts.query.trim().replace(/[,.()*%\\]/g, " ").slice(0, 80);
-    if (sanitized.length > 0) {
+  if (opts.dateFrom) query = query.gte("created_at", opts.dateFrom);
+  if (opts.dateTo) query = query.lte("created_at", opts.dateTo);
+
+  if (hasQuery) {
+    const idsList = (contactIds ?? []).slice(0, 5000);
+    if (idsList.length === 0 && sanitized.length === 0) {
+      return {};
+    }
+    if (idsList.length === 0) {
+      query = query.ilike("display_reference", `%${sanitized}%`);
+    } else {
+      const inList = idsList.join(",");
       query = query.or(
-        `display_reference.ilike.%${sanitized}%,contact.full_name.ilike.%${sanitized}%,contact.phone.ilike.%${sanitized}%,contact.email.ilike.%${sanitized}%`,
+        `display_reference.ilike.%${sanitized}%,contact_id.in.(${inList})`,
       );
     }
   }
+
+  // Cap explícito: el conteo no debería volcar millones de filas. 50k
+  // es muy por encima de cualquier org realista en MVP — funciona como
+  // circuit breaker si la query no quedó bien acotada.
+  query = query.limit(50000);
 
   const { data, error } = await query;
   if (error) throw error;
@@ -326,6 +379,40 @@ export async function countKanbanOpportunitiesByStage(opts: {
     counts[row.stage_id] = (counts[row.stage_id] ?? 0) + 1;
   }
   return counts;
+}
+
+/**
+ * Resuelve los `contact_id` que matchean un query parcial sobre
+ * `full_name`, `phone` y `email`. Lote polish M6 ronda 2: lo extrae
+ * del pipeline para que `.or()` aplique solo sobre la tabla principal
+ * (PostgREST no soporta predicados mixtos parent+embedded en un solo
+ * `.or()`).
+ *
+ * Cap: 5000 IDs — suficiente para una org del MVP. Si el query es
+ * tan amplio que produce más, los excedentes no se pierden porque el
+ * caller también filtra por `display_reference.ilike`; lo común es
+ * que el query sea suficientemente específico para acotar mucho más.
+ */
+export async function searchContactIdsForQuery(rawQuery: string): Promise<UUID[]> {
+  const sanitized = rawQuery
+    .trim()
+    .replace(/[,.()*%\\]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 80);
+  if (sanitized.length === 0) return [];
+
+  const { supabase, organizationId } = getTenantScopedClient();
+  const { data, error } = await supabase
+    .from("contacts")
+    .select("id")
+    .eq("organization_id", organizationId)
+    .or(
+      `full_name.ilike.%${sanitized}%,phone.ilike.%${sanitized}%,email.ilike.%${sanitized}%`,
+    )
+    .limit(5000);
+  if (error) throw error;
+  return (data ?? []).map((r) => (r as { id: UUID }).id);
 }
 
 /**

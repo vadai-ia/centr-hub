@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { AdvisorOption } from "@/lib/types/pipeline";
 import type { UUID } from "@/lib/types/database";
 
@@ -10,6 +10,36 @@ export interface ActiveFilters {
   /** UUID de membership o null. */
   advisorId: UUID | null;
   query: string;
+}
+
+interface QuickRange {
+  label: string;
+  /** days back from today (inclusive). 0 = solo hoy. */
+  days: number;
+}
+
+const QUICK_RANGES: QuickRange[] = [
+  { label: "Hoy", days: 0 },
+  { label: "7 días", days: 7 },
+  { label: "30 días", days: 30 },
+  { label: "90 días", days: 90 },
+];
+
+function isoDate(d: Date): string {
+  // yyyy-mm-dd en zona horaria local del navegador.
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function rangeFromDays(days: number): { dateFrom: string; dateTo: string } {
+  const today = new Date();
+  const to = isoDate(today);
+  const fromDate = new Date(today);
+  fromDate.setDate(fromDate.getDate() - days);
+  const from = isoDate(fromDate);
+  return { dateFrom: from, dateTo: to };
 }
 
 interface Props {
@@ -55,8 +85,29 @@ export function PipelineFiltersBar({ filters, advisors, showAdvisorFilter, onCha
     onChange({ dateFrom: null, dateTo: null, advisorId: null, query: "" });
   }
 
+  // Identifica cuál rango rápido coincide con la selección actual para
+  // marcarlo activo (memoizado — depende solo de las fechas).
+  const activeQuickRange = useMemo(() => {
+    if (!filters.dateFrom || !filters.dateTo) return null;
+    for (const r of QUICK_RANGES) {
+      const candidate = rangeFromDays(r.days);
+      if (
+        candidate.dateFrom === filters.dateFrom &&
+        candidate.dateTo === filters.dateTo
+      ) {
+        return r.days;
+      }
+    }
+    return null;
+  }, [filters.dateFrom, filters.dateTo]);
+
+  function applyQuickRange(r: QuickRange) {
+    const { dateFrom, dateTo } = rangeFromDays(r.days);
+    onChange({ ...filters, dateFrom, dateTo });
+  }
+
   return (
-    <div className="flex flex-wrap items-center gap-2 mb-3 pb-3 border-b border-gray-200 dark:border-gray-700">
+    <div className="flex flex-wrap items-center gap-2 mb-2 pb-2 border-b border-gray-200 dark:border-gray-700">
       <div className="relative flex-1 min-w-[180px] max-w-xs">
         <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none">
           <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -71,6 +122,28 @@ export function PipelineFiltersBar({ filters, advisors, showAdvisorFilter, onCha
           placeholder="Buscar por nombre, teléfono, referencia"
           className="w-full pl-8 pr-2 py-1.5 text-sm rounded-md bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-amber-400"
         />
+      </div>
+
+      <div className="inline-flex rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-0.5 gap-0.5">
+        {QUICK_RANGES.map((r) => {
+          const isActive = activeQuickRange === r.days;
+          return (
+            <button
+              key={r.label}
+              type="button"
+              onClick={() => applyQuickRange(r)}
+              className={[
+                "text-[11px] font-medium px-2 py-1 rounded transition-colors",
+                isActive
+                  ? "bg-amber-400 text-gray-900"
+                  : "text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700",
+              ].join(" ")}
+              title={`Últimos ${r.days === 0 ? "1 día (hoy)" : `${r.days} días`}`}
+            >
+              {r.label}
+            </button>
+          );
+        })}
       </div>
 
       <DateRangeInput

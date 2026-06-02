@@ -17,6 +17,38 @@ Cada entrada documenta UN bug o lección con la siguiente estructura:
 
 ## Entradas
 
+### Lote polish M6 ronda 2 — pipeline filtros silenciosos, conteos lentos y URL de Shopify mal construida
+
+- **Milestone donde se detectó:** lote polish M6 (correcciones ronda 2, junio 2026).
+- **Síntoma:** (1) la barra de búsqueda del pipeline no filtraba nada — al escribir nombre/teléfono/referencia seguían apareciendo todas las tarjetas; (2) el rango de fechas tampoco cambiaba el resultado; (3) la plataforma reaccionaba con lag perceptible que antes del lote no existía; (4) el botón "Cliente en Shopify" del popup llevaba a la página genérica de la tienda, no al customer específico; (5) las notas en el timeline aparecían atribuidas a "Regina Vadai" aun cuando se creaban desde la cuenta del admin de Centr.
+- **Causa raíz:**
+  - **Búsqueda:** el `.or()` de PostgREST en `listKanbanOpportunities` mezclaba predicados sobre la tabla principal (`display_reference`) y sobre el embedded resource (`contact.full_name`, etc.) en un solo string. PostgREST NO soporta esa mezcla — el `.or()` aplica solo sobre la tabla principal salvo que se pase `{ referencedTable }`, y aún así no puede combinar parent + embedded en un solo predicado lógico. El resultado: el filtro completo se ignoraba silenciosamente.
+  - **Fechas:** el filtro usaba `last_modified_at` (el campo de LWW del proyecto), no `created_at`. Como `last_modified_at` se actualiza con cada webhook o edit, las opps "recientes" según ese campo eran casi todas — el rango no se notaba.
+  - **Lag:** la nueva función `countKanbanOpportunitiesByStage` traía TODAS las filas (sin `.limit()`) con un `!inner` join sobre `contacts` solo para contar en JavaScript. Con 5 000 opps, esa consulta era ~5 000 filas × join cartesiano vs 9 stages — operación pesada repetida por toggle de funnel, cambio de filtro y polling fallback cada 30s.
+  - **Shopify URL:** se construía `https://{shopify_store_domain}/admin/customers/{id}`. El formato correcto del admin moderno es `https://admin.shopify.com/store/{handle}/customers/{id}`, donde `handle` es la parte antes de `.myshopify.com`. El formato viejo redirige a la tienda root.
+  - **Autoría timeline:** el código resolvía el nombre del autor desde `user_profiles.full_name`, que se llenó en el bootstrap inicial con el nombre del operador VADAI (Regina). Cuando el admin de Centr opera desde la misma cuenta auth (o desde una nueva donde nadie actualizó user_profiles), el resolver muestra Regina porque es el valor sembrado, no porque sea quien hace la acción. El código siempre usó `session.userId` correctamente — el problema vive en DATA, no en LÓGICA.
+- **Workaround / fix:**
+  - **Búsqueda:** introducido `searchContactIdsForQuery(rawQuery)` en `lib/db/opportunities.ts` que pre-resuelve los `contact_id` matching y los inyecta en el `.or()` como `contact_id.in.(...)` — predicado puro de tabla principal. El caller (`loadInitialPipelineState` + `loadKanbanPageAction`) corre la sub-query una sola vez y comparte el resultado entre count + N stage queries via `matchingContactIds`.
+  - **Fechas:** ambos `listKanbanOpportunities` y `countKanbanOpportunitiesByStage` cambiaron `last_modified_at` por `created_at` en los filtros de rango.
+  - **Lag:** la función de conteo ya no joina contacts ni trae filas de más — `select("stage_id")` puro + `limit(50000)` como circuit breaker. La perf mejora en orden de magnitud para orgs con miles de opps.
+  - **Shopify URL:** `lib/actions/opportunities-m6.ts` strips `.myshopify.com` del `shopify_store_domain` para obtener el handle y construye `https://admin.shopify.com/store/{handle}/customers/{id}`.
+  - **Autoría timeline:** el resolver `loadUserNamesMap` ahora consulta `auth.users.raw_user_meta_data.full_name` después de `user_profiles.full_name` y le da prioridad si existe — el operador puede corregir su display name desde la Auth UI sin tocar BD. Además, fix definitivo en datos: ejecutar este SQL contra Supabase con el `auth_user_id` real del admin de Centr:
+    ```sql
+    -- Encuentra el user id del operador (admin de Centr):
+    SELECT id, email FROM auth.users WHERE email = '<email-del-admin>';
+    -- Actualiza el display name en ambos lugares:
+    UPDATE public.user_profiles SET full_name = 'Nombre correcto' WHERE id = '<auth-user-id>';
+    UPDATE auth.users SET raw_user_meta_data =
+      raw_user_meta_data || jsonb_build_object('full_name', 'Nombre correcto')
+      WHERE id = '<auth-user-id>';
+    ```
+- **Lección:**
+  - PostgREST `.or()` con embedded resources es trampa silenciosa — el filtro no falla, solo se ignora. Cuando el query toca múltiples tablas relacionadas, la regla operativa segura es pre-resolver la sub-query a una lista de IDs y aplicar el OR sobre la tabla principal.
+  - Las funciones de "count" que no aprovechan `count: 'exact', head: true` y no acotan con `.limit()` son una bomba de relojería de performance — el costo escala con el tamaño total de la tabla, no con la página visible. Siempre acotar el conteo con limit defensivo + select mínimo (solo el discriminador).
+  - El campo de fecha "fecha de creación" del usuario casi siempre es `created_at`, no `last_modified_at` ni `updated_at`. Cuando se construye un filtro de rango en la UI, confirmar contra schema antes de cablear — `last_modified_at` se actualiza con LWW de webhooks/syncs y no refleja "cuándo apareció esta opp".
+  - `user_profiles.full_name` y `auth.users.raw_user_meta_data.full_name` pueden divergir. El display autoritativo de "quién hizo qué" debe priorizar el campo que el usuario controla activamente (Auth UI) sobre el campo sembrado.
+  - El handle Shopify del Admin URL moderno no es el dominio crudo `*.myshopify.com` — es el slug del store. Verificar formato con un link real antes de cablear builders de URL.
+
 ### RETURNING INTO variable escalar con INSERT multi-fila falla en PL/pgSQL
 
 - **Milestone donde se detectó:** M1.
