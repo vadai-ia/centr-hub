@@ -41,10 +41,32 @@ const ABSORPTION_SOURCE = "absorbed_by_advanced_opportunity" as const;
 export interface AbsorbInput {
   /** Contacto cuyo Lead nuevo se quiere absorber. */
   contactId: UUID;
-  /** Opp recién creada (Cotización, etc.) que justifica la absorción. */
+  /**
+   * Opp avanzada que justifica la absorción. Para `draft_orders_*`
+   * triggers es la Cotización recién creada; para `corrective_backfill`
+   * es cualquier opp activa no-inicial pre-existente del contacto.
+   */
   absorbingOpportunityId: UUID;
-  /** Etiqueta semántica del disparador — viaja al audit y al note. */
-  trigger: "draft_orders_create" | "draft_orders_update_as_create";
+  /**
+   * Etiqueta semántica del disparador — viaja al audit y al note.
+   *
+   * Triggers en vivo:
+   *   - `draft_orders_create`            — Cotización aterriza después
+   *                                        del Lead nuevo R12 (race).
+   *   - `draft_orders_update_as_create`  — idempotencia inversa del
+   *                                        worker draft_orders/update.
+   * Trigger one-shot:
+   *   - `corrective_backfill`            — script de corrección de
+   *                                        históricos. `cancellation_source`
+   *                                        es idéntico a los triggers en
+   *                                        vivo (mismo invariante de
+   *                                        queries y métricas); solo el
+   *                                        audit trail los distingue.
+   */
+  trigger:
+    | "draft_orders_create"
+    | "draft_orders_update_as_create"
+    | "corrective_backfill";
 }
 
 export interface AbsorbResult {

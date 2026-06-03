@@ -15,7 +15,8 @@
     "shopify:inspect-get-customer": "tsx --tsconfig scripts/tsconfig.json scripts/shopify/inspect-get-customer.ts",
     "whaapy:configure-webhook": "tsx --tsconfig scripts/tsconfig.json scripts/whaapy/configure-webhook.ts",
     "whaapy:inspect-get-contact": "tsx --tsconfig scripts/tsconfig.json scripts/whaapy/inspect-get-contact.ts",
-    "whaapy:inspect-webhook-headers": "tsx --tsconfig scripts/tsconfig.json scripts/whaapy/inspect-webhook-headers.ts"
+    "whaapy:inspect-webhook-headers": "tsx --tsconfig scripts/tsconfig.json scripts/whaapy/inspect-webhook-headers.ts",
+    "maintenance:cancel-orphaned-lead-nuevo": "tsx --tsconfig scripts/tsconfig.json scripts/maintenance/cancel-orphaned-lead-nuevo.ts"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.1.0",
