@@ -25,6 +25,7 @@ import {
   replaceLineItems,
   updateOpportunity,
 } from "@/lib/db/opportunities";
+import { absorbInitialStageOpportunities } from "@/lib/services/opportunity-absorption";
 import { recordAuditEvent } from "@/lib/db/operational";
 import type {
   ContactRow,
@@ -193,6 +194,16 @@ export const draftOrdersCreate = inngest.createFunction(
         context: "webhook",
       });
       await replaceLineItems(opp.id, normalized.lineItems.map(mapLineItemForOpportunity));
+      // Absorbe cualquier "Lead nuevo" R12-creado activo del mismo
+      // contacto — cubre la dirección de race en que R12 disparó antes
+      // que llegara este draft_orders/create. Ver CLAUDE.md "Auto-creación
+      // C2 — Modelo C2 (R12)" + ERRORES.md "Lead nuevo duplicado con
+      // Cotización activa por race de webhooks".
+      await absorbInitialStageOpportunities({
+        contactId: contact.id,
+        absorbingOpportunityId: opp.id,
+        trigger: "draft_orders_create",
+      });
       return { opportunityId: opp.id, created: true };
     });
   },
@@ -315,6 +326,15 @@ export const draftOrdersUpdate = inngest.createFunction(
           context: "webhook",
         });
         await replaceLineItems(opp.id, normalized.lineItems.map(mapLineItemForOpportunity));
+        // Mismo razonamiento que en draftOrdersCreate: este path
+        // crea Cotización cuando draft_orders/update aterriza antes
+        // que draft_orders/create (idempotencia inversa). Absorber
+        // Lead nuevo R12 si existe activo para el contacto.
+        await absorbInitialStageOpportunities({
+          contactId: contact.id,
+          absorbingOpportunityId: opp.id,
+          trigger: "draft_orders_update_as_create",
+        });
         return { opportunityId: opp.id, created: true };
       }
 

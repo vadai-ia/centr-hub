@@ -22,6 +22,7 @@ import {
   type FieldProposal,
 } from "@/lib/services/last-write-wins";
 import { discardIfOwnEcho } from "@/lib/services/sync-loop-defense";
+import { isEchoByCustomFieldMarker } from "@/lib/services/whaapy-echo-detection";
 import {
   createContact,
   findContactByWhaapyContactId,
@@ -140,7 +141,45 @@ export const whaapyContactCreated = inngest.createFunction(
       finalPatch.missing_phone = phoneFinal === null;
       const updated = await updateContact(contact.id, finalPatch);
 
-      // 3. R12 (a): contacto nuevo entra a Whaapy → opp en Lead nuevo.
+      // 3. R11 opción A — eco de nuestro propio outbound. Si el payload
+      //    trae `custom_fields.last_platform_write_at` reciente, este
+      //    contact.created es el espejo del POST /contacts/v1 que M3
+      //    encoló desde Shopify → Whaapy (asimetría v5.1). NO es un
+      //    lead orgánico de WhatsApp — suprimimos R12.
+      //
+      //    El contact local YA quedó hidratado por los pasos 1 y 2
+      //    (identity match + LWW), así que solo se omite la creación
+      //    de la oportunidad sintética "Lead nuevo".
+      const isEcho = isEchoByCustomFieldMarker(
+        data.custom_fields,
+        env.receivedAt,
+      );
+      if (isEcho) {
+        await recordAuditEvent({
+          actorUserId: null,
+          eventType: "sync_loop_prevented",
+          entityType: "contact",
+          entityId: updated.id,
+          payload: {
+            source: "whaapy",
+            whaapy_entity_id: data.contact_id,
+            reason: "custom_field_marker_match_on_created",
+            marker_field: WHAAPY_OUTBOUND_MARKER_FIELD,
+            marker_value:
+              (data.custom_fields as Record<string, unknown> | null | undefined)?.[
+                WHAAPY_OUTBOUND_MARKER_FIELD
+              ] ?? null,
+            suppressed: "r12_auto_creation",
+          } as Json,
+        });
+        return {
+          contactId: updated.id,
+          linked: !!match.match,
+          r12Suppressed: true,
+        };
+      }
+
+      // 4. R12 (a): contacto nuevo entra a Whaapy → opp en Lead nuevo.
       await evaluateAndCreateC2Opportunity({
         contact: updated,
         trigger: "new_contact_in_whaapy",
@@ -247,7 +286,7 @@ export const whaapyContactUpdated = inngest.createFunction(
 
       // 3b. R11 opción A: marker custom_field. Si el GET trae
       //     `last_platform_write_at` reciente, es eco — descartar.
-      if (isEchoByCustomFieldMarker(snapshot, env.receivedAt)) {
+      if (isEchoByCustomFieldMarker(snapshot.custom_fields, env.receivedAt)) {
         await recordAuditEvent({
           actorUserId: null,
           eventType: "sync_loop_prevented",
@@ -335,25 +374,6 @@ export const whaapyContactDeleted = inngest.createFunction(
 // ============================================================
 // helpers privados
 // ============================================================
-
-function isEchoByCustomFieldMarker(
-  snapshot: WhaapyContactSnapshot,
-  receivedAt: string,
-): boolean {
-  const cf = snapshot.custom_fields;
-  if (!cf || typeof cf !== "object") return false;
-  const raw = (cf as Record<string, unknown>)[WHAAPY_OUTBOUND_MARKER_FIELD];
-  if (typeof raw !== "string") return false;
-  const markerTs = new Date(raw).getTime();
-  if (!Number.isFinite(markerTs)) return false;
-  const receivedTs = new Date(receivedAt).getTime();
-  // Si el marker es <= receivedAt y dentro de una ventana de 5 minutos
-  // hacia atrás, lo tratamos como nuestra escritura. Margen mayor que
-  // la ventana de la opción B (30s) — la opción A cubre los casos donde
-  // los timestamps no se alinearon por la latencia del GET reconcile.
-  const deltaMs = receivedTs - markerTs;
-  return deltaMs >= 0 && deltaMs <= 5 * 60 * 1000;
-}
 
 async function propagateUpdateToShopify(
   contact: ContactRow,
