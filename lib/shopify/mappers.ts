@@ -338,6 +338,10 @@ export const shopifyDraftOrderWebhookSchema = z
     updated_at: z.string().nullable().optional(),
     created_at: z.string().nullable().optional(),
     completed_at: z.string().nullable().optional(),
+    // Estado del draft: 'open' | 'invoice_sent' | 'completed'. Al
+    // completarse, Shopify setea `order_id` con la Order creada.
+    status: z.string().nullable().optional(),
+    order_id: z.union([z.number(), z.string()]).nullable().optional(),
   })
   .passthrough();
 
@@ -367,6 +371,10 @@ export interface NormalizedDraftOrder {
   updatedAt: string | null;
   createdAt: string | null;
   completedAt: string | null;
+  /** 'open' | 'invoice_sent' | 'completed' (null si Shopify lo omite). */
+  status: string | null;
+  /** Order Shopify creada al completar el draft. Null mientras no se completa. */
+  shopifyOrderId: string | null;
 }
 
 export function mapDraftOrderWebhookToNormalized(raw: unknown): NormalizedDraftOrder {
@@ -391,6 +399,8 @@ export function mapDraftOrderWebhookToNormalized(raw: unknown): NormalizedDraftO
     updatedAt: data.updated_at ?? null,
     createdAt: data.created_at ?? null,
     completedAt: data.completed_at ?? null,
+    status: data.status ?? null,
+    shopifyOrderId: shopifyIdToString(data.order_id ?? null),
   };
 }
 

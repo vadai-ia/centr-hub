@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   DndContext,
@@ -153,6 +153,13 @@ export function PipelineBoard({
     return map;
   }, [stages]);
 
+  // Ref del estado de cards para que el handler de realtime pueda leer
+  // la etapa previa de una opp sin re-crear el callback en cada cambio.
+  const cardsRef = useRef(cardsByStage);
+  useEffect(() => {
+    cardsRef.current = cardsByStage;
+  }, [cardsByStage]);
+
   const dndSensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
     useSensor(TouchSensor, {
@@ -185,9 +192,30 @@ export function PipelineBoard({
         setCardsByStage((cur) => removeOppById(cur, oppId));
         return;
       }
+      // Toast del trigger F1→F2 (M7.2 B2): si la card transita de una
+      // etapa NO ganada a una etapa Ganada y trae `shopify_order_id`
+      // (firma exclusiva del trigger — el cierre manual nunca lo
+      // popula), es la completación del Draft Order vía webhook.
+      const newStage = stagesById[opp.stage_id];
+      if (newStage?.is_won && opp.shopify_order_id) {
+        let prevStageId: UUID | null = null;
+        for (const [sid, list] of Object.entries(cardsRef.current)) {
+          if (list.some((o) => o.id === opp.id)) {
+            prevStageId = sid as UUID;
+            break;
+          }
+        }
+        const prevStage = prevStageId ? stagesById[prevStageId] : undefined;
+        if (prevStage && !prevStage.is_won) {
+          pushToast(
+            "Cotización completada. Se creó seguimiento en Post-venta.",
+            "success",
+          );
+        }
+      }
       setCardsByStage((cur) => upsertOpp(cur, opp, stagesById));
     },
-    [effectiveAdvisorId, stagesById],
+    [effectiveAdvisorId, stagesById, pushToast],
   );
 
   // Aplica un PipelineInitialState al estado local — usado por

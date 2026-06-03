@@ -193,6 +193,34 @@ describe("mapDraftOrderWebhookToNormalized", () => {
     expect(result.lineItems[0].title).toBe("Custom item");
   });
 
+  it("draft abierto: status='open', sin completedAt ni shopifyOrderId (M7.2 B2)", () => {
+    const result = mapDraftOrderWebhookToNormalized({
+      id: 1,
+      customer: { id: 1 },
+      line_items: [],
+      total_price: "0",
+      status: "open",
+    });
+    expect(result.status).toBe("open");
+    expect(result.completedAt).toBe(null);
+    expect(result.shopifyOrderId).toBe(null);
+  });
+
+  it("draft completado: status='completed' + order_id capturado para shopify_order_id (M7.2 B2)", () => {
+    const result = mapDraftOrderWebhookToNormalized({
+      id: 999,
+      customer: { id: 1 },
+      line_items: [],
+      total_price: "0",
+      status: "completed",
+      completed_at: "2026-06-01T12:00:00Z",
+      order_id: 7654321,
+    });
+    expect(result.status).toBe("completed");
+    expect(result.completedAt).toBe("2026-06-01T12:00:00Z");
+    expect(result.shopifyOrderId).toBe("7654321");
+  });
+
   it("embeddedCustomer hidratado cuando el payload trae customer completo (fix M3)", () => {
     const result = mapDraftOrderWebhookToNormalized({
       id: 999,

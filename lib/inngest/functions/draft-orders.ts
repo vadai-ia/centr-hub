@@ -26,6 +26,7 @@ import {
   updateOpportunity,
 } from "@/lib/db/opportunities";
 import { absorbInitialStageOpportunities } from "@/lib/services/opportunity-absorption";
+import { fireF1ToF2Trigger } from "@/lib/services/f1-to-f2-trigger";
 import { recordAuditEvent } from "@/lib/db/operational";
 import type {
   ContactRow,
@@ -50,6 +51,33 @@ import type {
 
 const inngest = getInngestClient();
 const COTIZACION_STAGE_NAME = "Cotización";
+
+/**
+ * Un Draft Order está completado cuando Shopify pone `status` en
+ * "completed" (o equivalentemente cuando aparece `completed_at`). Es
+ * el disparador del trigger atómico F1→F2 (M7.2, Bloque 2).
+ */
+function isDraftCompleted(normalized: NormalizedDraftOrder): boolean {
+  return normalized.status === "completed" || normalized.completedAt !== null;
+}
+
+/**
+ * Dispara el trigger F1→F2 si el draft se completó. Idempotente
+ * (el RPC `trigger_f1_to_f2` detecta hija existente), así que es
+ * seguro invocarlo desde cualquier path que resuelva la oportunidad.
+ */
+async function maybeFireF1ToF2(
+  opportunityId: UUID,
+  normalized: NormalizedDraftOrder,
+  shopifyEventId: string,
+): Promise<void> {
+  if (!isDraftCompleted(normalized)) return;
+  await fireF1ToF2Trigger({
+    opportunityId,
+    shopifyOrderId: normalized.shopifyOrderId,
+    shopifyEventId,
+  });
+}
 
 async function resolveCotizacionStage(): Promise<PipelineStageRow> {
   const stages = await listPipelineStages("venta");
@@ -174,6 +202,9 @@ export const draftOrdersCreate = inngest.createFunction(
         if (tagAssignment) patch.assigned_advisor_id = tagAssignment;
         await updateOpportunity(existing.id, patch);
         await replaceLineItems(existing.id, normalized.lineItems.map(mapLineItemForOpportunity));
+        // Defensa: un draft que se crea ya completado (caso atípico)
+        // dispara el trigger F1→F2 igual. Idempotente.
+        await maybeFireF1ToF2(existing.id, normalized, env.eventId);
         return { opportunityId: existing.id, created: false };
       }
 
@@ -204,6 +235,7 @@ export const draftOrdersCreate = inngest.createFunction(
         absorbingOpportunityId: opp.id,
         trigger: "draft_orders_create",
       });
+      await maybeFireF1ToF2(opp.id, normalized, env.eventId);
       return { opportunityId: opp.id, created: true };
     });
   },
@@ -335,10 +367,15 @@ export const draftOrdersUpdate = inngest.createFunction(
           absorbingOpportunityId: opp.id,
           trigger: "draft_orders_update_as_create",
         });
+        await maybeFireF1ToF2(opp.id, normalized, env.eventId);
         return { opportunityId: opp.id, created: true };
       }
 
       if (!shouldApplyRecordUpdate(existing.last_modified_at, effectiveUpdatedAt)) {
+        // Aunque el update sea "stale" por LWW, una completación NO
+        // debe perderse: el trigger es idempotente, así que se evalúa
+        // igual sobre la F1 ya conocida.
+        await maybeFireF1ToF2(existing.id, normalized, env.eventId);
         return { opportunityId: existing.id, discarded: true, reason: "stale_update" };
       }
 
@@ -347,6 +384,7 @@ export const draftOrdersUpdate = inngest.createFunction(
       if (tagAssignment) patch.assigned_advisor_id = tagAssignment;
       await updateOpportunity(existing.id, patch);
       await replaceLineItems(existing.id, normalized.lineItems.map(mapLineItemForOpportunity));
+      await maybeFireF1ToF2(existing.id, normalized, env.eventId);
       return { opportunityId: existing.id, created: false };
     });
   },
