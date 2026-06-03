@@ -84,6 +84,64 @@ export async function updateStage(
   return data;
 }
 
+export async function deleteStage(id: UUID): Promise<void> {
+  const { supabase, organizationId } = getTenantScopedClient();
+  const { error } = await supabase
+    .from("pipeline_stages")
+    .delete()
+    .eq("id", id)
+    .eq("organization_id", organizationId);
+  if (error) throw error;
+}
+
+/**
+ * Cuenta TODAS las oportunidades (incluidas canceladas) que
+ * referencian una etapa. Usado por el bloqueo de eliminación: el FK
+ * `opportunities.stage_id ... on delete restrict` impide borrar la
+ * etapa si existe cualquier opp apuntándola, sin importar su estado
+ * de cancelación — por eso el conteo no filtra `cancelled_at`.
+ */
+export async function countOpportunitiesForStage(stageId: UUID): Promise<number> {
+  const { supabase, organizationId } = getTenantScopedClient();
+  const { count, error } = await supabase
+    .from("opportunities")
+    .select("id", { count: "exact", head: true })
+    .eq("organization_id", organizationId)
+    .eq("stage_id", stageId);
+  if (error) throw error;
+  return count ?? 0;
+}
+
+/**
+ * Reordena las etapas de un funnel aplicando posiciones 1..N en el
+ * orden recibido. Persiste cada UPDATE de forma individual (no hay
+ * unique constraint sobre `position`, así que no hay riesgo de
+ * colisión transitoria). Valida que cada id pertenezca al funnel/org.
+ */
+export async function reorderStages(
+  funnel: Funnel,
+  orderedIds: UUID[],
+): Promise<void> {
+  const { supabase, organizationId } = getTenantScopedClient();
+  const current = await listPipelineStages(funnel);
+  const validIds = new Set(current.map((s) => s.id));
+  for (const id of orderedIds) {
+    if (!validIds.has(id)) {
+      throw new Error(
+        `reorderStages: etapa ${id} no pertenece al funnel ${funnel} de la organización`,
+      );
+    }
+  }
+  for (let i = 0; i < orderedIds.length; i++) {
+    const { error } = await supabase
+      .from("pipeline_stages")
+      .update({ position: i + 1 })
+      .eq("id", orderedIds[i])
+      .eq("organization_id", organizationId);
+    if (error) throw error;
+  }
+}
+
 // ============================================================
 // loss_reasons
 // ============================================================
