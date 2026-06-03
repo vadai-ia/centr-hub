@@ -144,6 +144,28 @@ export async function listActiveRealVendors(
 }
 
 /**
+ * Lista vendedores REALES para el mapeo de tags (M7.2, Bloque 5).
+ * A diferencia de `listActiveRealVendors`, INCLUYE vendedores
+ * desactivados (no filtra por `is_active`) — un mapeo histórico a un
+ * vendedor que ya no opera sigue siendo válido para atribución. R10:
+ * el usuario sistema "Histórico" SIEMPRE se excluye (`is_system_user`).
+ */
+export async function listRealVendorsForMapping(
+  organizationId: UUID,
+): Promise<Array<MembershipRow & { profile: UserProfileRow }>> {
+  const supabase = getSupabaseAdminClient();
+  const { data, error } = await supabase
+    .from("memberships")
+    .select("*, profile:user_profiles!inner(*)")
+    .eq("organization_id", organizationId)
+    .eq("role", "vendedor")
+    .eq("profile.is_system_user", false)
+    .order("created_at", { ascending: true });
+  if (error) throw error;
+  return (data ?? []) as Array<MembershipRow & { profile: UserProfileRow }>;
+}
+
+/**
  * Devuelve la membresía del usuario sistema "Histórico" de la org.
  * Único caller legítimo: backfill de M11.
  */

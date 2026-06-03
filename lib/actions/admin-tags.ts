@@ -1,0 +1,204 @@
+"use server";
+import { revalidatePath } from "next/cache";
+import { z } from "zod";
+import { withTenantContext } from "@/lib/tenant/context";
+import { resolveAdminContext } from "@/lib/auth/admin-guard";
+import { getInngestClient } from "@/lib/inngest/client";
+import {
+  listTagMappings,
+  upsertTagMapping,
+} from "@/lib/db/configuration";
+import { listRealVendorsForMapping } from "@/lib/db/users";
+import {
+  aggregateDetectedTags,
+  findOrdersWithTag,
+  reattributeOrders,
+} from "@/lib/db/tag-aggregation";
+import { recordAuditEvent } from "@/lib/db/operational";
+import {
+  PLATFORM_TAG_REPROCESS_EVENT,
+  type TagReprocessEnvelope,
+} from "@/lib/inngest/functions/tag-reprocess";
+import type {
+  TagMappingActionResult,
+  TagMappingView,
+  TagReprocessResult,
+  TagVendorOption,
+} from "@/lib/types/admin";
+import type { UUID } from "@/lib/types/database";
+
+/**
+ * Server actions del mapeo de tags ↔ vendedor (M7.2, Bloque 5).
+ * Solo admin/superadmin. El dropdown de vendedores excluye al usuario
+ * sistema "Histórico" (R10) e incluye vendedores reales desactivados.
+ */
+
+/** Conteo de entidades sobre el cual el re-proceso pasa a background. */
+const REPROCESS_INLINE_THRESHOLD = 200;
+
+type LoadResult =
+  | { ok: true; mappings: TagMappingView[]; vendors: TagVendorOption[] }
+  | { ok: false; message: string };
+
+export async function loadAdminTagMappings(): Promise<LoadResult> {
+  const admin = await resolveAdminContext();
+  if (!admin.ok) return admin;
+
+  return withTenantContext(admin.ctx.orgId, async () => {
+    const [detected, mappings, vendors] = await Promise.all([
+      aggregateDetectedTags(),
+      listTagMappings(),
+      listRealVendorsForMapping(admin.ctx.orgId),
+    ]);
+
+    const vendorMap = new Map(
+      vendors.map((v) => [v.id, { name: v.profile.full_name, active: v.is_active }]),
+    );
+    const detectedMap = new Map(detected.map((d) => [d.normalized, d]));
+    const mappingMap = new Map(mappings.map((m) => [m.normalized_tag, m]));
+
+    const allNormalized = new Set<string>([
+      ...detected.map((d) => d.normalized),
+      ...mappings.map((m) => m.normalized_tag),
+    ]);
+
+    const views: TagMappingView[] = Array.from(allNormalized).map((norm) => {
+      const row = mappingMap.get(norm);
+      const det = detectedMap.get(norm);
+      const mappedId = row?.mapped_membership_id ?? null;
+      const vendor = mappedId ? vendorMap.get(mappedId) : undefined;
+      return {
+        normalized: norm,
+        original: det?.original ?? row?.original_tag ?? norm,
+        count: det?.count ?? 0,
+        classification: row?.classification ?? "informational",
+        mapped_membership_id: mappedId,
+        mapped_vendor_name: vendor?.name ?? null,
+        mapped_vendor_active: mappedId ? (vendor?.active ?? false) : null,
+      };
+    });
+    views.sort((a, b) => a.original.localeCompare(b.original, "es"));
+
+    const vendorOptions: TagVendorOption[] = vendors.map((v) => ({
+      membershipId: v.id,
+      fullName: v.profile.full_name,
+      isActive: v.is_active,
+    }));
+
+    return { ok: true, mappings: views, vendors: vendorOptions };
+  }, { source: "user_session" });
+}
+
+const reclassifySchema = z.object({
+  normalizedTag: z.string().trim().min(1),
+  originalTag: z.string().trim().min(1),
+  classification: z.enum(["vendor", "informational"]),
+  membershipId: z.string().uuid().nullable().optional(),
+});
+
+export async function reclassifyTagAction(
+  raw: unknown,
+): Promise<TagMappingActionResult> {
+  const parsed = reclassifySchema.safeParse(raw);
+  if (!parsed.success) return { ok: false, message: "Datos de clasificación inválidos." };
+  const input = parsed.data;
+  const admin = await resolveAdminContext();
+  if (!admin.ok) return admin;
+
+  return withTenantContext(admin.ctx.orgId, async () => {
+    let membershipId: UUID | null = null;
+    if (input.classification === "vendor") {
+      if (!input.membershipId) {
+        return { ok: false, message: "Selecciona un vendedor para clasificar como De vendedor." };
+      }
+      // Defensa R10: el vendedor debe ser real (no sistema). La lista
+      // de mapeo ya excluye al "Histórico".
+      const vendors = await listRealVendorsForMapping(admin.ctx.orgId);
+      if (!vendors.some((v) => v.id === input.membershipId)) {
+        return { ok: false, message: "El vendedor seleccionado no es válido." };
+      }
+      membershipId = input.membershipId;
+    }
+
+    await upsertTagMapping({
+      normalized_tag: input.normalizedTag,
+      original_tag: input.originalTag,
+      classification: input.classification,
+      mapped_membership_id: membershipId,
+      created_by_user_id: admin.ctx.userId,
+    });
+    await recordAuditEvent({
+      actorUserId: admin.ctx.userId,
+      eventType: "tag_reclassified",
+      entityType: "tag_mapping",
+      entityId: null,
+      payload: {
+        normalized_tag: input.normalizedTag,
+        classification: input.classification,
+        mapped_membership_id: membershipId,
+      },
+    });
+    revalidatePath("/admin/mapeo-tags");
+
+    const result = await loadAdminTagMappings();
+    if (!result.ok) return { ok: false, message: result.message };
+    return { ok: true, mappings: result.mappings };
+  }, { source: "user_session" });
+}
+
+const reprocessSchema = z.object({
+  normalizedTag: z.string().trim().min(1),
+  originalTag: z.string().trim().min(1),
+  membershipId: z.string().uuid().nullable().optional(),
+});
+
+export async function reprocessTagAction(
+  raw: unknown,
+): Promise<TagReprocessResult> {
+  const parsed = reprocessSchema.safeParse(raw);
+  if (!parsed.success) return { ok: false, message: "Parámetros de re-proceso inválidos." };
+  const input = parsed.data;
+  const admin = await resolveAdminContext();
+  if (!admin.ok) return admin;
+
+  return withTenantContext(admin.ctx.orgId, async () => {
+    const membershipId = input.membershipId ?? null;
+    const candidates = await findOrdersWithTag(input.normalizedTag);
+
+    if (candidates.length === 0) {
+      return { ok: true, mode: "none", count: 0 };
+    }
+
+    // Conteo grande → background con notificación al admin al terminar.
+    if (candidates.length > REPROCESS_INLINE_THRESHOLD) {
+      const envelope: TagReprocessEnvelope = {
+        organizationId: admin.ctx.orgId,
+        normalizedTag: input.normalizedTag,
+        originalTag: input.originalTag,
+        membershipId,
+        actorUserId: admin.ctx.userId,
+      };
+      await getInngestClient().send({
+        name: PLATFORM_TAG_REPROCESS_EVENT,
+        data: envelope as unknown as Record<string, unknown>,
+      });
+      return { ok: true, mode: "background", count: candidates.length };
+    }
+
+    // Conteo pequeño → inline.
+    const affected = await reattributeOrders(candidates, membershipId);
+    await recordAuditEvent({
+      actorUserId: admin.ctx.userId,
+      eventType: "tag_attribution_reprocessed",
+      entityType: "tag_mapping",
+      entityId: null,
+      payload: {
+        normalized_tag: input.normalizedTag,
+        mapped_membership_id: membershipId,
+        affected_entities: affected,
+        mode: "inline",
+      },
+    });
+    return { ok: true, mode: "inline", count: affected };
+  }, { source: "user_session" });
+}

@@ -7,6 +7,7 @@ import { whaapyContactFunctions } from "./whaapy-contacts";
 import { whaapyConversationFunctions } from "./whaapy-conversations";
 import { whaapyOutboundFunctions } from "./whaapy-outbound";
 import { shopifyOutboundFunctions } from "./shopify-outbound";
+import { tagReprocessFunctions } from "./tag-reprocess";
 
 /**
  * Registro completo de funciones Inngest para servir desde
@@ -24,4 +25,5 @@ export const allFunctions = [
   ...whaapyConversationFunctions,
   ...whaapyOutboundFunctions,
   ...shopifyOutboundFunctions,
+  ...tagReprocessFunctions,
 ];

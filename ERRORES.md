@@ -17,6 +17,25 @@ Cada entrada documenta UN bug o lección con la siguiente estructura:
 
 ## Entradas
 
+### Trigger F1→F2: atomicidad por RPC e idempotencia por hija-existente, no por flag de webhook
+
+- **Milestone donde se detectó:** M7.2 (decisiones de diseño documentadas en construcción).
+- **Síntoma esperado si se implementa mal:** los anti-patrones que M7.2 tiende a producir — (a) transacción sin rollback real (la F1 queda Ganada sin hija si el proceso muere entre el UPDATE y el INSERT de la hija); (b) idempotencia mal hecha (cada webhook de completación duplicado crea otra hija en Post-venta); (c) propagación accidental a la hija (reasignar la F1 después del trigger cambia también el asesor de la F2).
+- **Causa raíz / decisión:** la completación de un Draft Order llega como `draft_orders/update` (puede repetirse) y la transición toca 4 tablas. Implementar la transición en TypeScript con varios `await` deja una ventana de inconsistencia entre pasos; un compensating-revert no la cierra del todo (si el proceso muere, no corre el revert).
+- **Workaround / fix (patrón correcto):**
+  1. **Atomicidad por RPC Postgres.** Toda la transición vive en `public.trigger_f1_to_f2` (migración 0020), una función PL/pgSQL SIN bloque EXCEPTION. Corre dentro de la transacción del statement que la invoca → si cualquier paso falla, Postgres revierte TODO. No existe estado intermedio posible. Es atomicidad real del motor, no emulada en app.
+  2. **Idempotencia por hija-existente, NO por flag.** Antes de crear, el RPC hace `SELECT ... FROM opportunities WHERE parent_opportunity_id = F1.id AND funnel='post_venta'`. Si existe → `skipped/child_already_exists`. Un `FOR UPDATE` sobre la F1 serializa completaciones concurrentes del mismo draft. Esto cubre tanto el webhook duplicado como el caso "F1 ya estaba Ganada manualmente" (no se duplica la hija; si no había hija, se crea una sola vez).
+  3. **R2 sin propagación a la hija.** El RPC copia `assigned_advisor_id` de la F1 a la hija UNA vez, en el momento del trigger, y nunca vuelve a tocar la hija. Una reasignación posterior del admin sobre la F1 (`updateOpportunity`) modifica solo la F1 — la hija conserva el asesor heredado. El edge case crítico del CHECKPOINT valida exactamente esto.
+- **Lección:** para transiciones multi-tabla disparadas por webhooks repetibles, la combinación correcta es **RPC transaccional + idempotencia por estado observable (existencia de la entidad derivada) + lock pesimista sobre el agregado padre**. No confiar en "el webhook llega una vez" ni en flags mutables como `won_at` para la idempotencia (un movimiento manual a Ganada setea `won_at` sin crear hija — usar `won_at` como guardia saltaría la creación legítima de la hija). El discriminador del toast (webhook vs manual) usa `shopify_order_id` poblado: solo el trigger lo escribe, así que su presencia en una transición no-ganada→ganada identifica de forma fiable el origen webhook.
+
+### Reconciliación de seeds con FK `on delete restrict`: renombrar in situ, no borrar+crear
+
+- **Milestone donde se detectó:** M7.2 (Bloque 3, reconciliación seed Post-venta 6→7).
+- **Síntoma esperado si se implementa mal:** la migración aborta con violación de FK al intentar `DELETE` de una `pipeline_stage` ("Preparación / Envío") que tiene oportunidades apuntándola (`opportunities.stage_id ... on delete restrict`), o peor, deja oportunidades huérfanas si se fuerza.
+- **Causa raíz:** el prompt describía el cambio como "eliminar Preparación/Envío + agregar dos nuevas". Un `DELETE` literal choca con el FK restrictivo en cuanto exista una sola opp en esa etapa (entornos de prueba o producción).
+- **Workaround / fix:** la migración 0019 **renombra** "Preparación / Envío" → "Envío en curso" (preserva el `id` de la etapa y por lo tanto todas sus oportunidades), quita `is_initial` de "Pago confirmado", inserta la nueva inicial "Cotización completada" y renormaliza posiciones. El estado final son las 7 etapas objetivo con cero pérdida de datos. Orden crítico: quitar `is_initial` de la inicial vieja ANTES de insertar la nueva, para no violar el índice único parcial `pipeline_stages_one_initial_per_funnel_idx`. Idempotente: si "Cotización completada" ya existe, salta.
+- **Lección:** cuando una reconciliación de catálogo "elimina X y agrega Y" pero X y Y son semánticamente equivalentes (aquí ambas son la etapa logística intermedia) y X está protegida por FK, **renombrar es la migración correcta** — logra el mismo estado final sin tocar las filas dependientes. Reservar borrar+crear solo cuando no hay equivalencia semántica, y en ese caso migrar las dependencias a una etapa válida ANTES del DELETE. Con índices únicos parciales (`WHERE is_initial = true`), siempre liberar el valor único antes de insertar el nuevo titular.
+
 ### Lead nuevo duplicado con Cotización activa por race de webhooks (R12 eco de Shopify→Whaapy)
 
 - **Milestone donde se detectó:** M6 producción (junio 2026), 8 contactos afectados en la org Centr.
