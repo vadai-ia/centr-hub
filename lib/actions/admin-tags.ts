@@ -5,6 +5,7 @@ import { withTenantContext } from "@/lib/tenant/context";
 import { resolveAdminContext } from "@/lib/auth/admin-guard";
 import { getInngestClient } from "@/lib/inngest/client";
 import {
+  deleteTagMappingByNormalized,
   listTagMappings,
   upsertTagMapping,
 } from "@/lib/db/configuration";
@@ -139,6 +140,53 @@ export async function reclassifyTagAction(
         classification: input.classification,
         mapped_membership_id: membershipId,
       },
+    });
+    revalidatePath("/admin/mapeo-tags");
+
+    const result = await loadAdminTagMappings();
+    if (!result.ok) return { ok: false, message: result.message };
+    return { ok: true, mappings: result.mappings };
+  }, { source: "user_session" });
+}
+
+const deleteSchema = z.object({
+  normalizedTag: z.string().trim().min(1),
+});
+
+/**
+ * Limpieza manual de una tag huérfana (M7.2 fix #5). Solo se permite
+ * si NINGUNA entidad (orden o contacto) la lleva — se re-verifica en
+ * servidor, no se confía en el conteo del cliente. Si hay entidades,
+ * se bloquea con mensaje (no hay purga automática: decisión del admin).
+ */
+export async function deleteTagMappingAction(
+  raw: unknown,
+): Promise<TagMappingActionResult> {
+  const parsed = deleteSchema.safeParse(raw);
+  if (!parsed.success) return { ok: false, message: "Identificador de tag inválido." };
+  const admin = await resolveAdminContext();
+  if (!admin.ok) return admin;
+
+  return withTenantContext(admin.ctx.orgId, async () => {
+    const [orders, contacts] = await Promise.all([
+      findOrdersWithTag(parsed.data.normalizedTag),
+      findContactsWithTag(parsed.data.normalizedTag),
+    ]);
+    const total = orders.length + contacts.length;
+    if (total > 0) {
+      return {
+        ok: false,
+        message: `No se puede eliminar: ${total} entidad${total === 1 ? "" : "es"} llevan esta tag. Solo se eliminan tags sin entidades.`,
+      };
+    }
+
+    const deleted = await deleteTagMappingByNormalized(parsed.data.normalizedTag);
+    await recordAuditEvent({
+      actorUserId: admin.ctx.userId,
+      eventType: "tag_mapping_deleted",
+      entityType: "tag_mapping",
+      entityId: null,
+      payload: { normalized_tag: parsed.data.normalizedTag, rows_deleted: deleted },
     });
     revalidatePath("/admin/mapeo-tags");
 

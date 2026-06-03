@@ -133,3 +133,23 @@ export async function updateTagMapping(
   if (error) throw error;
   return data;
 }
+
+/**
+ * Elimina un mapping de tag por su `normalized_tag` (citext único por
+ * org). Usado por la limpieza manual de tags huérfanas (M7.2 fix #5):
+ * el caller DEBE verificar antes que 0 entidades la lleven. Devuelve
+ * cuántas filas se borraron (0 si no existía).
+ */
+export async function deleteTagMappingByNormalized(
+  normalizedTag: string,
+): Promise<number> {
+  const { supabase, organizationId } = getTenantScopedClient();
+  const { data, error } = await supabase
+    .from("tag_mappings")
+    .delete()
+    .eq("organization_id", organizationId)
+    .eq("normalized_tag", normalizedTag)
+    .select("id");
+  if (error) throw error;
+  return (data ?? []).length;
+}

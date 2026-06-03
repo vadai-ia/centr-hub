@@ -1,6 +1,9 @@
 "use client";
 import { useMemo, useState } from "react";
-import { reprocessTagAction } from "@/lib/actions/admin-tags";
+import {
+  deleteTagMappingAction,
+  reprocessTagAction,
+} from "@/lib/actions/admin-tags";
 import type { TagMappingView, TagVendorOption } from "@/lib/types/admin";
 import { TagReclassifyModal } from "./tag-reclassify-modal";
 
@@ -22,11 +25,26 @@ export function MapeoTagsScreen({ initialMappings, vendors }: Props) {
   const [busyTag, setBusyTag] = useState<string | null>(null);
   const [banner, setBanner] = useState<{ tone: "error" | "success" | "info"; text: string } | null>(null);
   const [modalTag, setModalTag] = useState<TagMappingView | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<TagMappingView | null>(null);
 
   const visible = useMemo(() => {
     if (filter === "all") return mappings;
     return mappings.filter((m) => m.classification === filter);
   }, [mappings, filter]);
+
+  async function confirmDelete() {
+    if (!deleteTarget) return;
+    setBusyTag(deleteTarget.normalized);
+    const res = await deleteTagMappingAction({ normalizedTag: deleteTarget.normalized });
+    setBusyTag(null);
+    setDeleteTarget(null);
+    if (!res.ok) {
+      setBanner({ tone: "error", text: res.message });
+      return;
+    }
+    setMappings(res.mappings);
+    setBanner({ tone: "success", text: "Tag eliminada." });
+  }
 
   async function reprocess(tag: TagMappingView) {
     setBusyTag(tag.normalized);
@@ -150,6 +168,19 @@ export function MapeoTagsScreen({ initialMappings, vendors }: Props) {
               >
                 {tag.classification === "vendor" ? "Cambiar" : "Reclasificar"}
               </button>
+              <button
+                type="button"
+                onClick={() => setDeleteTarget(tag)}
+                disabled={busyTag === tag.normalized || tag.count > 0}
+                title={
+                  tag.count > 0
+                    ? `No se puede eliminar: ${tag.count} entidad${tag.count === 1 ? "" : "es"} llevan esta tag.`
+                    : "Eliminar tag huérfana (0 entidades)"
+                }
+                className="px-2 py-1 text-xs rounded-md text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+              >
+                Eliminar
+              </button>
             </li>
           ))}
         </ul>
@@ -166,6 +197,44 @@ export function MapeoTagsScreen({ initialMappings, vendors }: Props) {
           setBanner({ tone: "success", text: "Clasificación actualizada. Usa “Re-procesar” para aplicar la atribución a entidades existentes." });
         }}
       />
+
+      {deleteTarget && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center px-4 bg-gray-900/40 backdrop-blur-sm"
+          role="dialog"
+          aria-modal="true"
+          onClick={busyTag ? undefined : () => setDeleteTarget(null)}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-sm w-full p-6"
+          >
+            <p className="text-lg font-semibold text-gray-900 dark:text-gray-100">Eliminar tag</p>
+            <p className="text-sm text-gray-600 dark:text-gray-300 mt-2">
+              ¿Eliminar la tag <span className="font-medium">{deleteTarget.original}</span>? No la
+              lleva ninguna entidad (0). Esta acción no se puede deshacer.
+            </p>
+            <div className="flex justify-end gap-2 mt-5">
+              <button
+                type="button"
+                onClick={() => setDeleteTarget(null)}
+                disabled={busyTag !== null}
+                className="px-3 py-1.5 text-sm rounded-md border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={confirmDelete}
+                disabled={busyTag !== null}
+                className="px-3 py-1.5 text-sm rounded-md bg-red-600 text-white hover:bg-red-700 disabled:bg-red-300"
+              >
+                {busyTag ? "Eliminando..." : "Eliminar"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
