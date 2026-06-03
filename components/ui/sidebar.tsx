@@ -40,7 +40,10 @@ export function Sidebar({ role }: Props) {
 
   return (
     <aside className="w-56 flex-shrink-0 border-r border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 flex flex-col overflow-y-auto">
-      <nav className="flex-1 p-3 space-y-1">
+      {/* Vendor + admin fluyen juntos arriba. El nav NO lleva flex-1
+          (empujaba el bloque admin al fondo del aside, lejos de las
+          pestañas). El spacer va DESPUÉS para ocupar el resto. */}
+      <nav className="p-3 space-y-1">
         {VENDOR_TABS.map((tab) => (
           <Link key={tab.href} href={tab.href} className={linkClass(tab.href)}>
             {tab.label}
@@ -49,7 +52,7 @@ export function Sidebar({ role }: Props) {
       </nav>
 
       {isAdmin && (
-        <div className="border-t border-gray-200 dark:border-gray-700 p-3">
+        <div className="border-t border-gray-200 dark:border-gray-700 mt-1 p-3">
           <p className="px-3 py-1 text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-1">
             Administración
           </p>
@@ -66,6 +69,8 @@ export function Sidebar({ role }: Props) {
           </nav>
         </div>
       )}
+
+      <div className="flex-1" aria-hidden />
     </aside>
   );
 }

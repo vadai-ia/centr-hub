@@ -11,7 +11,9 @@ import {
 import { listRealVendorsForMapping } from "@/lib/db/users";
 import {
   aggregateDetectedTags,
+  findContactsWithTag,
   findOrdersWithTag,
+  reattributeContacts,
   reattributeOrders,
 } from "@/lib/db/tag-aggregation";
 import { recordAuditEvent } from "@/lib/db/operational";
@@ -163,14 +165,19 @@ export async function reprocessTagAction(
 
   return withTenantContext(admin.ctx.orgId, async () => {
     const membershipId = input.membershipId ?? null;
-    const candidates = await findOrdersWithTag(input.normalizedTag);
+    // Candidatos = órdenes + contactos que llevan la tag (fix M7.2 #3).
+    const [orders, contacts] = await Promise.all([
+      findOrdersWithTag(input.normalizedTag),
+      findContactsWithTag(input.normalizedTag),
+    ]);
+    const totalCandidates = orders.length + contacts.length;
 
-    if (candidates.length === 0) {
+    if (totalCandidates === 0) {
       return { ok: true, mode: "none", count: 0 };
     }
 
     // Conteo grande → background con notificación al admin al terminar.
-    if (candidates.length > REPROCESS_INLINE_THRESHOLD) {
+    if (totalCandidates > REPROCESS_INLINE_THRESHOLD) {
       const envelope: TagReprocessEnvelope = {
         organizationId: admin.ctx.orgId,
         normalizedTag: input.normalizedTag,
@@ -182,11 +189,13 @@ export async function reprocessTagAction(
         name: PLATFORM_TAG_REPROCESS_EVENT,
         data: envelope as unknown as Record<string, unknown>,
       });
-      return { ok: true, mode: "background", count: candidates.length };
+      return { ok: true, mode: "background", count: totalCandidates };
     }
 
-    // Conteo pequeño → inline.
-    const affected = await reattributeOrders(candidates, membershipId);
+    // Conteo pequeño → inline (órdenes + contactos).
+    const ordersAffected = await reattributeOrders(orders, membershipId);
+    const contactsAffected = await reattributeContacts(contacts, membershipId);
+    const affected = ordersAffected + contactsAffected;
     await recordAuditEvent({
       actorUserId: admin.ctx.userId,
       eventType: "tag_attribution_reprocessed",
@@ -196,6 +205,8 @@ export async function reprocessTagAction(
         normalized_tag: input.normalizedTag,
         mapped_membership_id: membershipId,
         affected_entities: affected,
+        orders_affected: ordersAffected,
+        contacts_affected: contactsAffected,
         mode: "inline",
       },
     });

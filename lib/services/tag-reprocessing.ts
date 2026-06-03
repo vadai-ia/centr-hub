@@ -1,17 +1,23 @@
 import "server-only";
-import { findOrdersWithTag, reattributeOrders } from "@/lib/db/tag-aggregation";
+import {
+  findContactsWithTag,
+  findOrdersWithTag,
+  reattributeContacts,
+  reattributeOrders,
+} from "@/lib/db/tag-aggregation";
 import { recordAuditEvent } from "@/lib/db/operational";
 import type { UUID } from "@/lib/types/database";
 
 /**
  * Re-procesamiento retroactivo de atribución por tag (M7.2, Bloque 5).
  *
- * ALCANCE: re-atribuye las ÓRDENES que llevan la tag (unidad de
- * atribución de revenue — ver `orders.ts`) al vendedor mapeado, y
- * cascadea al `opportunity_id` ligado. NO toca contactos (cuya
- * asignación pertenece al dominio Whaapy, no a tags de venta). Se
- * dispara solo cuando el admin reclasifica una tag a `vendor` o
- * cambia el vendedor mapeado.
+ * ALCANCE: re-atribuye al vendedor mapeado (a) las ÓRDENES que llevan
+ * la tag (unidad de atribución de revenue — ver `orders.ts`) + cascada
+ * a su `opportunity_id` ligado, y (b) los CONTACTOS que llevan la tag,
+ * LWW-aware (fix post-CHECKPOINT M7.2 #3 — la tag de Shopify es fuente
+ * legítima de asignación del contacto, R2; respeta asignaciones Whaapy
+ * más recientes). Se dispara cuando el admin reclasifica una tag a
+ * `vendor` o cambia el vendedor mapeado.
  *
  * Compartido por el path inline (conteo pequeño) y el worker Inngest
  * (conteo grande, background). Idempotente: re-correr fija el mismo
@@ -28,8 +34,13 @@ export interface RunTagReprocessingInput {
 export async function runTagReprocessing(
   input: RunTagReprocessingInput,
 ): Promise<number> {
-  const orders = await findOrdersWithTag(input.normalizedTag);
-  const affected = await reattributeOrders(orders, input.membershipId);
+  const [orders, contacts] = await Promise.all([
+    findOrdersWithTag(input.normalizedTag),
+    findContactsWithTag(input.normalizedTag),
+  ]);
+  const ordersAffected = await reattributeOrders(orders, input.membershipId);
+  const contactsAffected = await reattributeContacts(contacts, input.membershipId);
+  const affected = ordersAffected + contactsAffected;
   await recordAuditEvent({
     actorUserId: input.actorUserId,
     eventType: "tag_attribution_reprocessed",
@@ -39,6 +50,8 @@ export async function runTagReprocessing(
       normalized_tag: input.normalizedTag,
       mapped_membership_id: input.membershipId,
       affected_entities: affected,
+      orders_affected: ordersAffected,
+      contacts_affected: contactsAffected,
     },
   });
   return affected;

@@ -28,6 +28,7 @@ import { absorbInitialStageOpportunities } from "@/lib/services/opportunity-abso
 const ORG = "org-1";
 const CONTACT = "contact-1";
 const LEAD_NUEVO_STAGE = "stage-lead-nuevo";
+const CONTACTADO_STAGE = "stage-contactado";
 const COTIZACION_STAGE = "stage-cotizacion";
 
 function seedStages() {
@@ -41,6 +42,16 @@ function seedStages() {
       is_won: false,
       is_lost: false,
       position: 1,
+    },
+    {
+      id: CONTACTADO_STAGE,
+      organization_id: ORG,
+      funnel: "venta",
+      name: "Contactado asesor",
+      is_initial: false,
+      is_won: false,
+      is_lost: false,
+      position: 2,
     },
     {
       id: COTIZACION_STAGE,
@@ -60,6 +71,7 @@ function seedOpp(opts: {
   stageId: string;
   contactId?: string;
   cancelledAt?: string | null;
+  draftOrderId?: string | null;
 }) {
   const row = {
     id: opts.id,
@@ -69,7 +81,7 @@ function seedOpp(opts: {
     contact_id: opts.contactId ?? CONTACT,
     assigned_advisor_id: null,
     parent_opportunity_id: null,
-    shopify_draft_order_id: null,
+    shopify_draft_order_id: opts.draftOrderId ?? null,
     shopify_order_id: null,
     display_reference: null,
     actual_amount: null,
@@ -193,6 +205,46 @@ describe("absorbInitialStageOpportunities", () => {
       .getTable("opportunities")
       .find((o) => o.id === "opp-lead-other")!;
     expect(other.cancelled_at).toBeNull();
+  });
+
+  it("absorbe un lead en etapa intermedia pre-Cotización (no solo 'Lead nuevo') — fix M7.2 #4", async () => {
+    const lead = seedOpp({ id: "opp-contactado", stageId: CONTACTADO_STAGE });
+    const cot = seedOpp({ id: "opp-cot", stageId: COTIZACION_STAGE });
+
+    await withTenantContext(ORG, async () => {
+      const result = await absorbInitialStageOpportunities({
+        contactId: CONTACT,
+        absorbingOpportunityId: cot.id,
+        trigger: "draft_orders_create",
+      });
+      expect(result.absorbedOpportunityIds).toEqual([lead.id]);
+    });
+
+    const updatedLead = fake.getTable("opportunities").find((o) => o.id === lead.id)!;
+    expect(updatedLead.cancelled_at).toBeTruthy();
+    expect(updatedLead.cancellation_source).toBe("absorbed_by_advanced_opportunity");
+    expect(updatedLead.stage_id).toBe(CONTACTADO_STAGE);
+  });
+
+  it("NO absorbe una opp pre-Cotización que YA tiene su propia draft ligada (coexisten) — fix M7.2 #4", async () => {
+    const withDraft = seedOpp({
+      id: "opp-contactado-draft",
+      stageId: CONTACTADO_STAGE,
+      draftOrderId: "999000111",
+    });
+    const cot = seedOpp({ id: "opp-cot", stageId: COTIZACION_STAGE });
+
+    await withTenantContext(ORG, async () => {
+      const result = await absorbInitialStageOpportunities({
+        contactId: CONTACT,
+        absorbingOpportunityId: cot.id,
+        trigger: "draft_orders_create",
+      });
+      expect(result.absorbedOpportunityIds).toEqual([]);
+    });
+
+    const after = fake.getTable("opportunities").find((o) => o.id === withDraft.id)!;
+    expect(after.cancelled_at).toBeNull();
   });
 
   it("nunca cancela la opp absorbente aunque estuviera en etapa inicial (defensa edge)", async () => {

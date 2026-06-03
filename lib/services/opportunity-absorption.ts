@@ -2,38 +2,47 @@ import "server-only";
 import { getTenantScopedClient } from "@/lib/db/client";
 import {
   cancelOpportunity,
+  getOpportunityById,
   listOpportunities,
 } from "@/lib/db/opportunities";
 import { recordAuditEvent } from "@/lib/db/operational";
 import type { Json, UUID } from "@/lib/types/database";
 
 /**
- * Absorción del "Lead nuevo" cuando llega una oportunidad más avanzada.
+ * Absorción de leads pre-Cotización cuando llega una oportunidad más
+ * avanzada (típicamente la Cotización de un `draft_orders/create`).
  *
- * Regla de negocio (CLAUDE.md "Auto-creación C2 — Modelo C2 (R12)"):
- * la coexistencia de "Lead nuevo" (etapa `is_initial = true`) con otra
- * oportunidad activa del mismo contacto en Funnel Venta NUNCA es un
- * estado válido. R12 cubre la dirección "no crees el Lead nuevo si ya
- * hay opp avanzada"; este servicio cubre la dirección inversa: cuando
- * la opp avanzada (típicamente Cotización desde `draft_orders/create`)
- * aterriza después del Lead nuevo por race de webhooks, el Lead nuevo
- * se absorbe.
+ * Regla de negocio (CLAUDE.md "Auto-creación C2 — Modelo C2 (R12)" +
+ * fix post-CHECKPOINT M7.2 #4): las etapas ANTERIORES a "Cotización"
+ * en el Funnel Venta son fases de lead del mismo flujo comercial
+ * (Lead nuevo, Contactado asesor, Contacto calificado, etc.). La
+ * coexistencia de un lead en cualquiera de esas etapas SIN draft
+ * propia con una Cotización del mismo contacto NO es un estado válido
+ * — el lead se absorbe. R12 cubre la dirección "no crees el Lead nuevo
+ * si ya hay opp avanzada"; este servicio cubre la inversa (la avanzada
+ * aterriza después por race de webhooks).
+ *
+ * "Anterior a Cotización" NO se hardcodea por nombre: la opp absorbente
+ * (la Cotización recién creada) define el umbral con su PROPIA posición
+ * de etapa. Se absorben los leads del contacto cuya etapa tiene
+ * posición MENOR que la de la absorbente. Esto respeta las posiciones
+ * editables por el admin (M7.2 Bloque 3).
  *
  * Mecánica:
- *   - Lista opps activas (no canceladas) del contacto en Funnel Venta
- *     en etapa `is_initial = true`, excluyendo la propia opp absorbente
- *     (defensivo: nunca cancelar la opp que acaba de crearse).
+ *   - Resuelve la posición de etapa de la opp absorbente.
+ *   - Lista opps activas (no canceladas) del contacto en Funnel Venta;
+ *     candidatos = etapa con posición < umbral, SIN `shopify_draft_order_id`
+ *     propio (si tiene su propia draft, es otra negociación y coexiste
+ *     — no se toca), excluyendo la propia absorbente.
  *   - Cancela cada match con `cancelOpportunity(source =
- *     "absorbed_by_advanced_opportunity")`. Cancelación ≠ pérdida —
- *     el Lead absorbido NO contamina win rate (R5) ni se transita a
- *     etapa "Perdida" (preserva auditoría: la etapa al momento de
- *     absorción queda en el row).
- *   - Audit log `lead_nuevo_absorbed_by_advanced_opportunity` con la
- *     opp absorbente y la absorbida.
+ *     "absorbed_by_advanced_opportunity")`. Cancelación ≠ pérdida (R5):
+ *     no contamina win rate ni transita a "Perdida"; la etapa al momento
+ *     de absorción queda en el row.
+ *   - Audit log `lead_nuevo_absorbed_by_advanced_opportunity`.
  *
- * Idempotente: si no hay Lead nuevo activo, es no-op. Si la absorbente
- * misma está en etapa inicial (no debería pasar por el caller), se
- * excluye del set.
+ * Idempotente: si no hay lead pre-Cotización activo sin draft, es no-op.
+ * No introduce races nuevos — corre tras crear la Cotización y
+ * `listOpportunities` ya excluye canceladas (los absorbidos no reaparecen).
  */
 
 const ABSORPTION_SOURCE = "absorbed_by_advanced_opportunity" as const;
@@ -78,21 +87,22 @@ export async function absorbInitialStageOpportunities(
 ): Promise<AbsorbResult> {
   const { supabase, organizationId } = getTenantScopedClient();
 
-  // Resolver etapas iniciales (`is_initial = true`) del Funnel Venta
-  // por id. Soporta el caso defensivo de que el admin haya creado
-  // varias etapas iniciales (improbable — el bootstrap garantiza una
-  // sola, pero `pipeline_stages` no tiene constraint estricto).
-  const { data: initialStages, error: stagesErr } = await supabase
+  // Mapa posición por etapa del Funnel Venta (posiciones editables).
+  const { data: stageRows, error: stagesErr } = await supabase
     .from("pipeline_stages")
-    .select("id")
+    .select("id, position")
     .eq("organization_id", organizationId)
-    .eq("funnel", "venta")
-    .eq("is_initial", true);
+    .eq("funnel", "venta");
   if (stagesErr) throw stagesErr;
-  const initialStageIds = (initialStages ?? []).map(
-    (r) => (r as { id: UUID }).id,
+  const positionByStage = new Map<UUID, number>(
+    (stageRows ?? []).map((r) => [(r as { id: UUID }).id, (r as { position: number }).position]),
   );
-  if (initialStageIds.length === 0) {
+
+  // Posición de la opp absorbente (la Cotización recién creada) = umbral.
+  const absorbing = await getOpportunityById(input.absorbingOpportunityId);
+  const threshold = absorbing ? positionByStage.get(absorbing.stage_id) : undefined;
+  if (threshold === undefined) {
+    // Sin umbral resoluble no podemos decidir "anterior a Cotización".
     return { absorbedOpportunityIds: [] };
   }
 
@@ -102,11 +112,13 @@ export async function absorbInitialStageOpportunities(
     funnel: "venta",
     contactId: input.contactId,
   });
-  const candidates = active.filter(
-    (opp) =>
-      opp.id !== input.absorbingOpportunityId &&
-      initialStageIds.includes(opp.stage_id),
-  );
+  const candidates = active.filter((opp) => {
+    if (opp.id === input.absorbingOpportunityId) return false;
+    // Coexiste si tiene su propia draft ligada (otra negociación).
+    if (opp.shopify_draft_order_id) return false;
+    const pos = positionByStage.get(opp.stage_id);
+    return pos !== undefined && pos < threshold;
+  });
   if (candidates.length === 0) {
     return { absorbedOpportunityIds: [] };
   }
@@ -116,7 +128,7 @@ export async function absorbInitialStageOpportunities(
     const result = await cancelOpportunity({
       opportunityId: opp.id,
       source: ABSORPTION_SOURCE,
-      note: `[Sistema] Lead nuevo absorbido por oportunidad avanzada (${input.trigger}). No es pérdida comercial.`,
+      note: `[Sistema] Lead pre-Cotización absorbido por oportunidad avanzada (${input.trigger}). No es pérdida comercial.`,
     });
     if (result.alreadyCancelled) continue;
     absorbed.push(opp.id);
