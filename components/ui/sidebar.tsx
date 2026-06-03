@@ -3,9 +3,11 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { Role } from "@/lib/types/database";
 
+// Alcance V1 (M7.2, Bloque 1). Mi Día, Reglas, Metas, Umbrales y
+// Branding se posponen a V2: ocultos de la nav. Sus rutas redirigen
+// limpio a /pipeline si se fuerza la URL directa.
 const VENDOR_TABS = [
   { href: "/pipeline", label: "Pipeline" },
-  { href: "/mi-dia", label: "Mi Día" },
   { href: "/contactos", label: "Contactos" },
   { href: "/whaapy", label: "Whaapy" },
   { href: "/dashboard", label: "Dashboard" },
@@ -15,11 +17,7 @@ const ADMIN_PAGES = [
   { href: "/admin/etapas", label: "Etapas del pipeline" },
   { href: "/admin/motivos", label: "Motivos de pérdida" },
   { href: "/admin/mapeo-tags", label: "Mapeo de tags" },
-  { href: "/admin/reglas", label: "Reglas de automación" },
-  { href: "/admin/metas", label: "Metas" },
-  { href: "/admin/umbrales", label: "Umbrales de semáforos" },
   { href: "/admin/usuarios", label: "Usuarios" },
-  { href: "/admin/branding", label: "Branding" },
 ] as const;
 
 interface Props {
