@@ -1,10 +1,17 @@
-export default function MotivosPage() {
-  return (
-    <div className="text-center py-16 text-gray-400 dark:text-gray-500">
-      <p className="text-lg font-medium text-gray-600 dark:text-gray-300">
-        Motivos de pérdida
-      </p>
-      <p className="mt-2 text-sm">Esta sección se construye en M7</p>
-    </div>
-  );
+import { loadAdminLossReasons } from "@/lib/actions/admin-loss-reasons";
+import { MotivosScreen } from "./motivos-screen";
+
+/**
+ * Admin → Motivos de pérdida (M7.2, Bloque 4).
+ */
+export default async function MotivosPage() {
+  const res = await loadAdminLossReasons();
+  if (!res.ok) {
+    return (
+      <div className="max-w-2xl mx-auto py-16 text-center text-gray-500 dark:text-gray-400">
+        <p>{res.message}</p>
+      </div>
+    );
+  }
+  return <MotivosScreen initialReasons={res.reasons} />;
 }

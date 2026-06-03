@@ -187,3 +187,41 @@ export async function updateLossReason(
   if (error) throw error;
   return data;
 }
+
+export async function getLossReasonById(id: UUID): Promise<LossReasonRow | null> {
+  const { supabase, organizationId } = getTenantScopedClient();
+  const { data, error } = await supabase
+    .from("loss_reasons")
+    .select("*")
+    .eq("id", id)
+    .eq("organization_id", organizationId)
+    .maybeSingle();
+  if (error) throw error;
+  return data ?? null;
+}
+
+/**
+ * Cuenta oportunidades que referencian un motivo de pérdida. El FK
+ * `opportunities.loss_reason_id ... on delete restrict` bloquea el
+ * borrado a nivel BD; este conteo da el mensaje amigable previo.
+ */
+export async function countOpportunitiesForLossReason(reasonId: UUID): Promise<number> {
+  const { supabase, organizationId } = getTenantScopedClient();
+  const { count, error } = await supabase
+    .from("opportunities")
+    .select("id", { count: "exact", head: true })
+    .eq("organization_id", organizationId)
+    .eq("loss_reason_id", reasonId);
+  if (error) throw error;
+  return count ?? 0;
+}
+
+export async function deleteLossReason(id: UUID): Promise<void> {
+  const { supabase, organizationId } = getTenantScopedClient();
+  const { error } = await supabase
+    .from("loss_reasons")
+    .delete()
+    .eq("id", id)
+    .eq("organization_id", organizationId);
+  if (error) throw error;
+}

@@ -1,4 +1,4 @@
-import type { PipelineStageRow } from "@/lib/types/database";
+import type { LossReasonRow, PipelineStageRow } from "@/lib/types/database";
 
 /**
  * Tipos compartidos de las pantallas de administración (M7.2) entre
@@ -9,4 +9,8 @@ import type { PipelineStageRow } from "@/lib/types/database";
 
 export type StageActionResult =
   | { ok: true; stages: PipelineStageRow[] }
+  | { ok: false; message: string };
+
+export type LossReasonActionResult =
+  | { ok: true; reasons: LossReasonRow[] }
   | { ok: false; message: string };
