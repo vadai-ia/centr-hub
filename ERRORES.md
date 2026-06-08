@@ -17,7 +17,49 @@ Cada entrada documenta UN bug o lección con la siguiente estructura:
 
 ## Entradas
 
-### Tag "fantasma" = mapping huérfano por cambio de ortografía de la tag en el origen (no es bug de normalización)
+### Dependencias del dashboard NO estaban instaladas pese a la doctrina; `xlsx` (SheetJS) deprecado en npm → `exceljs`
+
+- **Milestone donde se detectó:** M8.2 (Dashboard + exportación).
+- **Síntoma:** el prompt y la doctrina afirmaban que `recharts`, `xlsx` y `jspdf` "ya están en el stack". `package.json` solo declaraba `luxon`. Construir el dashboard sin ellas era imposible y CLAUDE.md exige aprobación explícita antes de instalar dependencias.
+- **Causa raíz:** la doctrina documentó la intención de stack (Sección 3.1) pero las libs nunca se instalaron en milestones previos — ningún milestone anterior necesitó gráficas ni export. Además `xlsx` (SheetJS) publicado en el registro npm está **deprecado y con advisories de seguridad**; su versión mantenida se distribuye fuera de npm.
+- **Workaround / fix:** con aprobación del operador se instalaron `recharts ^3.8.1`, `jspdf ^4.2.1`, `jspdf-autotable ^5.0.8` y **`exceljs ^4.4.0` en lugar de `xlsx`** (mantenido, soporta celdas con estilo, sin el advisory de SheetJS). `npm install` reportó 9 vulnerabilidades (5 moderate, 4 high) provenientes de **deps transitivas viejas de exceljs** (`glob@7`, `fstream`, `unzipper`) — NO se corrió `npm audit fix --force` para no romper el stack fijado (Kibah lesson). **Deuda aceptada para MVP**: las libs solo corren client-side al exportar (no en superficie de ataque server). Si V2 lo justifica, evaluar reemplazo de exceljs o pin de transitivas.
+- **Lección:** "documentado en la doctrina" ≠ "instalado". Antes de un milestone que asume libs, verificar `package.json` real. Y antes de instalar `xlsx` por defecto, recordar que el paquete npm es el viejo vulnerable — `exceljs` es la alternativa robusta para escritura de Excel con estilo.
+
+### `"use server"` solo puede exportar funciones async — un const objeto rompe el build
+
+- **Milestone donde se detectó:** M8.2.
+- **Síntoma:** `next build` fallaba en "Collecting page data" con `Error: A "use server" file can only export async functions, found object` apuntando a `/dashboard`. `tsc` pasaba limpio — el error es de runtime del build, no de tipos.
+- **Causa raíz:** `lib/actions/dashboard.ts` (módulo `"use server"`) exportaba `DEFAULT_DASHBOARD_FILTERS` (un objeto). Next.js exige que TODO export runtime de un módulo de server actions sea una función async; los `export type`/`interface` se borran y no cuentan, pero un objeto const sí.
+- **Workaround / fix:** mover el const a `lib/actions/dashboard-defaults.ts` (sin `"use server"`), tipado con `import type { DashboardFiltersInput } from "./dashboard"` (el import type se borra en compilación → no arrastra el módulo server al bundle del importador). El page importa la action desde `dashboard.ts` y el default desde `dashboard-defaults.ts`.
+- **Lección:** en un archivo `"use server"`, exportar SOLO funciones async (+ tipos). Constantes, objetos default y helpers síncronos van en un módulo aparte. `tsc --noEmit` NO detecta esto; solo lo caza `next build` — correr el build antes de cerrar, no solo el typecheck.
+
+### Target TS < es6: iterar Map/Set y unicode regex `\p{}` fallan en compilación
+
+- **Milestone donde se detectó:** M8.2.
+- **Síntoma:** `tsc` con errores `TS2802: Type 'Set<...>' can only be iterated ... '--downlevelIteration' or '--target' of 'es2015'` al hacer `for (const x of set)` / `[...map.entries()]`, y `TS1501: This regular expression flag is only available when targeting 'es6' or later` por usar `/[^\p{L}\p{N}]+/gu`.
+- **Causa raíz:** el `tsconfig.json` del proyecto fija un target bajo (no se debe tocar — parte del stack fijado). Bajo ese target, iterar `Map`/`Set` directamente y las property-escapes unicode (`\p{}`, que requieren el flag `u`) no son válidas.
+- **Workaround / fix:** (a) iterar con `Array.from(set)` / `Array.from(map.entries())` / `Array.from(map.values())` + `.forEach`/`.map` en vez de `for...of`/spread directo (Array.from resuelve el iterable en runtime sin el flag). (b) Reemplazar el regex unicode por uno ASCII con transliteración manual de acentos para el nombre de archivo del export.
+- **Lección:** en este repo, NUNCA iterar `Map`/`Set` con `for...of` o spread directo — usar `Array.from(...)`. Y nada de `\p{...}`/flag `u` en regex. Es restricción del target, no preferencia de estilo. Patrón ya presente en el código existente (las queries de M5/M6 iteran arrays, no Sets).
+
+### recharts v3: el `formatter` del Tooltip recibe `ValueType` (puede ser undefined), no `number`
+
+- **Milestone donde se detectó:** M8.2.
+- **Síntoma:** `tsc` error `TS2322` en cada `<Tooltip formatter={(v: number) => ...}>`: "Type '(v: number) => ...' is not assignable to type 'Formatter<ValueType, NameType>' ... Type 'undefined' is not assignable to type 'number'".
+- **Causa raíz:** en recharts 3 el tipo del `formatter` declara el primer parámetro como `ValueType` (`number | string | (number|string)[] | undefined`). Anotarlo como `number` es más estrecho que la firma esperada y TS lo rechaza.
+- **Workaround / fix:** no anotar el parámetro (dejar que TS lo infiera desde la firma esperada) y coercir con `Number(v)` dentro del formatter. Para el tercer arg (payload entry) castear puntualmente: `(item as { payload?: { amount?: number } })?.payload?.amount`.
+- **Lección:** con recharts 3 + TS strict, los callbacks (`formatter`, `tickFormatter`, `labelFormatter`) tipan los valores como `ValueType`/`NameType` (uniones que incluyen undefined). Coercir con `Number()`/`String()` en el cuerpo en vez de anotar parámetros estrechos.
+
+### Decisiones de cómputo del dashboard (no-bugs, para que el CHECKPOINT no las marque como error)
+
+- **Milestone donde se detectó:** M8.2 (documentadas en construcción).
+- **Contexto:** varias decisiones del dashboard producen resultados que a primera vista parecen "inconsistencias" pero son intencionales:
+  - **El desglose por vendedor NO suma al total de la org.** El usuario sistema "Histórico" (R10) se excluye de las filas del drilldown pero su revenue/conteos SÍ entran en los totales de la org (scope "all"). La diferencia entre la suma de las filas y el total mostrado arriba = la contribución de Histórico. Es correcto por diseño (el prompt lo pide explícito), no un error de cuadre.
+  - **Leads, Leads calificados y Cotizaciones enviadas excluyen canceladas.** Se cuentan vía histórico de etapas / creación, pero filtrando opps `cancelled_at IS NULL`. Consistente con "cancelado ≠ perdido" (R5) y evita inflar Leads con duplicados absorbidos (R12). Decisión documentada; si Centr quiere contar "cotizaciones retractadas", es ajuste V2.
+  - **Pipeline $ y Oportunidades activas son SNAPSHOT, no acotados al periodo.** Representan el estado vivo actual del funnel; el filtro de periodo no los recorta (un pipeline "del mes pasado" no tiene sentido operativo). El resto de KPIs sí respetan el periodo.
+  - **Tasa de recompra usa ventana FIJA de 12 meses**, independiente del filtro de periodo (definición del KPI), configurable solo vía `DASHBOARD_REPURCHASE_WINDOW_MONTHS`.
+  - **Win rate por etapa: "avanzó" = la opp alcanzó (en cualquier momento de su historia) una etapa de posición mayor que NO sea la perdida.** Llegar a Ganada cuenta como avance; llegar a Perdida no. Muestra <10 → "Muestra pequeña" (umbral fijo `DASHBOARD_STAGE_WINRATE_MIN_SAMPLE=10`).
+  - **Frontera "Cotización" / "Contacto calificado" se ancla por NOMBRE una sola vez para obtener su POSICIÓN**, y toda clasificación posterior es por `position` (no por listas de nombres). Mismo criterio que la absorción de M7.2 y que el worker de draft orders (que ya resuelve "Cotización" por nombre). Si el admin renombra esas etapas, hay fallback posicional documentado en `lib/services/dashboard-stages.ts`.
+- **Lección:** documentar las decisiones de cómputo que rompen la intuición de "todo debe cuadrar" evita que una validación manual posterior las reporte como bug. El checkpoint manual debe validar contra estas definiciones, no contra el supuesto naïve.
 
 - **Milestone donde se detectó:** Fixes post-CHECKPOINT M7.2 (junio 2026). Caso real: tag `ginajimenez` en `tag_mappings` con 0 entidades.
 - **Síntoma:** existía una fila `tag_mappings` con `normalized_tag = 'ginajimenez'` (sin acento) clasificada como `vendor` → Gina, pero 0 contactos/0 orders la llevaban. En paralelo, la tag REAL `ginajiménez` (con acento) tenía 41 entidades (28 orders + 13 contactos). Origen del fantasma desconocido a primera vista.
