@@ -52,6 +52,30 @@ export async function findOpportunityByDraftOrderId(
   return data ?? null;
 }
 
+/**
+ * Resuelve el id de la hija de Post-venta de una F1 dada (su
+ * `parent_opportunity_id`). El trigger F1→F2 crea como máximo una hija
+ * por F1 (guard `child_already_exists`), así que ≤1 fila. Incluye
+ * canceladas: el hook de re-atribución de orders/* puede necesitar
+ * alinear el asesor aunque la hija esté cancelada (consistencia de
+ * auditoría). Devuelve null si la F1 aún no tiene hija.
+ */
+export async function findPostventaChildOpportunityId(
+  parentOpportunityId: UUID,
+): Promise<UUID | null> {
+  const { supabase, organizationId } = getTenantScopedClient();
+  const { data, error } = await supabase
+    .from("opportunities")
+    .select("id")
+    .eq("organization_id", organizationId)
+    .eq("parent_opportunity_id", parentOpportunityId)
+    .eq("funnel", "post_venta")
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return (data?.id as UUID) ?? null;
+}
+
 export async function createOpportunity(
   input: Omit<OppInsert, "organization_id">,
 ): Promise<OpportunityRow> {

@@ -1,6 +1,7 @@
 import "server-only";
 import { getTenantScopedClient } from "@/lib/db/client";
 import { recordAuditEvent, createNotification } from "@/lib/db/operational";
+import { findPostventaChildOpportunityId } from "@/lib/db/opportunities";
 import type { Json, UUID } from "@/lib/types/database";
 
 /**
@@ -177,6 +178,86 @@ export async function backfillF1ToF2Child(
     changes: r.changes,
     lineItemsCopied: r.line_items_copied,
   };
+}
+
+// ============================================================
+// Re-atribución del asesor de la hija de Post-venta (desde la orden)
+// ============================================================
+
+export interface ReattributeChildAdvisorResult {
+  status: "fixed" | "would_fix" | "noop" | "skipped";
+  reason?: string | null;
+  childOpportunityId: UUID | null;
+  parentOpportunityId: UUID | null;
+  /** shopify_order_id de la orden cuya atribución se usó (si la hubo). */
+  orderShopifyOrderId?: string | null;
+  fromAdvisorId?: UUID | null;
+  toAdvisorId?: UUID | null;
+}
+
+interface ReattributeRpcResult {
+  status: "fixed" | "would_fix" | "noop" | "skipped";
+  reason?: string | null;
+  child_opportunity_id: UUID | null;
+  parent_opportunity_id?: UUID | null;
+  order_shopify_order_id?: string | null;
+  from_advisor_id?: UUID | null;
+  to_advisor_id?: UUID | null;
+}
+
+/**
+ * Alinea el asesor de una hija de Post-venta con el de su ORDEN cerrada,
+ * reusando el RPC `reattribute_postventa_child_advisor` (migración 0022,
+ * misma semántica que el trigger arreglado). Solo cambia el asesor de la
+ * hija cuando la orden tiene asesor y difiere; nunca toca la F1 ni el
+ * contacto; respeta la guarda anti-reasignación-manual. Idempotente y
+ * atómico (garantías en el RPC).
+ *
+ * `dryRun = true` calcula el cambio sin escribir nada.
+ */
+export async function reattributePostventaChildAdvisor(
+  childId: UUID,
+  dryRun: boolean,
+  source: string,
+): Promise<ReattributeChildAdvisorResult> {
+  const { supabase } = getTenantScopedClient();
+
+  const { data, error } = await supabase.rpc(
+    "reattribute_postventa_child_advisor",
+    { p_child_id: childId, p_dry_run: dryRun, p_source: source },
+  );
+  if (error) throw error;
+
+  const r = data as ReattributeRpcResult;
+  return {
+    status: r.status,
+    reason: r.reason ?? null,
+    childOpportunityId: r.child_opportunity_id,
+    parentOpportunityId: r.parent_opportunity_id ?? null,
+    orderShopifyOrderId: r.order_shopify_order_id ?? null,
+    fromAdvisorId: r.from_advisor_id ?? null,
+    toAdvisorId: r.to_advisor_id ?? null,
+  };
+}
+
+/**
+ * Hook desde el worker de orders/*: cuando una orden con asesor se
+ * vincula a una F1 que ya tiene hija de Post-venta, re-atribuye el asesor
+ * de la hija. Cierra la ventana de carrera en que el draft se completó
+ * (trigger F1→F2 disparado, hija nacida con fallback F1) ANTES de que la
+ * orden aterrizara con su tag de vendedor.
+ *
+ * No-op silencioso si la F1 aún no tiene hija (el trigger la creará
+ * después leyendo la orden ya presente). El RPC es idempotente, así que
+ * invocarlo en cada orders/* del mismo pedido es seguro.
+ */
+export async function reattributePostventaChildForOrder(args: {
+  parentOpportunityId: UUID;
+  source: string;
+}): Promise<void> {
+  const childId = await findPostventaChildOpportunityId(args.parentOpportunityId);
+  if (!childId) return;
+  await reattributePostventaChildAdvisor(childId, false, args.source);
 }
 
 /**

@@ -23,6 +23,7 @@ import {
   updateOrder,
 } from "@/lib/db/orders";
 import { findOpportunityByDraftOrderId } from "@/lib/db/opportunities";
+import { reattributePostventaChildForOrder } from "@/lib/services/f1-to-f2-trigger";
 import { recordAuditEvent } from "@/lib/db/operational";
 import type { Json, OrderRow, UUID } from "@/lib/types/database";
 
@@ -265,6 +266,20 @@ function makeOrderWorker(args: {
             payload: { shopify_order_id: normalized.shopifyOrderId },
           });
         }
+
+        // Hook de re-atribución (fix 0022): si esta orden tiene asesor y
+        // está vinculada a una F1, alinea el asesor de la hija de
+        // Post-venta con el de la orden. Cierra la ventana de carrera en
+        // que el draft se completó (hija nacida con fallback F1) antes de
+        // que la orden aterrizara con su tag. RPC idempotente: no-op si ya
+        // está alineado o si la F1 aún no tiene hija.
+        if (order.opportunity_id && order.assigned_advisor_id) {
+          await reattributePostventaChildForOrder({
+            parentOpportunityId: order.opportunity_id,
+            source: args.topic,
+          });
+        }
+
         return { orderId: order.id };
       });
     },

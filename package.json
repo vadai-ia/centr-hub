@@ -17,7 +17,8 @@
     "whaapy:inspect-get-contact": "tsx --tsconfig scripts/tsconfig.json scripts/whaapy/inspect-get-contact.ts",
     "whaapy:inspect-webhook-headers": "tsx --tsconfig scripts/tsconfig.json scripts/whaapy/inspect-webhook-headers.ts",
     "maintenance:cancel-orphaned-lead-nuevo": "tsx --tsconfig scripts/tsconfig.json scripts/maintenance/cancel-orphaned-lead-nuevo.ts",
-    "maintenance:backfill-postventa-child-data": "tsx --tsconfig scripts/tsconfig.json scripts/maintenance/backfill-postventa-child-data.ts"
+    "maintenance:backfill-postventa-child-data": "tsx --tsconfig scripts/tsconfig.json scripts/maintenance/backfill-postventa-child-data.ts",
+    "maintenance:reattribute-postventa-child-advisor": "tsx --tsconfig scripts/tsconfig.json scripts/maintenance/reattribute-postventa-child-advisor.ts"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.1.0",
