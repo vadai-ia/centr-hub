@@ -23,7 +23,10 @@ import {
   updateOrder,
 } from "@/lib/db/orders";
 import { findOpportunityByDraftOrderId } from "@/lib/db/opportunities";
-import { reattributePostventaChildForOrder } from "@/lib/services/f1-to-f2-trigger";
+import {
+  reattributePostventaChildForOrder,
+  reattributeVentaOpportunityForOrder,
+} from "@/lib/services/f1-to-f2-trigger";
 import { recordAuditEvent } from "@/lib/db/operational";
 import type { Json, OrderRow, UUID } from "@/lib/types/database";
 
@@ -267,13 +270,22 @@ function makeOrderWorker(args: {
           });
         }
 
-        // Hook de re-atribución (fix 0022): si esta orden tiene asesor y
-        // está vinculada a una F1, alinea el asesor de la hija de
-        // Post-venta con el de la orden. Cierra la ventana de carrera en
-        // que el draft se completó (hija nacida con fallback F1) antes de
-        // que la orden aterrizara con su tag. RPC idempotente: no-op si ya
-        // está alineado o si la F1 aún no tiene hija.
+        // Hooks de re-atribución (fix 0022 + 0023): si esta orden tiene
+        // asesor y está vinculada a una opp de Venta (F1), realinea dos
+        // filas distintas sin colisión —
+        //   (a) la F1 de Venta sin asesor (rellena NULL, fix 0023): cierra
+        //       la ventana de carrera en que la opp avanzó por la tag del
+        //       draft antes de que la orden aterrizara con su tag. SOLO
+        //       rellena NULL — nunca pisa un asesor ya puesto.
+        //   (b) la hija de Post-venta (fix 0022): alinea el asesor de la
+        //       hija con el de la orden.
+        // Ambas RPC son idempotentes y tocan funnels distintos (venta vs
+        // post_venta), así que no se pisan ni duplican trabajo.
         if (order.opportunity_id && order.assigned_advisor_id) {
+          await reattributeVentaOpportunityForOrder({
+            opportunityId: order.opportunity_id,
+            source: args.topic,
+          });
           await reattributePostventaChildForOrder({
             parentOpportunityId: order.opportunity_id,
             source: args.topic,

@@ -260,6 +260,85 @@ export async function reattributePostventaChildForOrder(args: {
   await reattributePostventaChildAdvisor(childId, false, args.source);
 }
 
+// ============================================================
+// Re-atribución del asesor de la opp de Venta (desde el pedido)
+// ============================================================
+
+export interface ReattributeVentaOpportunityResult {
+  status: "fixed" | "would_fix" | "noop" | "skipped";
+  reason?: string | null;
+  opportunityId: UUID | null;
+  /** shopify_order_id del pedido cuya atribución se usó (si la hubo). */
+  orderShopifyOrderId?: string | null;
+  /** Siempre null en este flujo — solo rellenamos NULL, nunca pisamos. */
+  fromAdvisorId?: UUID | null;
+  toAdvisorId?: UUID | null;
+}
+
+interface ReattributeVentaRpcResult {
+  status: "fixed" | "would_fix" | "noop" | "skipped";
+  reason?: string | null;
+  opportunity_id: UUID | null;
+  order_shopify_order_id?: string | null;
+  from_advisor_id?: UUID | null;
+  to_advisor_id?: UUID | null;
+}
+
+/**
+ * Rellena el asesor de una opp de Venta SIN asesor con el de su PEDIDO
+ * vinculado, reusando el RPC `reattribute_venta_opportunity_advisor`
+ * (migración 0023). Guardrail central: SOLO rellena NULL — si la opp ya
+ * tiene asesor (tag de draft, herencia o manual), no se toca. Nunca
+ * escribe a la orden ni al contacto. Idempotente y atómico (garantías
+ * en el RPC).
+ *
+ * `dryRun = true` calcula el cambio sin escribir nada.
+ */
+export async function reattributeVentaOpportunityAdvisor(
+  opportunityId: UUID,
+  dryRun: boolean,
+  source: string,
+): Promise<ReattributeVentaOpportunityResult> {
+  const { supabase } = getTenantScopedClient();
+
+  const { data, error } = await supabase.rpc(
+    "reattribute_venta_opportunity_advisor",
+    { p_opportunity_id: opportunityId, p_dry_run: dryRun, p_source: source },
+  );
+  if (error) throw error;
+
+  const r = data as ReattributeVentaRpcResult;
+  return {
+    status: r.status,
+    reason: r.reason ?? null,
+    opportunityId: r.opportunity_id,
+    orderShopifyOrderId: r.order_shopify_order_id ?? null,
+    fromAdvisorId: r.from_advisor_id ?? null,
+    toAdvisorId: r.to_advisor_id ?? null,
+  };
+}
+
+/**
+ * Hook desde el worker de orders/*: cuando un pedido con asesor se
+ * vincula a una opp de Venta que está SIN asesor, le rellena el asesor.
+ * Cierra la ventana de carrera en que la opp de Venta avanzó por la tag
+ * del draft ANTES de que el pedido aterrizara con su tag de vendedor.
+ *
+ * Convive con `reattributePostventaChildForOrder` sin colisión: esta
+ * función toca la opp de Venta (la F1, funnel='venta'); la otra toca la
+ * hija de Post-venta (funnel='post_venta'). Filas y funnels distintos.
+ *
+ * No-op silencioso si la opp ya tiene asesor (rellena solo NULL) o si el
+ * pedido aún no tiene asesor. El RPC es idempotente, así que invocarlo
+ * en cada orders/* del mismo pedido es seguro.
+ */
+export async function reattributeVentaOpportunityForOrder(args: {
+  opportunityId: UUID;
+  source: string;
+}): Promise<void> {
+  await reattributeVentaOpportunityAdvisor(args.opportunityId, false, args.source);
+}
+
 /**
  * Notifica a todos los admins activos de la org actual. Mismo patrón
  * que el DLQ handler (notificación origin=system).
