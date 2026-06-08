@@ -135,3 +135,26 @@ export const PIPELINE_UNASSIGNED_COOKIE = "centr_pipeline_unassigned" as const;
 export const CONTACTS_PAGE_SIZE = 50 as const;
 export const CONTACT_SEARCH_DEBOUNCE_MS = 300 as const;
 export const TIMELINE_DEFAULT_LIMIT = 50 as const;
+
+/**
+ * Dashboard descriptivo (M8.2).
+ *
+ * `DASHBOARD_STAGE_WINRATE_MIN_SAMPLE` — umbral FIJO de muestra para
+ *   el KPI "Win rate por etapa": si una etapa tiene menos de N opps
+ *   en el periodo, se muestra "Muestra pequeña" en vez del %. Fijo en
+ *   V1, no configurable (las metas/umbrales configurables son V2).
+ *   Es deliberadamente independiente de `DEFAULT_THRESHOLDS.
+ *   win_rate_min_sample` (config V2) para no acoplar el dashboard
+ *   descriptivo a la maquinaria de cumplimiento futura.
+ *
+ * `DASHBOARD_REPURCHASE_WINDOW_MONTHS` — ventana del KPI "Tasa de
+ *   recompra" (clientes con >1 order en los últimos N meses).
+ *
+ * `DASHBOARD_EXPORT_MAX_ROWS` — tope defensivo de filas por tabla en
+ *   los exports (drilldown por vendedor, pérdidas por motivo). Los
+ *   KPIs son agregados, no volcados de filas, así que este límite no
+ *   debería alcanzarse en una org del MVP; actúa como circuit breaker.
+ */
+export const DASHBOARD_STAGE_WINRATE_MIN_SAMPLE = 10 as const;
+export const DASHBOARD_REPURCHASE_WINDOW_MONTHS = 12 as const;
+export const DASHBOARD_EXPORT_MAX_ROWS = 5000 as const;
