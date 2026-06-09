@@ -194,10 +194,10 @@ describe("computePostventaMetrics", () => {
     return {
       period: PERIOD,
       ordersCreated: [
-        { assigned_advisor_id: A, created_at: "2026-05-10T18:00:00.000Z" },
-        { assigned_advisor_id: A, created_at: "2026-05-11T18:00:00.000Z" },
-        { assigned_advisor_id: B, created_at: "2026-05-12T18:00:00.000Z" },
-        { assigned_advisor_id: null, created_at: "2026-05-13T18:00:00.000Z" },
+        { assigned_advisor_id: A, shopify_created_at: "2026-05-10T18:00:00.000Z" },
+        { assigned_advisor_id: A, shopify_created_at: "2026-05-11T18:00:00.000Z" },
+        { assigned_advisor_id: B, shopify_created_at: "2026-05-12T18:00:00.000Z" },
+        { assigned_advisor_id: null, shopify_created_at: "2026-05-13T18:00:00.000Z" },
       ],
       problematicOpps: [{ assigned_advisor_id: A }, { assigned_advisor_id: B }],
       postventaStages: { problematicStage: null, terminalStageIds: TERMINAL },

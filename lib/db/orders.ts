@@ -100,6 +100,37 @@ export async function replaceOrderLineItems(
 }
 
 /**
+ * Órdenes sin `shopify_created_at` poblado (migración 0024). Usado por
+ * el correctivo `backfill-order-shopify-created-at` para enumerar qué
+ * filas necesitan que se les traiga la fecha real de Shopify. Devuelve
+ * el subconjunto de columnas que el correctivo necesita para reportar
+ * (incluye `opportunity_id` para distinguir las huérfanas O6).
+ *
+ * Idempotente por construcción: una vez poblado el campo, la fila deja
+ * de aparecer aquí, así que re-correr el correctivo no la reprocesa.
+ */
+export interface OrderMissingShopifyCreatedAt {
+  id: UUID;
+  shopify_order_id: string;
+  opportunity_id: UUID | null;
+  created_at: string;
+}
+
+export async function listOrdersMissingShopifyCreatedAt(): Promise<
+  OrderMissingShopifyCreatedAt[]
+> {
+  const { supabase, organizationId } = getTenantScopedClient();
+  const { data, error } = await supabase
+    .from("orders")
+    .select("id, shopify_order_id, opportunity_id, created_at")
+    .eq("organization_id", organizationId)
+    .is("shopify_created_at", null)
+    .order("created_at", { ascending: true });
+  if (error) throw error;
+  return (data ?? []) as OrderMissingShopifyCreatedAt[];
+}
+
+/**
  * Suma de revenue real para el periodo. R5: solo órdenes con
  * financial_status = 'paid' cuentan; usa total_amount y paid_at.
  */

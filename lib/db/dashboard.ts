@@ -26,7 +26,14 @@ export interface PaidOrderRow {
 }
 export interface CreatedOrderRow {
   assigned_advisor_id: UUID | null;
-  created_at: string;
+  /**
+   * Fecha real de creación del pedido en Shopify (migración 0024). El
+   * dashboard cuenta/agrupa pedidos por esta fecha, NO por `created_at`
+   * de BD (que es cuándo el registro entró localmente). La query filtra
+   * por este campo, así que las filas con NULL (pre-correctivo) quedan
+   * fuera del periodo.
+   */
+  shopify_created_at: string;
 }
 export interface AdvisorOnlyRow {
   assigned_advisor_id: UUID | null;
@@ -270,7 +277,15 @@ export async function listFullHistoryForOpportunities(
 // Funnel Post-venta
 // ============================================================
 
-/** Post-venta KPI 1 — órdenes creadas en el periodo. */
+/**
+ * Post-venta KPI 1 — órdenes CREADAS en el periodo, por la fecha real
+ * de creación en Shopify (`shopify_created_at`, migración 0024), NO por
+ * `created_at` de BD. Definición de negocio: cuenta pagados + pendientes
+ * por igual (sin filtro de `financial_status`). Las filas con
+ * `shopify_created_at` NULL (pre-correctivo o pedido inexistente en
+ * Shopify) quedan fuera de cualquier periodo — una fecha desconocida no
+ * se inventa.
+ */
 export async function listOrdersCreatedInPeriod(
   startUtc: string,
   endUtc: string,
@@ -278,10 +293,10 @@ export async function listOrdersCreatedInPeriod(
   const { supabase, organizationId } = getTenantScopedClient();
   const { data, error } = await supabase
     .from("orders")
-    .select("assigned_advisor_id, created_at")
+    .select("assigned_advisor_id, shopify_created_at")
     .eq("organization_id", organizationId)
-    .gte("created_at", startUtc)
-    .lte("created_at", endUtc)
+    .gte("shopify_created_at", startUtc)
+    .lte("shopify_created_at", endUtc)
     .limit(ROW_CAP);
   if (error) throw error;
   return (data ?? []) as CreatedOrderRow[];

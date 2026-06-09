@@ -226,6 +226,12 @@ export interface OrderRow {
   updated_at: ISODateString;
   paid_at: ISODateString | null;
   cancelled_at: ISODateString | null;
+  // Fecha real de creación del pedido en Shopify (created_at del objeto
+  // Order de Shopify). Distinto de `created_at`, que es cuándo el
+  // registro entró a la BD local. NULL en filas pre-fix 0024 hasta que
+  // el correctivo las popule. El dashboard cuenta pedidos por esta
+  // columna, no por `created_at` (migración 0024).
+  shopify_created_at: ISODateString | null;
 }
 
 export interface OrderLineItemRow {

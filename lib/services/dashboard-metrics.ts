@@ -318,7 +318,9 @@ export function computePostventaMetrics(raw: PostventaRaw, scope: Scope): Postve
   for (const o of raw.ordersCreated) {
     if (!matchScope(o.assigned_advisor_id, scope)) continue;
     ordersCount += 1;
-    const key = monthKeyInTz(o.created_at);
+    // Bucket por la fecha real de creación en Shopify (migración 0024),
+    // no por `created_at` de BD.
+    const key = monthKeyInTz(o.shopify_created_at);
     if (monthOrders.has(key)) monthOrders.set(key, monthOrders.get(key)! + 1);
   }
 

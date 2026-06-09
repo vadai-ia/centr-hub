@@ -185,6 +185,7 @@ async function backfillOrders(opts: {
         last_modified_source: "shopify",
         paid_at: normalized.paidAt,
         cancelled_at: normalized.cancelledAt,
+        shopify_created_at: normalized.createdAt,
       });
       await replaceOrderLineItems(
         created.id,
@@ -228,6 +229,7 @@ async function backfillOrders(opts: {
       cancelled_at: normalized.cancelledAt ?? existing.cancelled_at,
       last_modified_at: effectiveUpdatedAt,
       last_modified_source: "shopify",
+      shopify_created_at: normalized.createdAt ?? existing.shopify_created_at,
       assigned_advisor_id: tagParse.assignedMembership?.id ?? existing.assigned_advisor_id,
     });
     await replaceOrderLineItems(

@@ -157,6 +157,9 @@ async function upsertOrderShell(
       last_modified_source: "shopify",
       paid_at: normalized.paidAt,
       cancelled_at: normalized.cancelledAt,
+      // Fecha real de creación del pedido en Shopify (no la de BD).
+      // El dashboard cuenta pedidos por este campo (migración 0024).
+      shopify_created_at: normalized.createdAt,
     });
     await replaceOrderLineItems(
       created.id,
@@ -187,6 +190,9 @@ async function upsertOrderShell(
     cancelled_at: normalized.cancelledAt ?? existing.cancelled_at,
     last_modified_at: effectiveUpdatedAt,
     last_modified_source: "shopify",
+    // Fecha real de creación en Shopify: inmutable allá. Coalesce
+    // defensivo para no borrarla si un payload llegara sin created_at.
+    shopify_created_at: normalized.createdAt ?? existing.shopify_created_at,
   };
   if (tagAssignment !== null) patch.assigned_advisor_id = tagAssignment;
 
