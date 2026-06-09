@@ -8,7 +8,7 @@ import {
   type CreateInShopifyPrefill,
 } from "@/components/contacts/create-in-shopify-dialog";
 import { ReassignAdvisorDialog } from "@/components/contacts/reassign-advisor-dialog";
-import { formatAddress } from "../utils";
+import { parseStoredAddress } from "@/lib/contacts/address";
 import { ContactHeader } from "./contact-header";
 import { ContactIndicators } from "./contact-indicators";
 import { ContactOpportunities } from "./contact-opportunities";
@@ -54,7 +54,7 @@ export function ContactDetailScreen({ bundle }: Props) {
     fullName: bundle.detail.contact.full_name,
     email: bundle.detail.contact.email,
     phone: bundle.detail.contact.phone,
-    address: formatAddress(bundle.detail.contact.address),
+    address: parseStoredAddress(bundle.detail.contact.address),
   };
 
   return (

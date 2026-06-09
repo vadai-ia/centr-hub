@@ -10,7 +10,7 @@ import {
   type CreateInShopifyPrefill,
 } from "@/components/contacts/create-in-shopify-dialog";
 import { ReassignAdvisorDialog } from "@/components/contacts/reassign-advisor-dialog";
-import { formatAddress } from "@/app/(dashboard)/contactos/utils";
+import { emptyStructuredAddress } from "@/lib/contacts/address";
 import { AddNoteDialog } from "./add-note-dialog";
 import { CreateTaskDialog } from "./create-task-dialog";
 import { OpportunityDialogContent } from "./opportunity-dialog-content";
@@ -126,10 +126,9 @@ export function OpportunityDialog({ paramName = "opp" }: Props) {
         // El popup carga `OpportunityContactSummary`, que solo trae los
         // campos visibles en la card y NO el `address` jsonb completo.
         // Pre-fill vacío: el usuario lo llena/edita en el modal.
-        address: null,
+        address: emptyStructuredAddress(),
       }
     : null;
-  void formatAddress;
 
   return (
     <div

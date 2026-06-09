@@ -4,6 +4,11 @@ import {
   createContactInShopifyAction,
   type CreateInShopifyResult,
 } from "@/lib/actions/contacts";
+import {
+  emptyStructuredAddress,
+  type StructuredAddress,
+} from "@/lib/contacts/address";
+import { StructuredAddressFields } from "@/components/contacts/structured-address-fields";
 import type { UUID } from "@/lib/types/database";
 
 export interface CreateInShopifyPrefill {
@@ -11,7 +16,8 @@ export interface CreateInShopifyPrefill {
   fullName: string | null;
   email: string | null;
   phone: string | null;
-  address: string | null;
+  /** Dirección estructurada del maestro (ya parseada). */
+  address: StructuredAddress;
 }
 
 interface Props {
@@ -46,7 +52,9 @@ export function CreateInShopifyDialog({
   const [lastName, setLastName] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
-  const [address, setAddress] = useState("");
+  const [address, setAddress] = useState<StructuredAddress>(
+    emptyStructuredAddress(),
+  );
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -58,7 +66,7 @@ export function CreateInShopifyDialog({
       setLastName("");
       setEmail("");
       setPhone("");
-      setAddress("");
+      setAddress(emptyStructuredAddress());
       setError(null);
       setSubmitting(false);
       return;
@@ -68,7 +76,12 @@ export function CreateInShopifyDialog({
     setLastName(last);
     setEmail(prefill.email ?? "");
     setPhone(prefill.phone ?? "");
-    setAddress(prefill.address ?? "");
+    // La dirección hereda nombre del contacto si no trae uno propio.
+    setAddress({
+      ...prefill.address,
+      first_name: prefill.address.first_name || first,
+      last_name: prefill.address.last_name || last,
+    });
     setError(null);
   }, [open, prefill]);
 
@@ -95,7 +108,7 @@ export function CreateInShopifyDialog({
       lastName: lastName.trim() || undefined,
       email: email.trim() || undefined,
       phone: phone.trim(),
-      address: address.trim() || undefined,
+      address,
     });
     setSubmitting(false);
     if (!result.ok) {
@@ -122,7 +135,7 @@ export function CreateInShopifyDialog({
         ref={dialogRef}
         tabIndex={-1}
         onClick={(e) => e.stopPropagation()}
-        className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-lg w-full p-6 outline-none"
+        className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-lg w-full p-6 outline-none max-h-[90vh] overflow-y-auto"
       >
         <p
           id="create-shopify-title"
@@ -191,17 +204,17 @@ export function CreateInShopifyDialog({
             />
           </Field>
 
-          <Field label="Dirección" hint="Línea única; el admin puede ampliar después.">
-            <input
-              type="text"
+          <div className="pt-1">
+            <span className="block text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-2">
+              Dirección <span className="font-normal normal-case">(opcional)</span>
+            </span>
+            <StructuredAddressFields
               value={address}
-              onChange={(e) => setAddress(e.target.value)}
+              onChange={setAddress}
               disabled={submitting}
-              maxLength={500}
-              placeholder="opcional"
-              className={inputClass}
+              idPrefix="shopify-addr"
             />
-          </Field>
+          </div>
 
           {error && (
             <div

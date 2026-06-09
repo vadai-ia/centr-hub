@@ -6,7 +6,11 @@ import {
   updateContactWithPropagationAction,
   type EditContactResult,
 } from "@/lib/actions/contacts";
-import { formatAddress } from "../utils";
+import {
+  parseStoredAddress,
+  type StructuredAddress,
+} from "@/lib/contacts/address";
+import { StructuredAddressFields } from "@/components/contacts/structured-address-fields";
 
 interface Props {
   contact: ContactRow;
@@ -30,10 +34,11 @@ interface Props {
  */
 export function ContactForm({ contact, onSaved }: Props) {
   const router = useRouter();
+  const initialAddress = parseStoredAddress(contact.address);
   const [fullName, setFullName] = useState(contact.full_name ?? "");
   const [email, setEmail] = useState(contact.email ?? "");
   const [phone, setPhone] = useState(contact.phone ?? "");
-  const [address, setAddress] = useState(formatAddress(contact.address) ?? "");
+  const [address, setAddress] = useState<StructuredAddress>(initialAddress);
   const [internalNote, setInternalNote] = useState(contact.internal_note ?? "");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -42,7 +47,7 @@ export function ContactForm({ contact, onSaved }: Props) {
     setFullName(contact.full_name ?? "");
     setEmail(contact.email ?? "");
     setPhone(contact.phone ?? "");
-    setAddress(formatAddress(contact.address) ?? "");
+    setAddress(parseStoredAddress(contact.address));
     setInternalNote(contact.internal_note ?? "");
     setError(null);
   }
@@ -82,7 +87,7 @@ export function ContactForm({ contact, onSaved }: Props) {
     fullName !== (contact.full_name ?? "") ||
     email !== (contact.email ?? "") ||
     phone !== (contact.phone ?? "") ||
-    address !== (formatAddress(contact.address) ?? "") ||
+    JSON.stringify(address) !== JSON.stringify(initialAddress) ||
     internalNote !== (contact.internal_note ?? "");
 
   return (
@@ -137,17 +142,20 @@ export function ContactForm({ contact, onSaved }: Props) {
               className={inputClass}
             />
           </Field>
-          <Field label="Dirección">
-            <input
-              type="text"
-              value={address}
-              onChange={(e) => setAddress(e.target.value)}
-              disabled={submitting}
-              maxLength={500}
-              className={inputClass}
-            />
-          </Field>
         </div>
+
+        <div className="pt-1">
+          <span className="block text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-2">
+            Dirección
+          </span>
+          <StructuredAddressFields
+            value={address}
+            onChange={setAddress}
+            disabled={submitting}
+            idPrefix="edit-addr"
+          />
+        </div>
+
         <Field label="Nota interna">
           <textarea
             value={internalNote}

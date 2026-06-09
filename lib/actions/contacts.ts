@@ -41,6 +41,11 @@ import {
   type ShopifyContactUpdateEnvelope,
 } from "@/lib/inngest/client";
 import { normalizePhone } from "@/lib/services/identity-matching";
+import {
+  structuredAddressToJson,
+  structuredAddressToShopify,
+  zStructuredAddress,
+} from "@/lib/contacts/address";
 import { CONTACTS_PAGE_SIZE } from "@/lib/constants";
 import type {
   ContactRow,
@@ -375,8 +380,8 @@ const createInShopifySchema = z.object({
   lastName: z.string().max(100).optional(),
   email: z.string().email().max(200).optional().or(z.literal("")),
   phone: z.string().min(4).max(40),
-  /** Texto libre, single line. Se envía como `address1` del Shopify Address. */
-  address: z.string().max(500).optional().or(z.literal("")),
+  /** Dirección estructurada (10 campos Shopify). Ninguno obligatorio. */
+  address: zStructuredAddress.optional(),
 });
 
 export type CreateInShopifyResult =
@@ -496,15 +501,12 @@ export async function createContactInShopifyAction(
     }
 
     const trimmedEmail = (parsed.data.email ?? "").trim();
-    const trimmedAddress = (parsed.data.address ?? "").trim();
-    const addresses = trimmedAddress
-      ? [
-          {
-            address1: trimmedAddress,
-            phone: phoneE164,
-          },
-        ]
-      : undefined;
+    // Mapea la dirección estructurada a UN Shopify Address (claves
+    // coinciden). Si no se capturó dirección → sin addresses.
+    const shopifyAddress = parsed.data.address
+      ? structuredAddressToShopify(parsed.data.address, phoneE164)
+      : null;
+    const addresses = shopifyAddress ? [shopifyAddress] : undefined;
 
     try {
       const result = await createCustomer({
@@ -911,10 +913,10 @@ const editContactSchema = z.object({
   email: z.string().email().max(200).optional().or(z.literal("")),
   phone: z.string().max(40).optional().or(z.literal("")),
   /**
-   * Texto libre single-line para M6. El maestro guarda jsonb;
-   * normalizamos a `{ line1: <text> }` si hay texto, null si vacío.
+   * Dirección estructurada (10 campos Shopify). El maestro guarda jsonb
+   * canónico; vacío en todos los campos → null (borrado propagado, R3).
    */
-  address: z.string().max(500).optional().or(z.literal("")),
+  address: zStructuredAddress.optional(),
   internalNote: z.string().max(5000).optional().or(z.literal("")),
 });
 
@@ -1017,7 +1019,12 @@ export async function updateContactWithPropagationAction(
           "El teléfono no es válido. Usa formato internacional (ej. +52 55 1234 5678) o déjalo vacío.",
       };
     }
-    const newAddress = normalizeAddressInput(parsed.data.address, existing.address);
+    // address undefined → el form no lo envió, preserva el existente.
+    // Si lo envió, se persiste la forma canónica (o null si todo vacío).
+    const newAddress =
+      parsed.data.address === undefined
+        ? existing.address
+        : structuredAddressToJson(parsed.data.address);
     const newInternalNote = normalizeEditableString(parsed.data.internalNote);
 
     const patch: Partial<ContactRow> = {};
@@ -1184,28 +1191,6 @@ function normalizeEditableEmail(v: string | undefined): string | null {
   const trimmed = normalizeEditableString(v);
   if (trimmed === null) return null;
   return trimmed.toLowerCase();
-}
-
-/**
- * Normaliza el address del form (string libre) al jsonb del maestro.
- * Si el form devuelve vacío, retornamos null (borrado propagado).
- * Si hay texto, intentamos preservar el shape existente actualizando
- * solo `line1` — las claves heredadas (city, state, country, zip) se
- * preservan para no perderlas con la edición single-line.
- */
-function normalizeAddressInput(
-  raw: string | undefined,
-  existing: Json | null,
-): Json | null {
-  if (raw === undefined) return existing;
-  const trimmed = raw.trim();
-  if (trimmed.length === 0) return null;
-  if (existing && typeof existing === "object" && !Array.isArray(existing)) {
-    const obj = { ...(existing as Record<string, Json>) };
-    obj.line1 = trimmed;
-    return obj as Json;
-  }
-  return { line1: trimmed } as Json;
 }
 
 function sameJson(a: Json | null, b: Json | null): boolean {

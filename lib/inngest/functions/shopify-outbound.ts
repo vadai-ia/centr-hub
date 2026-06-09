@@ -12,6 +12,7 @@ import {
 import { ShopifyApiError } from "@/lib/shopify/admin-client";
 import { getOrganizationById } from "@/lib/db/organizations";
 import { recordAuditEvent } from "@/lib/db/operational";
+import { parseStoredAddress, structuredAddressToShopify } from "@/lib/contacts/address";
 
 /**
  * Worker outbound Shopify desde edición manual (M6 — B8).
@@ -83,9 +84,17 @@ export const shopifyOutboundContactUpdate = inngest.createFunction(
           return { discarded: true, reason: "shop_domain_missing" };
         }
 
-        const { fullName, email, phone, internalNote, shopifyCustomerId } =
+        const { fullName, email, phone, internalNote, shopifyCustomerId, address } =
           envelope.contactSnapshot;
         const { first, last } = splitName(fullName);
+
+        // Mapea la dirección estructurada del maestro al Address de
+        // Shopify (claves coinciden). Si está vacía → no se manda
+        // `addresses` (no se pisa la dirección existente en Shopify).
+        const shopifyAddress = structuredAddressToShopify(
+          parseStoredAddress(address),
+          phone,
+        );
 
         try {
           await updateCustomer({
@@ -98,6 +107,7 @@ export const shopifyOutboundContactUpdate = inngest.createFunction(
               email,
               phone,
               note: internalNote,
+              ...(shopifyAddress ? { addresses: [shopifyAddress] } : {}),
             },
           });
           return { contactId: envelope.contactId, shopifyCustomerId };

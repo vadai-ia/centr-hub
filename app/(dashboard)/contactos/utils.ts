@@ -109,6 +109,7 @@ export function formatAddress(address: unknown): string | null {
     obj.address2,
     obj.city,
     obj.state,
+    obj.province,
     obj.country,
     obj.zip,
     obj.postal_code,
