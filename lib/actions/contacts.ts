@@ -111,6 +111,8 @@ const searchSchema = z.object({
   filterAdvisorId: z.string().uuid().nullable().optional(),
   dateFrom: z.string().optional(),
   dateTo: z.string().optional(),
+  /** Fix A: incluir contactos archivados por borrado en Whaapy. */
+  includeArchived: z.boolean().optional(),
 });
 
 async function resolveEffectiveAdvisor(
@@ -242,6 +244,7 @@ export async function searchContactsAction(
       filterAdvisorId: isAdmin ? parsed.data.filterAdvisorId ?? undefined : undefined,
       dateFrom: parsed.data.dateFrom,
       dateTo: parsed.data.dateTo,
+      includeArchived: parsed.data.includeArchived ?? false,
       limit: CONTACTS_PAGE_SIZE,
       offset: parsed.data.page * CONTACTS_PAGE_SIZE,
     });

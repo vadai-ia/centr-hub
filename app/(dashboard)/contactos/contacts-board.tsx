@@ -17,6 +17,8 @@ interface ContactFilters {
   dateFrom: string | null;
   dateTo: string | null;
   advisorId: UUID | null;
+  /** Fix A: ver contactos archivados por borrado en Whaapy. */
+  includeArchived: boolean;
 }
 
 export function ContactsBoard({ initial }: Props) {
@@ -26,6 +28,7 @@ export function ContactsBoard({ initial }: Props) {
     dateFrom: null,
     dateTo: null,
     advisorId: null,
+    includeArchived: false,
   });
   const [rows, setRows] = useState<ContactListRow[]>(initial.rows);
   const [hasMore, setHasMore] = useState(initial.hasMore);
@@ -63,6 +66,7 @@ export function ContactsBoard({ initial }: Props) {
           filterAdvisorId: filters.advisorId,
           dateFrom: filters.dateFrom ? `${filters.dateFrom}T00:00:00.000Z` : undefined,
           dateTo: filters.dateTo ? `${filters.dateTo}T23:59:59.999Z` : undefined,
+          includeArchived: filters.includeArchived,
         });
         if (seq !== requestSeqRef.current) return;
         if (!res.ok) {
@@ -93,7 +97,7 @@ export function ContactsBoard({ initial }: Props) {
     }
     void runSearch(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [appliedQuery, filters.advisorId, filters.dateFrom, filters.dateTo]);
+  }, [appliedQuery, filters.advisorId, filters.dateFrom, filters.dateTo, filters.includeArchived]);
 
   const loadMore = useCallback(async () => {
     if (loading || !hasMore) return;
@@ -108,6 +112,7 @@ export function ContactsBoard({ initial }: Props) {
         filterAdvisorId: filters.advisorId,
         dateFrom: filters.dateFrom ? `${filters.dateFrom}T00:00:00.000Z` : undefined,
         dateTo: filters.dateTo ? `${filters.dateTo}T23:59:59.999Z` : undefined,
+        includeArchived: filters.includeArchived,
       });
       if (seq !== requestSeqRef.current) return;
       if (!res.ok) {
@@ -129,7 +134,8 @@ export function ContactsBoard({ initial }: Props) {
   const hasAnyFilter =
     filters.dateFrom !== null ||
     filters.dateTo !== null ||
-    filters.advisorId !== null;
+    filters.advisorId !== null ||
+    filters.includeArchived;
 
   return (
     <div className="flex flex-col gap-3 h-full min-h-0">
@@ -191,10 +197,23 @@ export function ContactsBoard({ initial }: Props) {
             ))}
           </select>
         )}
+        <label className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400 cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={filters.includeArchived}
+            onChange={(e) =>
+              setFilters((f) => ({ ...f, includeArchived: e.target.checked }))
+            }
+            className="rounded border-gray-300 dark:border-gray-600 text-amber-500 focus:ring-amber-400"
+          />
+          <span>Ver archivados</span>
+        </label>
         {hasAnyFilter && (
           <button
             type="button"
-            onClick={() => setFilters({ dateFrom: null, dateTo: null, advisorId: null })}
+            onClick={() =>
+              setFilters({ dateFrom: null, dateTo: null, advisorId: null, includeArchived: false })
+            }
             className="text-xs font-medium text-gray-500 dark:text-gray-400 hover:text-rose-600 dark:hover:text-rose-400 transition-colors px-2 py-1"
           >
             Limpiar

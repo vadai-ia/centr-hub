@@ -30,6 +30,7 @@ import {
 } from "@/lib/db/contacts";
 import { recordAuditEvent } from "@/lib/db/operational";
 import { evaluateAndCreateC2Opportunity } from "@/lib/services/r12-auto-creation";
+import { archiveContactForWhaapyDeletion } from "@/lib/services/whaapy-contact-archival";
 import { updateCustomer } from "@/lib/shopify/outbound";
 import { WHAAPY_OUTBOUND_MARKER_FIELD } from "@/lib/whaapy/config";
 import type {
@@ -343,8 +344,14 @@ export const whaapyContactUpdated = inngest.createFunction(
 );
 
 // ============================================================
-// 3) contact.deleted (soft + NO propaga a Shopify — R8)
+// 3) contact.deleted → archivado propagado (Fix A)
 // ============================================================
+//
+// Borrar en Whaapy ARCHIVA el contacto en la plataforma (nunca borrado
+// físico): marca `deleted_in_whaapy`, cancela las opps NO terminales,
+// y etiqueta el customer Shopify si está enlazado. La lógica vive en el
+// servicio compartido `archiveContactForWhaapyDeletion` — el mismo que
+// reusa el correctivo, garantizando semántica idéntica.
 
 export const whaapyContactDeleted = inngest.createFunction(
   {
@@ -360,13 +367,22 @@ export const whaapyContactDeleted = inngest.createFunction(
       if (!contact) return { discarded: true, reason: "not_local" };
 
       const ts = parsed.data.deleted_at ?? env.receivedAt;
-      const updated = await updateContact(contact.id, {
-        deleted_in_whaapy: true,
-        last_modified_at: ts,
-        last_modified_source: "whaapy",
-        last_whaapy_activity_at: env.receivedAt,
+      const result = await archiveContactForWhaapyDeletion({
+        contact,
+        deletedAt: ts,
+        source: "whaapy_webhook",
       });
-      return { contactId: updated.id };
+
+      // Whaapy emitió el webhook → registró actividad del lado
+      // conversacional. Se persiste en todos los caminos (incluido
+      // re-proceso idempotente), igual que en updated/created.
+      await updateContact(contact.id, { last_whaapy_activity_at: env.receivedAt });
+
+      return {
+        contactId: result.contactId,
+        cancelledOpportunityIds: result.cancelledOpportunityIds,
+        shopifyTagged: result.shopifyTagged,
+      };
     });
   },
 );

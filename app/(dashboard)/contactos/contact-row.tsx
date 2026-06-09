@@ -101,8 +101,19 @@ export function ContactRow({ row, advisors, derivedAdvisor }: Props) {
 
       {/* Columna 3: presencia en sistemas externos (fija) */}
       <div className="hidden md:flex items-center gap-1 justify-start">
-        <SystemBadge kind="shopify" active={indicators.inShopify} />
-        <SystemBadge kind="whaapy" active={indicators.inWhaapy} />
+        {row.deleted_in_whaapy ? (
+          <span
+            className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded font-medium flex-shrink-0 bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-300"
+            title="Contacto archivado: eliminado en Whaapy"
+          >
+            Archivado
+          </span>
+        ) : (
+          <>
+            <SystemBadge kind="shopify" active={indicators.inShopify} />
+            <SystemBadge kind="whaapy" active={indicators.inWhaapy} />
+          </>
+        )}
       </div>
 
       {/* Columna 4: asesor (fija) */}

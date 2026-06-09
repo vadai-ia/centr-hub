@@ -174,6 +174,13 @@ export interface SearchContactsOpts {
   filterAdvisorId?: UUID | null;
   dateFrom?: string;
   dateTo?: string;
+  /**
+   * Fix A: por default el listado EXCLUYE contactos archivados por
+   * borrado en Whaapy (`deleted_in_whaapy = true`) — salen de las
+   * vistas activas. La sub-vista "Ver archivados" pasa `true` para
+   * incluirlos (trazabilidad para el admin).
+   */
+  includeArchived?: boolean;
   limit: number;
   offset?: number;
 }
@@ -317,9 +324,13 @@ export async function getDerivedAdvisorsForContacts(
  *   - `(last_modified_at DESC, id ASC)` para estabilidad ante ties.
  *
  * `deleted_in_*` y `anonymized_at` se devuelven al caller — la UI
- * decide si los renderiza con badge especial (anonimizado) o si los
- * oculta. Por default acá NO filtramos: el admin puede querer ver
- * contactos eliminados externamente para revisión.
+ * decide si los renderiza con badge especial (anonimizado).
+ *
+ * Fix A: los archivados por borrado en Whaapy (`deleted_in_whaapy =
+ * true`) se EXCLUYEN por default (salen de las vistas activas); el
+ * opt-in `includeArchived` los reincluye para la sub-vista de
+ * archivados. `deleted_in_shopify` sigue sin filtrarse (el borrado en
+ * Shopify no archiva el contacto en la plataforma — fuente de verdad).
  */
 export async function searchContactsForList(
   opts: SearchContactsOpts,
@@ -338,6 +349,12 @@ export async function searchContactsForList(
     .eq("organization_id", organizationId)
     .order("last_modified_at", { ascending: false })
     .order("id", { ascending: true });
+
+  // Fix A: por default, los archivados por borrado en Whaapy salen de
+  // las vistas activas. "Ver archivados" los reincluye.
+  if (!opts.includeArchived) {
+    query = query.eq("deleted_in_whaapy", false);
+  }
 
   if (opts.assignedAdvisorId !== undefined) {
     if (opts.assignedAdvisorId === null) {

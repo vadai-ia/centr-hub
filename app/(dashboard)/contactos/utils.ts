@@ -123,9 +123,15 @@ export function formatAddress(address: unknown): string | null {
 export function systemIndicators(row: {
   shopify_customer_id: string | null;
   whaapy_contact_id: string | null;
+  /** Fix A: si el contacto fue archivado por borrado en Whaapy, el
+   *  badge de presencia "WHAAPY" se apaga aunque `whaapy_contact_id`
+   *  siga presente (se conserva por trazabilidad). Así "WHAAPY" y
+   *  "Eliminado en Whaapy" dejan de convivir. Lo mismo para Shopify. */
+  deleted_in_whaapy?: boolean | null;
+  deleted_in_shopify?: boolean | null;
 }): SystemIndicators {
-  const inShopify = row.shopify_customer_id !== null;
-  const inWhaapy = row.whaapy_contact_id !== null;
+  const inShopify = row.shopify_customer_id !== null && !row.deleted_in_shopify;
+  const inWhaapy = row.whaapy_contact_id !== null && !row.deleted_in_whaapy;
   let presence: SystemIndicators["presence"] = "none";
   if (inShopify && inWhaapy) presence = "both";
   else if (inShopify) presence = "shopify_only";

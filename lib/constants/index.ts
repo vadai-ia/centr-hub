@@ -79,6 +79,16 @@ export const PG_TENANT_SETTING = "app.current_organization_id" as const;
 export const PLATFORM_ORIGIN_MARKER = "centrhub" as const;
 
 /**
+ * Tag aplicado al customer de Shopify cuando el contacto se archiva por
+ * borrado en Whaapy (Fix A — propagación del archivado). NO se borra el
+ * customer (Shopify bloquea borrar customers con órdenes + doctrina
+ * "nunca borrado físico"): se etiqueta de forma reversible y no
+ * destructiva. La escritura saliente lleva marca R11 (markOutboundWrite),
+ * así el `customers/update` resultante se descarta como eco propio.
+ */
+export const WHAAPY_DELETED_SHOPIFY_TAG = "Eliminado en Whaapy" as const;
+
+/**
  * Pipeline kanban (M5).
  *
  * `PIPELINE_PAGE_SIZE`     — número de cards traídas por columna en
