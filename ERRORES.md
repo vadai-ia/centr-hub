@@ -17,6 +17,15 @@ Cada entrada documenta UN bug o lección con la siguiente estructura:
 
 ## Entradas
 
+### Tooltips de KPI clipeados por `overflow-hidden` de la tarjeta + tooltip sin dependencias
+
+- **Milestone donde se detectó:** M8.2 rediseño visual del Dashboard (junio 2026).
+- **Síntoma esperado si se implementa mal:** al agregar tooltips explicativos por KPI (hover/focus → popover), el popover queda CORTADO por la tarjeta. La `KpiCard` previa usaba `overflow-hidden` (para redondear la barra de acento lateral); cualquier popover hijo posicionado `absolute` fuera del box se recorta y se ve truncado.
+- **Causa raíz:** `overflow-hidden` en el contenedor de la tarjeta recorta TODO hijo que desborde, incluido un tooltip que debe salir por debajo/encima del borde.
+- **Workaround / fix:** el rediseño reemplazó la barra de acento lateral por fondo tintado + chip de ícono, así que `overflow-hidden` dejó de ser necesario y se quitó de `KpiCard`. El radio redondeado del fondo se logra con `rounded-xl` sin clipear hijos (el background-color respeta el border-radius sin `overflow-hidden`; solo los hijos lo desbordan). El tooltip (`info-tooltip.tsx`) se posiciona `absolute z-50` y puede salir de la tarjeta libremente.
+- **Decisión de implementación — tooltip propio, sin dependencias:** CLAUDE.md prohíbe instalar deps sin aprobación y el stack no tiene Radix. El tooltip es un componente local mínimo: `<button>` enfocable (trigger) + popover en estado local, mostrado en `onMouseEnter/onFocus` y ocultado en `onMouseLeave/onBlur` (+ `onClick` toggle para touch), con `role="tooltip"` + `aria-describedby`. Texto 100% ESTÁTICO — no pega a BD ni recalcula (requisito del prompt: el hover no debe tener costo de datos).
+- **Lección:** antes de meter popovers/tooltips/menus dentro de una tarjeta, revisar si el contenedor tiene `overflow-hidden` (común cuando se usa para clipear barras de acento o esquinas). Si lo tiene, el popover se corta — o se quita el `overflow-hidden` (preferible si el redondeo se puede lograr de otra forma) o se portaliza el popover. Y para tooltips simples y estáticos, un componente local accesible es suficiente; no hace falta una dependencia de UI.
+
 ### KPIs de opportunities y opportunity_stage_history fechados por la fecha de importación en vez de la fecha real de Shopify
 
 - **Milestone donde se detectó:** Fix crítico pre-M10.2 (junio 2026), continuación del fix de `orders` (0024). Confirmado contra BD de producción Centr.

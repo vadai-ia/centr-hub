@@ -12,6 +12,7 @@ import {
 import { formatAmount } from "@/lib/format/money";
 import { formatCount } from "@/lib/format/dashboard";
 import type { LossByReason, MonthValue } from "@/lib/types/dashboard";
+import { InfoTooltip } from "./info-tooltip";
 
 /**
  * Gráficas del Dashboard (recharts, client-only). Diseño sobrio: pocas
@@ -23,10 +24,23 @@ import type { LossByReason, MonthValue } from "@/lib/types/dashboard";
 const AXIS_COLOR = "#9CA3AF";
 const GRID_COLOR = "rgba(148,163,184,0.18)";
 
-function ChartFrame({ title, children, empty }: { title: string; children: React.ReactNode; empty: boolean }) {
+function ChartFrame({
+  title,
+  tooltip,
+  children,
+  empty,
+}: {
+  title: string;
+  tooltip?: string;
+  children: React.ReactNode;
+  empty: boolean;
+}) {
   return (
     <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4 shadow-sm">
-      <p className="text-sm font-medium text-gray-700 dark:text-gray-200 mb-3">{title}</p>
+      <p className="mb-3 flex items-center gap-1 text-sm font-medium text-gray-700 dark:text-gray-200">
+        {title}
+        {tooltip ? <InfoTooltip label={title} content={tooltip} /> : null}
+      </p>
       {empty ? (
         <div className="h-56 flex items-center justify-center text-sm text-gray-400 dark:text-gray-500">
           Sin datos en el periodo
@@ -46,9 +60,17 @@ const tooltipStyle = {
   fontSize: 12,
 };
 
-export function RevenueByMonthChart({ data, currency }: { data: MonthValue[]; currency: string }) {
+export function RevenueByMonthChart({
+  data,
+  currency,
+  tooltip,
+}: {
+  data: MonthValue[];
+  currency: string;
+  tooltip?: string;
+}) {
   return (
-    <ChartFrame title="Revenue por mes" empty={data.length === 0}>
+    <ChartFrame title="Revenue por mes" tooltip={tooltip} empty={data.length === 0}>
       <ResponsiveContainer width="100%" height="100%">
         <BarChart data={data} margin={{ top: 8, right: 8, left: 8, bottom: 0 }}>
           <CartesianGrid strokeDasharray="3 3" stroke={GRID_COLOR} vertical={false} />
@@ -72,9 +94,9 @@ export function RevenueByMonthChart({ data, currency }: { data: MonthValue[]; cu
   );
 }
 
-export function OrdersByMonthChart({ data }: { data: MonthValue[] }) {
+export function OrdersByMonthChart({ data, tooltip }: { data: MonthValue[]; tooltip?: string }) {
   return (
-    <ChartFrame title="Pedidos por mes" empty={data.length === 0}>
+    <ChartFrame title="Pedidos por mes" tooltip={tooltip} empty={data.length === 0}>
       <ResponsiveContainer width="100%" height="100%">
         <BarChart data={data} margin={{ top: 8, right: 8, left: 8, bottom: 0 }}>
           <CartesianGrid strokeDasharray="3 3" stroke={GRID_COLOR} vertical={false} />
@@ -92,13 +114,21 @@ export function OrdersByMonthChart({ data }: { data: MonthValue[] }) {
   );
 }
 
-export function WonVsLostChart({ won, lost }: { won: number; lost: number }) {
+export function WonVsLostChart({
+  won,
+  lost,
+  tooltip,
+}: {
+  won: number;
+  lost: number;
+  tooltip?: string;
+}) {
   const data = [
     { name: "Ganadas", value: won, fill: "#10B981" },
     { name: "Perdidas", value: lost, fill: "#F43F5E" },
   ];
   return (
-    <ChartFrame title="Ganadas vs Perdidas" empty={won === 0 && lost === 0}>
+    <ChartFrame title="Ganadas vs Perdidas" tooltip={tooltip} empty={won === 0 && lost === 0}>
       <ResponsiveContainer width="100%" height="100%">
         <BarChart data={data} margin={{ top: 8, right: 8, left: 8, bottom: 0 }}>
           <CartesianGrid strokeDasharray="3 3" stroke={GRID_COLOR} vertical={false} />
@@ -120,10 +150,18 @@ export function WonVsLostChart({ won, lost }: { won: number; lost: number }) {
   );
 }
 
-export function LossesByReasonChart({ data, currency }: { data: LossByReason[]; currency: string }) {
+export function LossesByReasonChart({
+  data,
+  currency,
+  tooltip,
+}: {
+  data: LossByReason[];
+  currency: string;
+  tooltip?: string;
+}) {
   const rows = data.map((d) => ({ name: d.reasonName, value: d.count, amount: d.amount }));
   return (
-    <ChartFrame title="Pérdidas por motivo" empty={rows.length === 0}>
+    <ChartFrame title="Pérdidas por motivo" tooltip={tooltip} empty={rows.length === 0}>
       <ResponsiveContainer width="100%" height="100%">
         <BarChart data={rows} layout="vertical" margin={{ top: 4, right: 12, left: 8, bottom: 0 }}>
           <CartesianGrid strokeDasharray="3 3" stroke={GRID_COLOR} horizontal={false} />
