@@ -33,7 +33,10 @@ import {
   updateCustomerTags,
   BackfillSuppressedError,
 } from "@/lib/shopify/outbound";
-import { ShopifyApiError } from "@/lib/shopify/admin-client";
+import {
+  ShopifyApiError,
+  extractShopifyErrorMessage,
+} from "@/lib/shopify/admin-client";
 import { recordWhaapySyncIntent } from "@/lib/inngest/functions/customers";
 import {
   getInngestClient,
@@ -504,8 +507,32 @@ export async function createContactInShopifyAction(
     }
 
     const trimmedEmail = (parsed.data.email ?? "").trim();
-    // Mapea la dirección estructurada a UN Shopify Address (claves
-    // coinciden). Si no se capturó dirección → sin addresses.
+
+    // Persiste la dirección estructurada en el maestro ANTES de invocar a
+    // Shopify, de modo que sobreviva aunque Shopify rechace la creación
+    // (decisión de negocio: no perder lo que el usuario escribió). Forma
+    // canónica legible (con acentos) — la normalización a códigos Shopify
+    // ocurre solo en el payload saliente. Borrado intencional propagado:
+    // si el usuario dejó la dirección vacía, null sobreescribe (R3).
+    if (parsed.data.address !== undefined) {
+      const newAddressJson = structuredAddressToJson(parsed.data.address);
+      if (!sameJson(newAddressJson, contact.address)) {
+        try {
+          await updateContact(contact.id, {
+            address: newAddressJson,
+            last_modified_at: new Date().toISOString(),
+            last_modified_source: "platform",
+          });
+        } catch {
+          // No bloquea la creación en Shopify por un fallo al persistir el
+          // espejo local; el flujo principal (crear customer) continúa.
+        }
+      }
+    }
+
+    // Mapea la dirección estructurada a UN Shopify Address (país/estado se
+    // normalizan a country_code/province_code adentro). Sin dirección →
+    // sin addresses.
     const shopifyAddress = parsed.data.address
       ? structuredAddressToShopify(parsed.data.address, phoneE164)
       : null;
@@ -542,10 +569,13 @@ export async function createContactInShopifyAction(
         };
       }
       if (e instanceof ShopifyApiError) {
+        const detail = extractShopifyErrorMessage(e.body);
         return {
           ok: false,
           reason: "shopify_api_error",
-          message: `Shopify rechazó la creación (HTTP ${e.status}). Revisa los datos o intenta más tarde.`,
+          message: detail
+            ? `Shopify rechazó la creación (HTTP ${e.status}): ${detail}`
+            : `Shopify rechazó la creación (HTTP ${e.status}). Revisa los datos o intenta más tarde.`,
         };
       }
       const msg = e instanceof Error ? e.message : "Error desconocido";

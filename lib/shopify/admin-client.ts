@@ -48,6 +48,45 @@ export class ShopifyApiError extends Error {
   }
 }
 
+/**
+ * Extrae el motivo de validación legible del body de error de Shopify
+ * para mostrárselo al usuario. Shopify responde 422 con formas variadas:
+ *   { "errors": { "phone": ["is invalid"], "address": ["Country ..."] } }
+ *   { "errors": "Not Found" }
+ *   "<texto plano>"
+ * Devuelve un string compacto tipo "phone: is invalid; address: Country..."
+ * o null si no se puede extraer. SOLO lee `errors` (feedback de
+ * validación, seguro de mostrar) — nunca vuelca el body completo, que
+ * podría arrastrar datos del request.
+ */
+export function extractShopifyErrorMessage(body: unknown): string | null {
+  if (typeof body === "string") {
+    const t = body.trim();
+    return t.length > 0 ? t.slice(0, 300) : null;
+  }
+  if (!body || typeof body !== "object") return null;
+  const errors = (body as { errors?: unknown }).errors;
+  if (errors === undefined || errors === null) return null;
+  if (typeof errors === "string") {
+    return errors.trim().slice(0, 300) || null;
+  }
+  if (Array.isArray(errors)) {
+    const parts = errors.map((e) => String(e)).filter((s) => s.trim());
+    return parts.length > 0 ? parts.join("; ").slice(0, 300) : null;
+  }
+  if (typeof errors === "object") {
+    const parts: string[] = [];
+    for (const [field, val] of Object.entries(errors as Record<string, unknown>)) {
+      const msgs = Array.isArray(val)
+        ? val.map((v) => String(v)).join(", ")
+        : String(val);
+      if (msgs.trim()) parts.push(`${field}: ${msgs}`);
+    }
+    return parts.length > 0 ? parts.join("; ").slice(0, 300) : null;
+  }
+  return null;
+}
+
 interface GrantResponse {
   access_token: string;
   scope?: string;

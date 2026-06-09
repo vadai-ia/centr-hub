@@ -79,21 +79,52 @@ describe("structuredAddressToJson", () => {
 });
 
 describe("structuredAddressToShopify", () => {
-  it("mapea las claves (coinciden 1:1) y omite vacíos", () => {
+  it("normaliza país a country_code y estado a province_code (México con acento no falla)", () => {
     const shop = structuredAddressToShopify({
       address1: "Calle 1",
-      city: "CDMX",
-      province: "CDMX",
+      city: "Monterrey",
+      province: "Nuevo León",
       country: "México",
-      zip: "01000",
+      zip: "64000",
     });
     expect(shop).toEqual({
       address1: "Calle 1",
-      city: "CDMX",
-      province: "CDMX",
-      country: "México",
-      zip: "01000",
+      city: "Monterrey",
+      province_code: "NLE",
+      country_code: "MX",
+      zip: "64000",
     });
+    expect(shop).not.toHaveProperty("country");
+    expect(shop).not.toHaveProperty("province");
+  });
+
+  it("resuelve alias de estado (CDMX/DF) a province_code", () => {
+    expect(
+      structuredAddressToShopify({ country: "Mexico", province: "CDMX" }),
+    ).toMatchObject({ country_code: "MX", province_code: "CMX" });
+    expect(
+      structuredAddressToShopify({ country: "MX", province: "Distrito Federal" }),
+    ).toMatchObject({ province_code: "CMX" });
+  });
+
+  it("país no reconocido se deja tal cual (Shopify decide)", () => {
+    const shop = structuredAddressToShopify({
+      address1: "1 Main St",
+      country: "Narnia",
+      province: "Oeste",
+    });
+    expect(shop).toMatchObject({ country: "Narnia", province: "Oeste" });
+    expect(shop).not.toHaveProperty("country_code");
+  });
+
+  it("estado solo se normaliza cuando el país resuelve a MX", () => {
+    // País US: province se conserva como nombre (no hay matriz US mapeada).
+    const shop = structuredAddressToShopify({
+      country: "Estados Unidos",
+      province: "Texas",
+    });
+    expect(shop).toMatchObject({ country_code: "US", province: "Texas" });
+    expect(shop).not.toHaveProperty("province_code");
   });
 
   it("usa fallbackPhone si la dirección no trae teléfono propio", () => {

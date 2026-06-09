@@ -142,9 +142,109 @@ export function structuredAddressToJson(addr: StructuredAddressInput): Json | nu
 }
 
 /**
- * Mapea la dirección estructurada a UN objeto Shopify Address (las claves
- * ya coinciden). Devuelve null si está vacía. `fallbackPhone` se usa para
- * el `phone` del address cuando la dirección no trae teléfono propio.
+ * Normaliza un string para usarlo como clave de lookup contra catálogo:
+ * quita acentos/diacríticos, colapsa espacios y baja a minúsculas. NO se
+ * persiste — solo se usa para resolver país/estado a códigos Shopify.
+ */
+function lookupKey(s: string): string {
+  return s
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+}
+
+/**
+ * País (nombre libre) → ISO 3166-1 alpha-2. Shopify valida `country`
+ * contra su catálogo (rechaza "México" con acento), pero acepta
+ * `country_code` de forma determinística. Mapeamos las variantes
+ * razonables (con/sin acento, ES/EN, código de 2 letras) a su código.
+ * Lo que no reconocemos se manda tal cual y, si Shopify lo rechaza, el
+ * mensaje real se le muestra al usuario.
+ */
+const COUNTRY_TO_ISO2: Record<string, string> = {
+  mexico: "MX",
+  "estados unidos mexicanos": "MX",
+  mx: "MX",
+  "estados unidos": "US",
+  "estados unidos de america": "US",
+  "united states": "US",
+  "united states of america": "US",
+  usa: "US",
+  eua: "US",
+  us: "US",
+  canada: "CA",
+  ca: "CA",
+  espana: "ES",
+  spain: "ES",
+  es: "ES",
+  guatemala: "GT",
+  colombia: "CO",
+  argentina: "AR",
+  chile: "CL",
+  peru: "PE",
+  brasil: "BR",
+  brazil: "BR",
+};
+
+/**
+ * Estado de México (nombre libre) → ISO 3166-2:MX (código que Shopify usa
+ * como `province_code`). Cubre los 32 estados + alias comunes (CDMX, DF,
+ * EdoMex). Resolver a `province_code` evita que un acento en el nombre del
+ * estado haga fallar la validación de Shopify.
+ */
+const MX_PROVINCE_TO_CODE: Record<string, string> = {
+  aguascalientes: "AGU",
+  "baja california": "BCN",
+  "baja california sur": "BCS",
+  campeche: "CAM",
+  chiapas: "CHP",
+  chihuahua: "CHH",
+  "ciudad de mexico": "CMX",
+  cdmx: "CMX",
+  "distrito federal": "CMX",
+  df: "CMX",
+  coahuila: "COA",
+  "coahuila de zaragoza": "COA",
+  colima: "COL",
+  durango: "DUR",
+  guanajuato: "GUA",
+  guerrero: "GRO",
+  hidalgo: "HID",
+  jalisco: "JAL",
+  mexico: "MEX",
+  "estado de mexico": "MEX",
+  edomex: "MEX",
+  michoacan: "MIC",
+  "michoacan de ocampo": "MIC",
+  morelos: "MOR",
+  nayarit: "NAY",
+  "nuevo leon": "NLE",
+  oaxaca: "OAX",
+  puebla: "PUE",
+  queretaro: "QUE",
+  "quintana roo": "ROO",
+  "san luis potosi": "SLP",
+  sinaloa: "SIN",
+  sonora: "SON",
+  tabasco: "TAB",
+  tamaulipas: "TAM",
+  tlaxcala: "TLA",
+  veracruz: "VER",
+  "veracruz de ignacio de la llave": "VER",
+  yucatan: "YUC",
+  zacatecas: "ZAC",
+};
+
+/**
+ * Mapea la dirección estructurada a UN objeto Shopify Address. Las claves
+ * canónicas coinciden 1:1, salvo país/estado que se normalizan a códigos
+ * Shopify (`country_code` / `province_code`) cuando se reconocen — así un
+ * valor escribible-por-humano ("México", "Nuevo León") no rompe la
+ * validación de Shopify. El maestro conserva el valor legible; solo el
+ * payload saliente lleva el código. Devuelve null si está vacía.
+ * `fallbackPhone` se usa cuando la dirección no trae teléfono propio.
  */
 export function structuredAddressToShopify(
   addr: StructuredAddressInput,
@@ -157,6 +257,30 @@ export function structuredAddressToShopify(
   }
   if (Object.keys(obj).length === 0) return null;
   if (!obj.phone && fallbackPhone) obj.phone = fallbackPhone;
+
+  // País → country_code cuando se reconoce. Si no, se deja el nombre tal
+  // cual y Shopify decide (su error real se le muestra al usuario).
+  let countryIso: string | null = null;
+  if (obj.country) {
+    const iso = COUNTRY_TO_ISO2[lookupKey(obj.country)];
+    if (iso) {
+      countryIso = iso;
+      obj.country_code = iso;
+      delete obj.country;
+    }
+  }
+
+  // Estado → province_code solo cuando el país es México (única matriz de
+  // subdivisiones que mapeamos). Para otros países se deja el nombre tal
+  // cual. Requiere country_code MX explícito para no adivinar.
+  if (obj.province && countryIso === "MX") {
+    const code = MX_PROVINCE_TO_CODE[lookupKey(obj.province)];
+    if (code) {
+      obj.province_code = code;
+      delete obj.province;
+    }
+  }
+
   return obj;
 }
 
