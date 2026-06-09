@@ -21,7 +21,8 @@
     "maintenance:reattribute-postventa-child-advisor": "tsx --tsconfig scripts/tsconfig.json scripts/maintenance/reattribute-postventa-child-advisor.ts",
     "maintenance:reattribute-venta-opportunity-advisor": "tsx --tsconfig scripts/tsconfig.json scripts/maintenance/reattribute-venta-opportunity-advisor.ts",
     "maintenance:backfill-order-shopify-created-at": "tsx --tsconfig scripts/tsconfig.json scripts/maintenance/backfill-order-shopify-created-at.ts",
-    "maintenance:backfill-opportunity-shopify-dates": "tsx --tsconfig scripts/tsconfig.json scripts/maintenance/backfill-opportunity-shopify-dates.ts"
+    "maintenance:backfill-opportunity-shopify-dates": "tsx --tsconfig scripts/tsconfig.json scripts/maintenance/backfill-opportunity-shopify-dates.ts",
+    "maintenance:cancel-deleted-draft-opportunities": "tsx --tsconfig scripts/tsconfig.json scripts/maintenance/cancel-deleted-draft-opportunities.ts"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.1.0",
