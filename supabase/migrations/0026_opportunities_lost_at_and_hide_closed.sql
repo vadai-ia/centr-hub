@@ -53,15 +53,16 @@ comment on column public.opportunities.lost_at is
 -- ------------------------------------------------------------
 update public.opportunities o
 set lost_at = sub.changed_at
-from public.pipeline_stages cur,
-     lateral (
-       select max(h.changed_at) as changed_at
+from (
+       select h.opportunity_id, max(h.changed_at) as changed_at
        from public.opportunity_stage_history h
        join public.pipeline_stages s on s.id = h.to_stage_id
-       where h.opportunity_id = o.id
-         and s.is_lost = true
-     ) sub
-where cur.id = o.stage_id
+       where s.is_lost = true
+       group by h.opportunity_id
+     ) sub,
+     public.pipeline_stages cur
+where sub.opportunity_id = o.id
+  and cur.id = o.stage_id
   and cur.is_lost = true
   and o.lost_at is null
   and sub.changed_at is not null;
