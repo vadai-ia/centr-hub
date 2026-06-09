@@ -10,10 +10,8 @@ import { resolveCustomPeriod } from "@/lib/time/period";
 import { DashboardToolbar } from "./dashboard-toolbar";
 import { DashboardVenta } from "./dashboard-venta";
 import { DashboardPostventa } from "./dashboard-postventa";
-import { AdvisorBreakdown } from "./advisor-breakdown";
 import { DashboardExportModal } from "./dashboard-export-modal";
 import type { DashboardData } from "@/lib/types/dashboard";
-import type { Funnel } from "@/lib/types/database";
 
 interface Toast {
   id: number;
@@ -21,6 +19,12 @@ interface Toast {
   variant: "info" | "error";
 }
 
+/**
+ * Pantalla del Dashboard (M8.2 rediseño). Una sola vista con ambas
+ * secciones — Venta arriba, Post-venta abajo (#2) — sin toggle de
+ * funnel. Filtros (periodo, asesor) aplican a ambas. Pull bajo demanda,
+ * sin polling (deuda M5-DT-03).
+ */
 export function DashboardScreen({
   initial,
   orgName,
@@ -29,7 +33,6 @@ export function DashboardScreen({
   orgName: string;
 }) {
   const [filters, setFilters] = useState<DashboardFiltersInput>(() => ({
-    funnel: initial.filters.funnel,
     preset: initial.filters.preset,
     customFrom: initial.filters.customFrom,
     customTo: initial.filters.customTo,
@@ -56,18 +59,15 @@ export function DashboardScreen({
 
   const fetchWith = useCallback(
     (next: DashboardFiltersInput) => {
-      // Validación local del rango custom antes de pegarle al server.
       if (next.preset === "custom") {
         if (!next.customFrom || !next.customTo) {
-          setFilters(next); // espera a que el usuario complete ambas fechas
+          setFilters(next);
           return;
         }
         const res = resolveCustomPeriod(next.customFrom, next.customTo);
         if (!res.ok) {
           setFilters(next);
-          setCustomError(
-            "La fecha 'desde' debe ser anterior o igual a 'hasta'.",
-          );
+          setCustomError("La fecha 'desde' debe ser anterior o igual a 'hasta'.");
           return;
         }
       }
@@ -85,20 +85,16 @@ export function DashboardScreen({
     [pushToast],
   );
 
-  function onFunnelChange(funnel: Funnel) {
-    if (funnel === filters.funnel) return;
-    // El asesor filtrado se reinicia al cambiar de funnel: los rankings
-    // por vendedor difieren entre funnels y el drilldown solo aparece sin
-    // filtro de asesor. Toast informativo (requisito M8.2).
-    const advisorWasSet = !!filters.advisor && filters.advisor !== "";
-    const next = { ...filters, funnel, advisor: "" };
-    if (advisorWasSet) {
-      pushToast(
-        `Cambiaste a Funnel ${funnel === "venta" ? "Venta" : "Post-venta"}. Se reinició el filtro de asesor.`,
-        "info",
-      );
+  // Cambio de preset. "Personalizado" solo muestra los inputs (sin
+  // recalcular); el recálculo ocurre al "Aplicar" (#6). Cambiar a un
+  // preset rápido limpia el rango custom.
+  function onPresetChange(preset: DashboardFiltersInput["preset"]) {
+    if (preset === "custom") {
+      setCustomError(null);
+      setFilters((f) => ({ ...f, preset: "custom" }));
+      return;
     }
-    fetchWith(next);
+    fetchWith({ ...filters, preset, customFrom: null, customTo: null });
   }
 
   return (
@@ -116,25 +112,16 @@ export function DashboardScreen({
         advisors={advisors}
         pending={isPending}
         customError={customError}
-        onFunnelChange={onFunnelChange}
-        onPresetChange={(preset) => fetchWith({ ...filters, preset })}
-        onCustomChange={(customFrom, customTo) =>
+        onPresetChange={onPresetChange}
+        onCustomApply={(customFrom, customTo) =>
           fetchWith({ ...filters, preset: "custom", customFrom, customTo })
         }
         onAdvisorChange={(advisor) => fetchWith({ ...filters, advisor })}
         onExport={() => setExportOpen(true)}
       />
 
-      {data.funnel === "venta" && data.venta ? (
-        <DashboardVenta m={data.venta} />
-      ) : null}
-      {data.funnel === "post_venta" && data.postventa ? (
-        <DashboardPostventa m={data.postventa} />
-      ) : null}
-
-      {data.advisorBreakdown ? (
-        <AdvisorBreakdown rows={data.advisorBreakdown} funnel={data.funnel} />
-      ) : null}
+      <DashboardVenta m={data.venta} breakdown={data.ventaBreakdown} />
+      <DashboardPostventa m={data.postventa} breakdown={data.postventaBreakdown} />
 
       {exportOpen ? (
         <DashboardExportModal

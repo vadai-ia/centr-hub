@@ -3,14 +3,15 @@ import {
   listDraftOppsCreatedInPeriod,
   listFullHistoryForOpportunities,
   listLivePipelineOpps,
+  listLivePostventaOpps,
   listLostEntriesInPeriod,
-  listOrderContactsSince,
   listOrdersCreatedInPeriod,
   listPaidOrdersInPeriod,
   listProblematicCaseOpps,
   listStageEntriesInPeriod,
   listWonOppsInPeriod,
   type LivePipelineRow,
+  type LivePostventaRow,
   type LostEntryRow,
   type StageEntryRow,
   type WonOppRow,
@@ -18,8 +19,9 @@ import {
 import { listLossReasons } from "@/lib/db/pipeline";
 import { listRealVendorsForMapping } from "@/lib/db/users";
 import {
-  resolveProblematicStage,
+  resolvePostventaStages,
   resolveVentaStageBoundaries,
+  type PostventaStageInfo,
   type VentaStageBoundaries,
 } from "@/lib/services/dashboard-stages";
 import {
@@ -29,10 +31,7 @@ import {
   monthLabel,
   type ResolvedPeriod,
 } from "@/lib/time/period";
-import { DASHBOARD_REPURCHASE_WINDOW_MONTHS, DASHBOARD_STAGE_WINRATE_MIN_SAMPLE } from "@/lib/constants";
-import { DateTime } from "luxon";
-import { TIMEZONE } from "@/lib/constants";
-import type { Funnel, UUID } from "@/lib/types/database";
+import type { UUID } from "@/lib/types/database";
 import type {
   AdvisorBreakdownRow,
   DashboardData,
@@ -97,7 +96,8 @@ export interface VentaRaw {
 export interface PostventaRaw {
   ordersCreated: Awaited<ReturnType<typeof listOrdersCreatedInPeriod>>;
   problematicOpps: Awaited<ReturnType<typeof listProblematicCaseOpps>>;
-  orderContacts: Awaited<ReturnType<typeof listOrderContactsSince>>;
+  liveOpps: LivePostventaRow[];
+  postventaStages: PostventaStageInfo;
   period: ResolvedPeriod;
 }
 
@@ -128,7 +128,7 @@ async function fetchVentaRaw(period: ResolvedPeriod): Promise<VentaRaw> {
       listPaidOrdersInPeriod(period.startUtc, period.endUtc),
       listDraftOppsCreatedInPeriod(period.startUtc, period.endUtc),
       listWonOppsInPeriod(period.startUtc, period.endUtc),
-      listLivePipelineOpps(),
+      listLivePipelineOpps(period.startUtc, period.endUtc),
       lostStageId
         ? listLostEntriesInPeriod(lostStageId, period.startUtc, period.endUtc)
         : Promise.resolve([] as LostEntryRow[]),
@@ -253,7 +253,9 @@ export function computeVentaMetrics(raw: VentaRaw, scope: Scope): VentaMetrics {
     }))
     .sort((a, b) => b.count - a.count);
 
-  // KPI9 Win rate por etapa (solo etapas no terminales).
+  // KPI9 Win rate por etapa (solo etapas no terminales). M8.2 ajuste #8:
+  // se muestra el % directo sin la etiqueta "Muestra pequeña"; el rate se
+  // calcula siempre (null solo si la muestra es 0).
   const winRateByStage: StageWinRate[] = boundaries.stages
     .filter((s) => !s.is_won && !s.is_lost)
     .sort((a, b) => a.position - b.position)
@@ -265,14 +267,12 @@ export function computeVentaMetrics(raw: VentaRaw, scope: Scope): VentaMetrics {
         const maxPos = raw.maxNonLostPos.get(oppId) ?? -Infinity;
         if (maxPos > s.position) advanced += 1;
       });
-      const smallSample = sample < DASHBOARD_STAGE_WINRATE_MIN_SAMPLE;
       return {
         stageId: s.id,
         stageName: s.name,
         position: s.position,
         sample,
-        rate: smallSample ? null : rateOrNull(advanced, sample),
-        smallSample,
+        rate: rateOrNull(advanced, sample),
       };
     });
 
@@ -299,23 +299,20 @@ export function computeVentaMetrics(raw: VentaRaw, scope: Scope): VentaMetrics {
 // ============================================================
 
 async function fetchPostventaRaw(period: ResolvedPeriod): Promise<PostventaRaw> {
-  const problematicStage = await resolveProblematicStage();
-  const windowStart = DateTime.now()
-    .setZone(TIMEZONE)
-    .minus({ months: DASHBOARD_REPURCHASE_WINDOW_MONTHS })
-    .startOf("day")
-    .toUTC()
-    .toISO()!;
+  const postventaStages = await resolvePostventaStages();
 
-  const [ordersCreated, problematicOpps, orderContacts] = await Promise.all([
+  const [ordersCreated, problematicOpps, liveOpps] = await Promise.all([
     listOrdersCreatedInPeriod(period.startUtc, period.endUtc),
-    problematicStage ? listProblematicCaseOpps(problematicStage.id) : Promise.resolve([]),
-    listOrderContactsSince(windowStart),
+    postventaStages.problematicStage
+      ? listProblematicCaseOpps(postventaStages.problematicStage.id)
+      : Promise.resolve([]),
+    listLivePostventaOpps(),
   ]);
-  return { ordersCreated, problematicOpps, orderContacts, period };
+  return { ordersCreated, problematicOpps, liveOpps, postventaStages, period };
 }
 
 export function computePostventaMetrics(raw: PostventaRaw, scope: Scope): PostventaMetrics {
+  // Pedidos creados en el periodo (KPI base + serie por mes).
   const monthOrders = emptyMonths(raw.period);
   let ordersCount = 0;
   for (const o of raw.ordersCreated) {
@@ -329,23 +326,21 @@ export function computePostventaMetrics(raw: PostventaRaw, scope: Scope): Postve
     matchScope(p.assigned_advisor_id, scope),
   ).length;
 
-  // Tasa de recompra: clientes con >1 order en la ventana fija de 12 meses.
-  const perContact = new Map<UUID, number>();
-  for (const r of raw.orderContacts) {
-    if (!matchScope(r.assigned_advisor_id, scope)) continue;
-    perContact.set(r.contact_id, (perContact.get(r.contact_id) ?? 0) + 1);
+  // Pedidos activos/vivos ahora (M8.2 ajuste #10): órdenes DISTINTAS con
+  // al menos una opp post-venta abierta (no terminal). Dedupe por
+  // `shopify_order_id`; opps sin orden ligada cuentan por su propio id.
+  const terminal = raw.postventaStages.terminalStageIds;
+  const activeOrderKeys = new Set<string>();
+  for (const opp of raw.liveOpps) {
+    if (!matchScope(opp.assigned_advisor_id, scope)) continue;
+    if (terminal.has(opp.stage_id)) continue; // ya cerrada (ganada/perdida)
+    activeOrderKeys.add(opp.shopify_order_id ?? `opp:${opp.id}`);
   }
-  const base = perContact.size;
-  let repurchasers = 0;
-  Array.from(perContact.values()).forEach((count) => {
-    if (count > 1) repurchasers += 1;
-  });
-  const repurchaseRate = rateOrNull(repurchasers, base);
 
   return {
     ordersCount,
+    activeOrders: activeOrderKeys.size,
     problematicCases,
-    repurchaseRate,
     ordersByMonth: monthsToSeries(monthOrders),
   };
 }
@@ -355,7 +350,6 @@ export function computePostventaMetrics(raw: PostventaRaw, scope: Scope): Postve
 // ============================================================
 
 export interface ComputeDashboardInput {
-  funnel: Funnel;
   period: ResolvedPeriod;
   isAdmin: boolean;
   /** Scope activo:
@@ -367,51 +361,57 @@ export interface ComputeDashboardInput {
   organizationId: UUID;
 }
 
+/**
+ * Calcula AMBOS funnels en una sola carga (M8.2 ajuste #2: sin toggle).
+ * Cada funnel se fetchea una vez a nivel org y se agrega por scope; el
+ * drilldown reusa el mismo dataset.
+ */
 export async function computeDashboardData(input: ComputeDashboardInput): Promise<DashboardData> {
   const scope: Scope =
     input.scope === undefined ? "all" : input.scope === "unassigned" ? null : input.scope;
   const wantBreakdown = input.isAdmin && input.scope === undefined;
 
-  let venta: VentaMetrics | null = null;
-  let postventa: PostventaMetrics | null = null;
-  let advisorBreakdown: AdvisorBreakdownRow[] | null = null;
+  const [ventaRaw, postventaRaw] = await Promise.all([
+    fetchVentaRaw(input.period),
+    fetchPostventaRaw(input.period),
+  ]);
 
-  if (input.funnel === "venta") {
-    const raw = await fetchVentaRaw(input.period);
-    venta = computeVentaMetrics(raw, scope);
-    if (wantBreakdown) {
-      advisorBreakdown = await buildBreakdown(input.organizationId, raw, null);
-    }
-  } else {
-    const raw = await fetchPostventaRaw(input.period);
-    postventa = computePostventaMetrics(raw, scope);
-    if (wantBreakdown) {
-      advisorBreakdown = await buildBreakdown(input.organizationId, null, raw);
-    }
+  const venta = computeVentaMetrics(ventaRaw, scope);
+  const postventa = computePostventaMetrics(postventaRaw, scope);
+
+  let ventaBreakdown: AdvisorBreakdownRow[] | null = null;
+  let postventaBreakdown: AdvisorBreakdownRow[] | null = null;
+  if (wantBreakdown) {
+    const scopes = await breakdownScopes(input.organizationId);
+    ventaBreakdown = scopes.map((s) => breakdownRow(s, computeVentaMetrics(ventaRaw, s.membershipId), null));
+    postventaBreakdown = scopes.map((s) =>
+      breakdownRow(s, null, computePostventaMetrics(postventaRaw, s.membershipId)),
+    );
   }
 
   return {
-    funnel: input.funnel,
     period: input.period,
     isAdmin: input.isAdmin,
     venta,
     postventa,
-    advisorBreakdown,
+    ventaBreakdown,
+    postventaBreakdown,
   };
 }
 
+interface BreakdownScope {
+  membershipId: UUID | null;
+  name: string;
+  color: string | null;
+}
+
 /**
- * Drilldown por vendedor. Itera vendedores REALES (excluye Histórico —
- * R10) + el grupo "Sin asignar" (membershipId null). Solo se llena el
- * funnel activo; el otro queda en cero.
+ * Vendedores del drilldown: REALES (excluye Histórico — R10) + el grupo
+ * "Sin asignar" (membershipId null).
  */
-async function buildBreakdown(
-  organizationId: UUID,
-  ventaRaw: VentaRaw | null,
-  postventaRaw: PostventaRaw | null,
-): Promise<AdvisorBreakdownRow[]> {
+async function breakdownScopes(organizationId: UUID): Promise<BreakdownScope[]> {
   const vendors = await listRealVendorsForMapping(organizationId);
-  const scopes: Array<{ membershipId: UUID | null; name: string; color: string | null }> = [
+  return [
     ...vendors.map((v) => ({
       membershipId: v.id,
       name: v.profile.full_name,
@@ -419,24 +419,26 @@ async function buildBreakdown(
     })),
     { membershipId: null, name: "Sin asignar", color: null },
   ];
+}
 
-  return scopes.map(({ membershipId, name, color }) => {
-    const scope: Scope = membershipId;
-    const v = ventaRaw ? computeVentaMetrics(ventaRaw, scope) : null;
-    const p = postventaRaw ? computePostventaMetrics(postventaRaw, scope) : null;
-    return {
-      membershipId,
-      name,
-      color,
-      isUnassigned: membershipId === null,
-      revenue: v?.revenue ?? 0,
-      quotesSent: v?.quotesSent ?? 0,
-      wonCount: v?.wonCount ?? 0,
-      lostCount: v?.wonVsLost.lost ?? 0,
-      winRate: v?.winRateGlobal ?? null,
-      pipelineGross: v?.pipelineGross ?? 0,
-      ordersCount: p?.ordersCount ?? 0,
-      problematicCases: p?.problematicCases ?? 0,
-    };
-  });
+function breakdownRow(
+  s: BreakdownScope,
+  v: VentaMetrics | null,
+  p: PostventaMetrics | null,
+): AdvisorBreakdownRow {
+  return {
+    membershipId: s.membershipId,
+    name: s.name,
+    color: s.color,
+    isUnassigned: s.membershipId === null,
+    revenue: v?.revenue ?? 0,
+    quotesSent: v?.quotesSent ?? 0,
+    wonCount: v?.wonCount ?? 0,
+    lostCount: v?.wonVsLost.lost ?? 0,
+    winRate: v?.winRateGlobal ?? null,
+    pipelineGross: v?.pipelineGross ?? 0,
+    ordersCount: p?.ordersCount ?? 0,
+    activeOrders: p?.activeOrders ?? 0,
+    problematicCases: p?.problematicCases ?? 0,
+  };
 }

@@ -17,6 +17,17 @@ Cada entrada documenta UN bug o lección con la siguiente estructura:
 
 ## Entradas
 
+### Filtro de fecha personalizado del Dashboard no se aplicaba + Pipeline $/Activas eran snapshot fijo
+
+- **Milestone donde se detectó:** M8.2 Bloque 2 (rediseño del Dashboard, junio 2026).
+- **Síntoma:** (a) al elegir un rango personalizado (desde/hasta) los KPIs no cambiaban; (b) "Pipeline $ (bruto)" y "Oportunidades activas (con cotización)" mostraban el mismo número sin importar el periodo seleccionado.
+- **Causa raíz:** (a) el rango custom se auto-aplicaba en `onChange` de cada `<input type="date">`; mientras una de las dos fechas estuviera vacía, `fetchWith` retornaba temprano (`if (!customFrom || !customTo) return`). El usuario percibía "no pasa nada" porque el disparo dependía de un estado parcial frágil y sin feedback. (b) `listLivePipelineOpps()` era un snapshot sin parámetros de periodo — leía TODAS las opps vivas de la org siempre, ignorando el filtro de fecha.
+- **Workaround / fix (M8.2):**
+  1. **Botón "Aplicar" explícito** para el rango custom. El toolbar mantiene un draft local de las fechas (`draftFrom`/`draftTo`) y solo dispara el recálculo al hacer click en "Aplicar" (deshabilitado hasta que ambas estén llenas). Click en "Personalizado" solo muestra los inputs, NO recalcula. Elimina el disparo por estado parcial.
+  2. **`listLivePipelineOpps(startUtc, endUtc)`** ahora acota por `created_at` al periodo. Definición operativa: **"activa en el periodo = creada en el periodo"** — la más simple y consistente con los demás KPIs, evita reconstrucción de estado histórico (cara y no pedida). Aplica también a "Activas con cotización" (deriva del mismo dataset).
+- **Verificación adicional (#7):** Pipeline $ NO suma ganadas ni perdidas. La query ya filtra `won_at IS NULL` (excluye ganadas) y el loop del servicio salta `stage.is_won || stage.is_lost` (excluye perdidas, que llegan con `won_at` NULL pero en etapa perdida). Confirmado por el test `pipeline $ bruto coalesce ... excluye ganadas/perdidas` (fixture incluye una opp en Ganada con monto 999 y otra en Perdida con 500; el total esperado las ignora).
+- **Lección:** para filtros con múltiples campos interdependientes (rango desde/hasta), un botón "Aplicar" explícito es más robusto que auto-aplicar en cada `onChange` — el auto-aplicar sobre estado parcial produce "no hace nada" silencioso. Y todo KPI que el usuario espera ver "acotado al periodo" debe recibir el periodo en su query; un snapshot global sin parámetros se ve idéntico a un bug de cálculo.
+
 ### Opp de Venta sin asesor pese a que su pedido tiene asesor (tag de vendedor tardía)
 
 - **Milestone donde se detectó:** Fix post-M7.2 (junio 2026). Confirmado en BD de producción Centr.

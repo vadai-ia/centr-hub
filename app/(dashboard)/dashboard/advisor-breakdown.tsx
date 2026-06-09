@@ -48,6 +48,7 @@ export function AdvisorBreakdown({
               ) : (
                 <>
                   <th className="py-2 px-3 font-medium text-right">Pedidos</th>
+                  <th className="py-2 px-3 font-medium text-right">Activos ahora</th>
                   <th className="py-2 px-4 font-medium text-right">Casos problemáticos</th>
                 </>
               )}
@@ -89,6 +90,7 @@ export function AdvisorBreakdown({
                 ) : (
                   <>
                     <td className="py-2 px-3 text-right tabular-nums">{formatCount(r.ordersCount)}</td>
+                    <td className="py-2 px-3 text-right tabular-nums">{formatCount(r.activeOrders)}</td>
                     <td className="py-2 px-4 text-right tabular-nums">{formatCount(r.problematicCases)}</td>
                   </>
                 )}

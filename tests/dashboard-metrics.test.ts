@@ -146,12 +146,14 @@ describe("computeVentaMetrics — scope 'all'", () => {
     expect(precio).toMatchObject({ count: 1, amount: 70 });
     expect(sin).toMatchObject({ count: 1, amount: 0 });
   });
-  it("win rate por etapa solo etapas no terminales + muestra pequeña <10", () => {
+  it("win rate por etapa solo etapas no terminales + % directo (sin muestra pequeña)", () => {
     expect(m.winRateByStage).toHaveLength(5); // excluye ganada y perdida
     const lead = m.winRateByStage.find((s) => s.stageId === LEAD.id)!;
-    expect(lead.sample).toBe(2);
-    expect(lead.smallSample).toBe(true);
-    expect(lead.rate).toBeNull();
+    expect(lead.sample).toBe(2); // o1, o2
+    // o1 (maxPos 5 > 1) avanzó; o2 (maxPos 1) no → 1/2 (#8: ya no hay
+    // umbral de muestra; el % se calcula siempre).
+    expect(lead.rate).toBeCloseTo(0.5);
+    expect("smallSample" in lead).toBe(false);
   });
 });
 
@@ -187,6 +189,7 @@ describe("computeVentaMetrics — división por cero", () => {
 });
 
 describe("computePostventaMetrics", () => {
+  const TERMINAL = new Set(["pv-won", "pv-lost"]);
   function postRaw(): PostventaRaw {
     return {
       period: PERIOD,
@@ -197,35 +200,37 @@ describe("computePostventaMetrics", () => {
         { assigned_advisor_id: null, created_at: "2026-05-13T18:00:00.000Z" },
       ],
       problematicOpps: [{ assigned_advisor_id: A }, { assigned_advisor_id: B }],
-      orderContacts: [
-        { contact_id: "c1", assigned_advisor_id: A },
-        { contact_id: "c1", assigned_advisor_id: A },
-        { contact_id: "c2", assigned_advisor_id: A },
-        { contact_id: "c3", assigned_advisor_id: B },
-        { contact_id: "c3", assigned_advisor_id: B },
-        { contact_id: "c3", assigned_advisor_id: B },
+      postventaStages: { problematicStage: null, terminalStageIds: TERMINAL },
+      // Pedidos activos ahora = órdenes DISTINTAS con opp post-venta viva.
+      liveOpps: [
+        { id: "p1", assigned_advisor_id: A, stage_id: "pv-open", shopify_order_id: "O1" },
+        { id: "p2", assigned_advisor_id: A, stage_id: "pv-open", shopify_order_id: "O1" }, // misma orden O1 → dedupe
+        { id: "p3", assigned_advisor_id: A, stage_id: "pv-open", shopify_order_id: "O2" },
+        { id: "p4", assigned_advisor_id: B, stage_id: "pv-open", shopify_order_id: "O3" },
+        { id: "p5", assigned_advisor_id: A, stage_id: "pv-won", shopify_order_id: "O4" }, // terminal → excluida
+        { id: "p6", assigned_advisor_id: A, stage_id: "pv-open", shopify_order_id: null }, // sin orden → cuenta por su id
       ],
     };
   }
 
-  it("scope 'all': pedidos, casos y tasa de recompra (>1 pedido)", () => {
+  it("scope 'all': pedidos creados, casos y pedidos activos (dedupe por orden, excluye terminal)", () => {
     const m = computePostventaMetrics(postRaw(), "all");
     expect(m.ordersCount).toBe(4);
     expect(m.problematicCases).toBe(2);
-    expect(m.repurchaseRate).toBeCloseTo(2 / 3); // c1 y c3 recompran de 3 clientes
+    expect(m.activeOrders).toBe(4); // O1, O2, O3, opp:p6 (p5 terminal fuera)
   });
 
   it("scope por asesor A", () => {
     const m = computePostventaMetrics(postRaw(), A);
     expect(m.ordersCount).toBe(2);
     expect(m.problematicCases).toBe(1);
-    expect(m.repurchaseRate).toBeCloseTo(0.5); // c1 recompra de {c1,c2}
+    expect(m.activeOrders).toBe(3); // O1, O2, opp:p6 (p4 es de B; p5 terminal)
   });
 
-  it("sin clientes → recompra null", () => {
+  it("sin opps vivas → activos 0", () => {
     const raw = postRaw();
-    raw.orderContacts = [];
+    raw.liveOpps = [];
     const m = computePostventaMetrics(raw, "all");
-    expect(m.repurchaseRate).toBeNull();
+    expect(m.activeOrders).toBe(0);
   });
 });

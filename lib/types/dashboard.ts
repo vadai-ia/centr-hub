@@ -1,4 +1,4 @@
-import type { Funnel, UUID } from "@/lib/types/database";
+import type { UUID } from "@/lib/types/database";
 import type { PeriodPreset, ResolvedPeriod } from "@/lib/time/period";
 
 /**
@@ -17,15 +17,14 @@ export interface MonthValue {
   value: number;
 }
 
-/** KPI 9 — conversión por etapa con umbral de muestra pequeña. */
+/** KPI 9 — conversión por etapa. */
 export interface StageWinRate {
   stageId: UUID;
   stageName: string;
   position: number;
   sample: number;
-  /** % que avanzó a una etapa posterior (no perdida). null si muestra <10. */
+  /** % que avanzó a una etapa posterior (no perdida). null si muestra = 0. */
   rate: number | null;
-  smallSample: boolean;
 }
 
 /** KPI 11 — pérdidas agrupadas por motivo. */
@@ -55,11 +54,11 @@ export interface VentaMetrics {
   wonVsLost: { won: number; lost: number };
 }
 
-/** KPIs del Funnel Post-venta (3). */
+/** KPIs del Funnel Post-venta. */
 export interface PostventaMetrics {
-  ordersCount: number; // 1
-  problematicCases: number; // 2
-  repurchaseRate: number | null; // 3 — ventana fija 12 meses
+  ordersCount: number; // pedidos creados en el periodo
+  activeOrders: number; // órdenes distintas con opp post-venta viva ahora (snapshot)
+  problematicCases: number;
   ordersByMonth: MonthValue[];
 }
 
@@ -83,11 +82,11 @@ export interface AdvisorBreakdownRow {
   pipelineGross: number;
   // Post-venta
   ordersCount: number;
+  activeOrders: number;
   problematicCases: number;
 }
 
 export interface DashboardFiltersState {
-  funnel: Funnel;
   /** Preset activo, o "custom" si el usuario eligió un rango manual. */
   preset: PeriodPreset | "custom";
   /** Solo presente cuando preset === "custom". */
@@ -97,14 +96,18 @@ export interface DashboardFiltersState {
   advisorMembershipId: UUID | null;
 }
 
-/** Snapshot completo que consume el dashboard para un funnel + periodo. */
+/**
+ * Snapshot completo que consume el dashboard (M8.2 ajuste #2: ya no hay
+ * toggle de funnel — Venta y Post-venta se calculan y muestran juntos en
+ * una sola pantalla). Ambas secciones comparten periodo y scope.
+ */
 export interface DashboardData {
-  funnel: Funnel;
   period: ResolvedPeriod;
   isAdmin: boolean;
   /** Métricas del scope activo (toda la org, o el asesor filtrado). */
-  venta: VentaMetrics | null;
-  postventa: PostventaMetrics | null;
+  venta: VentaMetrics;
+  postventa: PostventaMetrics;
   /** Drilldown por vendedor — solo admin y solo cuando no hay asesor filtrado. */
-  advisorBreakdown: AdvisorBreakdownRow[] | null;
+  ventaBreakdown: AdvisorBreakdownRow[] | null;
+  postventaBreakdown: AdvisorBreakdownRow[] | null;
 }

@@ -10,7 +10,6 @@ import {
   resolvePresetPeriod,
   type ResolvedPeriod,
 } from "@/lib/time/period";
-import { FUNNELS } from "@/lib/constants";
 import type { UUID } from "@/lib/types/database";
 import type { DashboardData, DashboardFiltersState } from "@/lib/types/dashboard";
 
@@ -44,7 +43,6 @@ export interface DashboardLoadErr {
 export type DashboardLoadResult = DashboardLoadOk | DashboardLoadErr;
 
 const filtersSchema = z.object({
-  funnel: z.enum(FUNNELS),
   preset: z.enum([...PERIOD_PRESETS, "custom"] as [string, ...string[]]),
   customFrom: z.string().nullable().optional(),
   customTo: z.string().nullable().optional(),
@@ -105,7 +103,6 @@ export async function loadDashboardAction(raw: unknown): Promise<DashboardLoadRe
     }
 
     const data = await computeDashboardData({
-      funnel: input.funnel,
       period: period.period,
       isAdmin,
       scope,
@@ -120,7 +117,6 @@ export async function loadDashboardAction(raw: unknown): Promise<DashboardLoadRe
       : [];
 
     const filters: DashboardFiltersState = {
-      funnel: input.funnel,
       preset: input.preset as DashboardFiltersState["preset"],
       customFrom: input.customFrom ?? null,
       customTo: input.customTo ?? null,

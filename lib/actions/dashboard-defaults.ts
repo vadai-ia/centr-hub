@@ -9,7 +9,6 @@ import type { DashboardFiltersInput } from "./dashboard";
  * el módulo server al bundle de quien lo importe.
  */
 export const DEFAULT_DASHBOARD_FILTERS: DashboardFiltersInput = {
-  funnel: "venta",
   preset: "30d",
   customFrom: null,
   customTo: null,

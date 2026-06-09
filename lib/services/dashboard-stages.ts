@@ -86,15 +86,30 @@ function medianPosition(stages: PipelineStageRow[]): number {
 
 const PROBLEMATIC_STAGE_NAME = "Caso problemático";
 
+export interface PostventaStageInfo {
+  /** Etapa "Caso problemático" (snapshot de casos). */
+  problematicStage: PipelineStageRow | null;
+  /** IDs de etapas terminales (ganada/perdida) del funnel post-venta. */
+  terminalStageIds: Set<UUID>;
+}
+
 /**
- * Resuelve la etapa "Caso problemático" del Funnel Post-venta. Ancla
- * por nombre; fallback a la última etapa por posición (en el catálogo
- * V1 "Caso problemático" es la etapa final del post-venta).
+ * Resuelve las anclas del Funnel Post-venta en una sola lectura:
+ *  - "Caso problemático" (ancla por nombre; fallback a la última etapa
+ *    por posición — en el catálogo V1 es la etapa final del post-venta).
+ *  - El conjunto de etapas terminales (is_won/is_lost), para distinguir
+ *    opps "vivas ahora" de las ya cerradas (M8.2 ajuste #10).
  */
-export async function resolveProblematicStage(): Promise<PipelineStageRow | null> {
+export async function resolvePostventaStages(): Promise<PostventaStageInfo> {
   const stages = await listPipelineStages("post_venta");
-  if (stages.length === 0) return null;
+  const terminalStageIds = new Set(
+    stages.filter((s) => s.is_won || s.is_lost).map((s) => s.id),
+  );
+  if (stages.length === 0) {
+    return { problematicStage: null, terminalStageIds };
+  }
   const byName = stages.find((s) => s.name === PROBLEMATIC_STAGE_NAME);
-  if (byName) return byName;
-  return stages.reduce((max, s) => (s.position > max.position ? s : max), stages[0]);
+  const problematicStage =
+    byName ?? stages.reduce((max, s) => (s.position > max.position ? s : max), stages[0]);
+  return { problematicStage, terminalStageIds };
 }

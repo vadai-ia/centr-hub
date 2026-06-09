@@ -36,12 +36,12 @@ export type ExportKpiKey =
   | "salesCycleDays"
   | "lossesByReason"
   | "winRateByStage"
+  | "ventaBreakdown"
   // Post-venta
   | "ordersCount"
+  | "activeOrders"
   | "problematicCases"
-  | "repurchaseRate"
-  // Compartido
-  | "advisorBreakdown";
+  | "postventaBreakdown";
 
 export interface ExportKpiOption {
   key: ExportKpiKey;
@@ -65,33 +65,37 @@ function fmtDate(label: string): string {
   return dt.isValid ? dt.toFormat("dd/MM/yyyy") : label;
 }
 
-/** Opciones de KPI disponibles para el funnel/rol del dataset actual. */
+/**
+ * Opciones de KPI disponibles (M8.2 ajuste #2: ambos funnels en un solo
+ * reporte). El admin sin asesor filtrado además puede incluir el
+ * desglose por vendedor de cada sección.
+ */
 export function exportKpiOptions(data: DashboardData): ExportKpiOption[] {
-  const opts: ExportKpiOption[] = [];
-  if (data.funnel === "venta") {
-    opts.push(
-      { key: "revenue", label: "Revenue cerrado" },
-      { key: "quotesSent", label: "Cotizaciones enviadas" },
-      { key: "pipelineGross", label: "Pipeline $ (bruto)" },
-      { key: "leads", label: "Leads" },
-      { key: "qualifiedLeads", label: "Leads calificados" },
-      { key: "wonCount", label: "Oportunidades ganadas" },
-      { key: "activeWithDraft", label: "Oportunidades activas (con cotización)" },
-      { key: "winRateGlobal", label: "Win rate global" },
-      { key: "lossRate", label: "Loss rate" },
-      { key: "salesCycleDays", label: "Sales cycle promedio" },
-      { key: "lossesByReason", label: "Pérdidas por motivo" },
-      { key: "winRateByStage", label: "Win rate por etapa" },
-    );
-  } else {
-    opts.push(
-      { key: "ordersCount", label: "Pedidos" },
-      { key: "problematicCases", label: "Casos problemáticos" },
-      { key: "repurchaseRate", label: "Tasa de recompra" },
-    );
+  const opts: ExportKpiOption[] = [
+    // Venta
+    { key: "revenue", label: "Venta · Revenue cerrado" },
+    { key: "quotesSent", label: "Venta · Cotizaciones enviadas" },
+    { key: "pipelineGross", label: "Venta · Pipeline $ (bruto)" },
+    { key: "leads", label: "Venta · Leads" },
+    { key: "qualifiedLeads", label: "Venta · Leads calificados" },
+    { key: "wonCount", label: "Venta · Oportunidades ganadas" },
+    { key: "activeWithDraft", label: "Venta · Oportunidades activas (con cotización)" },
+    { key: "winRateGlobal", label: "Venta · Win rate global" },
+    { key: "lossRate", label: "Venta · Loss rate" },
+    { key: "salesCycleDays", label: "Venta · Sales cycle promedio" },
+    { key: "lossesByReason", label: "Venta · Pérdidas por motivo" },
+    { key: "winRateByStage", label: "Venta · Win rate por etapa" },
+  ];
+  if (data.ventaBreakdown && data.ventaBreakdown.length > 0) {
+    opts.push({ key: "ventaBreakdown", label: "Venta · Desglose por vendedor" });
   }
-  if (data.advisorBreakdown && data.advisorBreakdown.length > 0) {
-    opts.push({ key: "advisorBreakdown", label: "Desglose por vendedor" });
+  opts.push(
+    { key: "ordersCount", label: "Post-venta · Pedidos (creados en periodo)" },
+    { key: "activeOrders", label: "Post-venta · Pedidos activos ahora" },
+    { key: "problematicCases", label: "Post-venta · Casos problemáticos" },
+  );
+  if (data.postventaBreakdown && data.postventaBreakdown.length > 0) {
+    opts.push({ key: "postventaBreakdown", label: "Post-venta · Desglose por vendedor" });
   }
   return opts;
 }
@@ -106,91 +110,95 @@ export function buildExportModel(
   selected: Set<ExportKpiKey>,
   ctx: BuildCtx,
 ): ExportModel {
-  const funnelLabel = data.funnel === "venta" ? "Funnel Venta" : "Funnel Post-venta";
   const range = `${fmtDate(data.period.startLabel)} al ${fmtDate(data.period.endLabel)}`;
   const advisorPart = ctx.advisorName ? ` — Asesor: ${ctx.advisorName}` : " — Toda la organización";
   const subtitle = `${ctx.orgName} · ${range}${advisorPart}`;
 
   const sections: ExportSection[] = [];
-  const scalar: string[][] = [];
 
-  if (data.funnel === "venta" && data.venta) {
-    const m = data.venta;
-    const push = (key: ExportKpiKey, label: string, value: string) => {
-      if (selected.has(key)) scalar.push([label, value]);
-    };
-    push("revenue", "Revenue cerrado", formatAmount(m.revenue, CCY) ?? DASH);
-    push("quotesSent", "Cotizaciones enviadas", formatCount(m.quotesSent));
-    push("pipelineGross", "Pipeline $ (bruto)", formatAmount(m.pipelineGross, CCY) ?? DASH);
-    push("leads", "Leads", formatCount(m.leads));
-    push("qualifiedLeads", "Leads calificados", formatCount(m.qualifiedLeads));
-    push("wonCount", "Oportunidades ganadas", formatCount(m.wonCount));
-    push("activeWithDraft", "Oportunidades activas (con cotización)", formatCount(m.activeWithDraft));
-    push("winRateGlobal", "Win rate global", formatPercent(m.winRateGlobal));
-    push("lossRate", "Loss rate", formatPercent(m.lossRate));
-    push("salesCycleDays", "Sales cycle promedio", formatDays(m.salesCycleDays));
-    if (scalar.length > 0) {
-      sections.push({ heading: "Indicadores", columns: ["KPI", "Valor"], rows: scalar });
-    }
-    if (selected.has("lossesByReason")) {
-      sections.push({
-        heading: "Pérdidas por motivo",
-        columns: ["Motivo", "Cantidad", "Monto"],
-        rows: m.lossesByReason.map((r) => [
-          r.reasonName,
-          formatCount(r.count),
-          formatAmount(r.amount, CCY) ?? DASH,
-        ]),
-      });
-    }
-    if (selected.has("winRateByStage")) {
-      sections.push({
-        heading: "Win rate por etapa",
-        columns: ["Etapa", "Muestra", "% avanza"],
-        rows: m.winRateByStage.map((s) => [
-          s.stageName,
-          formatCount(s.sample),
-          s.smallSample ? "Muestra pequeña" : formatPercent(s.rate),
-        ]),
-      });
-    }
-  } else if (data.funnel === "post_venta" && data.postventa) {
-    const m = data.postventa;
-    if (selected.has("ordersCount")) scalar.push(["Pedidos", formatCount(m.ordersCount)]);
-    if (selected.has("problematicCases")) scalar.push(["Casos problemáticos", formatCount(m.problematicCases)]);
-    if (selected.has("repurchaseRate")) scalar.push(["Tasa de recompra", formatPercent(m.repurchaseRate)]);
-    if (scalar.length > 0) {
-      sections.push({ heading: "Indicadores", columns: ["KPI", "Valor"], rows: scalar });
-    }
+  // ---- Funnel Venta ----
+  const v = data.venta;
+  const ventaScalar: string[][] = [];
+  const pushV = (key: ExportKpiKey, label: string, value: string) => {
+    if (selected.has(key)) ventaScalar.push([label, value]);
+  };
+  pushV("revenue", "Revenue cerrado", formatAmount(v.revenue, CCY) ?? DASH);
+  pushV("quotesSent", "Cotizaciones enviadas", formatCount(v.quotesSent));
+  pushV("pipelineGross", "Pipeline $ (bruto)", formatAmount(v.pipelineGross, CCY) ?? DASH);
+  pushV("leads", "Leads", formatCount(v.leads));
+  pushV("qualifiedLeads", "Leads calificados", formatCount(v.qualifiedLeads));
+  pushV("wonCount", "Oportunidades ganadas", formatCount(v.wonCount));
+  pushV("activeWithDraft", "Oportunidades activas (con cotización)", formatCount(v.activeWithDraft));
+  pushV("winRateGlobal", "Win rate global", formatPercent(v.winRateGlobal));
+  pushV("lossRate", "Loss rate", formatPercent(v.lossRate));
+  pushV("salesCycleDays", "Sales cycle promedio", formatDays(v.salesCycleDays));
+  if (ventaScalar.length > 0) {
+    sections.push({ heading: "Venta · Indicadores", columns: ["KPI", "Valor"], rows: ventaScalar });
+  }
+  if (selected.has("lossesByReason")) {
+    sections.push({
+      heading: "Venta · Pérdidas por motivo",
+      columns: ["Motivo", "Cantidad", "Monto"],
+      rows: v.lossesByReason.map((r) => [
+        r.reasonName,
+        formatCount(r.count),
+        formatAmount(r.amount, CCY) ?? DASH,
+      ]),
+    });
+  }
+  if (selected.has("winRateByStage")) {
+    sections.push({
+      heading: "Venta · Win rate por etapa",
+      columns: ["Etapa", "Muestra", "% avanza"],
+      rows: v.winRateByStage.map((s) => [
+        s.stageName,
+        formatCount(s.sample),
+        formatPercent(s.rate),
+      ]),
+    });
+  }
+  if (selected.has("ventaBreakdown") && data.ventaBreakdown) {
+    sections.push({
+      heading: "Venta · Desglose por vendedor",
+      columns: ["Vendedor", "Revenue", "Cotiz.", "Ganadas", "Perdidas", "Win rate", "Pipeline $"],
+      rows: data.ventaBreakdown.map((r) => [
+        r.name,
+        formatAmount(r.revenue, CCY) ?? DASH,
+        formatCount(r.quotesSent),
+        formatCount(r.wonCount),
+        formatCount(r.lostCount),
+        formatPercent(r.winRate),
+        formatAmount(r.pipelineGross, CCY) ?? DASH,
+      ]),
+    });
   }
 
-  if (selected.has("advisorBreakdown") && data.advisorBreakdown) {
-    const isVenta = data.funnel === "venta";
+  // ---- Funnel Post-venta ----
+  const p = data.postventa;
+  const pvScalar: string[][] = [];
+  if (selected.has("ordersCount")) pvScalar.push(["Pedidos (creados en periodo)", formatCount(p.ordersCount)]);
+  if (selected.has("activeOrders")) pvScalar.push(["Pedidos activos ahora", formatCount(p.activeOrders)]);
+  if (selected.has("problematicCases")) pvScalar.push(["Casos problemáticos", formatCount(p.problematicCases)]);
+  if (pvScalar.length > 0) {
+    sections.push({ heading: "Post-venta · Indicadores", columns: ["KPI", "Valor"], rows: pvScalar });
+  }
+  if (selected.has("postventaBreakdown") && data.postventaBreakdown) {
     sections.push({
-      heading: "Desglose por vendedor",
-      columns: isVenta
-        ? ["Vendedor", "Revenue", "Cotiz.", "Ganadas", "Perdidas", "Win rate", "Pipeline $"]
-        : ["Vendedor", "Pedidos", "Casos problemáticos"],
-      rows: data.advisorBreakdown.map((r) =>
-        isVenta
-          ? [
-              r.name,
-              formatAmount(r.revenue, CCY) ?? DASH,
-              formatCount(r.quotesSent),
-              formatCount(r.wonCount),
-              formatCount(r.lostCount),
-              formatPercent(r.winRate),
-              formatAmount(r.pipelineGross, CCY) ?? DASH,
-            ]
-          : [r.name, formatCount(r.ordersCount), formatCount(r.problematicCases)],
-      ),
+      heading: "Post-venta · Desglose por vendedor",
+      columns: ["Vendedor", "Pedidos", "Pedidos activos", "Casos problemáticos"],
+      rows: data.postventaBreakdown.map((r) => [
+        r.name,
+        formatCount(r.ordersCount),
+        formatCount(r.activeOrders),
+        formatCount(r.problematicCases),
+      ]),
     });
   }
 
   const emptyNote = isDatasetEmpty(data) ? "Sin datos en el periodo seleccionado." : null;
 
   return {
-    title: `Reporte ${funnelLabel}`,
+    title: "Reporte Dashboard",
     subtitle,
     emptyNote,
     sections,
@@ -198,24 +206,21 @@ export function buildExportModel(
 }
 
 function isDatasetEmpty(data: DashboardData): boolean {
-  if (data.funnel === "venta" && data.venta) {
-    const m = data.venta;
-    return (
-      m.revenue === 0 &&
-      m.quotesSent === 0 &&
-      m.leads === 0 &&
-      m.qualifiedLeads === 0 &&
-      m.wonCount === 0 &&
-      m.wonVsLost.lost === 0 &&
-      m.pipelineGross === 0 &&
-      m.activeWithDraft === 0
-    );
-  }
-  if (data.funnel === "post_venta" && data.postventa) {
-    const m = data.postventa;
-    return m.ordersCount === 0 && m.problematicCases === 0;
-  }
-  return true;
+  const v = data.venta;
+  const p = data.postventa;
+  return (
+    v.revenue === 0 &&
+    v.quotesSent === 0 &&
+    v.leads === 0 &&
+    v.qualifiedLeads === 0 &&
+    v.wonCount === 0 &&
+    v.wonVsLost.lost === 0 &&
+    v.pipelineGross === 0 &&
+    v.activeWithDraft === 0 &&
+    p.ordersCount === 0 &&
+    p.activeOrders === 0 &&
+    p.problematicCases === 0
+  );
 }
 
 function triggerDownload(blob: Blob, filename: string): void {

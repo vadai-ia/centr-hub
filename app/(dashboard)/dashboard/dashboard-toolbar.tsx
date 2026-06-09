@@ -1,6 +1,6 @@
 "use client";
+import { useEffect, useState } from "react";
 import type { AdvisorOption, DashboardFiltersInput } from "@/lib/actions/dashboard";
-import type { Funnel } from "@/lib/types/database";
 
 const PRESET_BUTTONS: Array<{ value: DashboardFiltersInput["preset"]; label: string }> = [
   { value: "today", label: "Hoy" },
@@ -16,45 +16,42 @@ interface Props {
   pending: boolean;
   /** Error de validación del rango custom (desde > hasta). */
   customError: string | null;
-  onFunnelChange: (f: Funnel) => void;
   onPresetChange: (p: DashboardFiltersInput["preset"]) => void;
-  onCustomChange: (from: string, to: string) => void;
+  /** Aplica el rango personalizado (botón "Aplicar" — M8.2 ajuste #6). */
+  onCustomApply: (from: string, to: string) => void;
   onAdvisorChange: (advisor: string) => void;
   onExport: () => void;
 }
 
+/**
+ * Barra de filtros del Dashboard (M8.2 rediseño). Sin toggle de funnel
+ * (#2): ambas secciones se muestran juntas. El filtro de asesor vive en
+ * la misma fila que los botones de periodo (#3). El rango personalizado
+ * se confirma con un botón "Aplicar" explícito (#6) para evitar disparos
+ * parciales mientras el usuario completa las dos fechas.
+ */
 export function DashboardToolbar({
   filters,
   isAdmin,
   advisors,
   pending,
   customError,
-  onFunnelChange,
   onPresetChange,
-  onCustomChange,
+  onCustomApply,
   onAdvisorChange,
   onExport,
 }: Props) {
   const isCustom = filters.preset === "custom";
 
-  function funnelBtn(value: Funnel, label: string) {
-    const active = filters.funnel === value;
-    return (
-      <button
-        type="button"
-        role="tab"
-        aria-selected={active}
-        onClick={() => onFunnelChange(value)}
-        className={`px-3 py-1.5 text-sm rounded transition-colors ${
-          active
-            ? "bg-indigo-600 text-white shadow-sm"
-            : "text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700"
-        }`}
-      >
-        {label}
-      </button>
-    );
-  }
+  // Draft local de las fechas: el dashboard NO se recalcula hasta "Aplicar".
+  const [draftFrom, setDraftFrom] = useState(filters.customFrom ?? "");
+  const [draftTo, setDraftTo] = useState(filters.customTo ?? "");
+  useEffect(() => {
+    setDraftFrom(filters.customFrom ?? "");
+    setDraftTo(filters.customTo ?? "");
+  }, [filters.customFrom, filters.customTo]);
+
+  const canApply = draftFrom !== "" && draftTo !== "";
 
   function presetBtn(value: DashboardFiltersInput["preset"], label: string) {
     const active = filters.preset === value;
@@ -63,7 +60,7 @@ export function DashboardToolbar({
         key={value}
         type="button"
         onClick={() => onPresetChange(value)}
-        className={`px-2.5 py-1 text-sm rounded-md border transition-colors ${
+        className={`px-3 py-1.5 text-sm rounded-md border transition-colors ${
           active
             ? "border-indigo-500 bg-indigo-50 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-200 font-medium"
             : "border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700/60"
@@ -75,18 +72,35 @@ export function DashboardToolbar({
   }
 
   return (
-    <div className="space-y-3">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div
-          role="tablist"
-          aria-label="Funnel"
-          className="inline-flex rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-0.5"
-        >
-          {funnelBtn("venta", "Venta")}
-          {funnelBtn("post_venta", "Post-venta")}
+    <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-sm p-3 space-y-3">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
+        {/* Periodo */}
+        <div className="flex flex-wrap items-center gap-1.5">
+          {PRESET_BUTTONS.map((b) => presetBtn(b.value, b.label))}
+          {presetBtn("custom", "Personalizado")}
         </div>
 
-        <div className="flex items-center gap-2">
+        {/* Asesor (admin) — junto a los botones de periodo (#3) */}
+        {isAdmin ? (
+          <label className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
+            Asesor
+            <select
+              value={filters.advisor ?? ""}
+              onChange={(e) => onAdvisorChange(e.target.value)}
+              className="rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-2 py-1.5 text-sm font-normal normal-case text-gray-800 dark:text-gray-100 min-w-[12rem]"
+            >
+              <option value="">Toda la organización</option>
+              <option value="unassigned">Sin asignar</option>
+              {advisors.map((a) => (
+                <option key={a.membershipId} value={a.membershipId}>
+                  {a.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
+
+        <div className="flex items-center gap-2 ml-auto">
           {pending ? (
             <span className="text-xs text-gray-400 dark:text-gray-500 animate-pulse">Actualizando…</span>
           ) : null}
@@ -103,56 +117,38 @@ export function DashboardToolbar({
         </div>
       </div>
 
-      <div className="flex flex-wrap items-end gap-x-4 gap-y-3">
-        <div className="flex flex-wrap items-center gap-1.5">
-          {PRESET_BUTTONS.map((b) => presetBtn(b.value, b.label))}
-          {presetBtn("custom", "Personalizado")}
-        </div>
-
-        {isCustom ? (
-          <div className="flex items-end gap-2">
-            <label className="flex flex-col text-xs text-gray-500 dark:text-gray-400">
-              Desde
-              <input
-                type="date"
-                value={filters.customFrom ?? ""}
-                max={filters.customTo ?? undefined}
-                onChange={(e) => onCustomChange(e.target.value, filters.customTo ?? "")}
-                className="mt-0.5 rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-2 py-1 text-sm text-gray-800 dark:text-gray-100"
-              />
-            </label>
-            <label className="flex flex-col text-xs text-gray-500 dark:text-gray-400">
-              Hasta
-              <input
-                type="date"
-                value={filters.customTo ?? ""}
-                min={filters.customFrom ?? undefined}
-                onChange={(e) => onCustomChange(filters.customFrom ?? "", e.target.value)}
-                className="mt-0.5 rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-2 py-1 text-sm text-gray-800 dark:text-gray-100"
-              />
-            </label>
-          </div>
-        ) : null}
-
-        {isAdmin ? (
-          <label className="flex flex-col text-xs text-gray-500 dark:text-gray-400 ml-auto">
-            Asesor
-            <select
-              value={filters.advisor ?? ""}
-              onChange={(e) => onAdvisorChange(e.target.value)}
-              className="mt-0.5 rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-2 py-1 text-sm text-gray-800 dark:text-gray-100 min-w-[12rem]"
-            >
-              <option value="">Toda la organización</option>
-              <option value="unassigned">Sin asignar</option>
-              {advisors.map((a) => (
-                <option key={a.membershipId} value={a.membershipId}>
-                  {a.name}
-                </option>
-              ))}
-            </select>
+      {isCustom ? (
+        <div className="flex flex-wrap items-end gap-2 border-t border-gray-100 dark:border-gray-700/60 pt-3">
+          <label className="flex flex-col text-xs text-gray-500 dark:text-gray-400">
+            Desde
+            <input
+              type="date"
+              value={draftFrom}
+              max={draftTo || undefined}
+              onChange={(e) => setDraftFrom(e.target.value)}
+              className="mt-0.5 rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-2 py-1 text-sm text-gray-800 dark:text-gray-100"
+            />
           </label>
-        ) : null}
-      </div>
+          <label className="flex flex-col text-xs text-gray-500 dark:text-gray-400">
+            Hasta
+            <input
+              type="date"
+              value={draftTo}
+              min={draftFrom || undefined}
+              onChange={(e) => setDraftTo(e.target.value)}
+              className="mt-0.5 rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-2 py-1 text-sm text-gray-800 dark:text-gray-100"
+            />
+          </label>
+          <button
+            type="button"
+            disabled={!canApply}
+            onClick={() => onCustomApply(draftFrom, draftTo)}
+            className="rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            Aplicar
+          </button>
+        </div>
+      ) : null}
 
       {customError ? (
         <p className="text-xs text-rose-600 dark:text-rose-400" role="alert">

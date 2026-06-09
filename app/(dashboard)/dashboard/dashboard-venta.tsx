@@ -1,4 +1,6 @@
 import { KpiCard } from "./kpi-card";
+import { DashboardSection } from "./dashboard-section";
+import { AdvisorBreakdown } from "./advisor-breakdown";
 import {
   LossesByReasonChart,
   RevenueByMonthChart,
@@ -7,13 +9,19 @@ import {
 import { formatAmount } from "@/lib/format/money";
 import { DASH, formatCount, formatDays, formatPercent } from "@/lib/format/dashboard";
 import { DEFAULT_CURRENCY } from "@/lib/constants";
-import type { VentaMetrics } from "@/lib/types/dashboard";
+import type { AdvisorBreakdownRow, VentaMetrics } from "@/lib/types/dashboard";
 
 const CCY = DEFAULT_CURRENCY;
 
-export function DashboardVenta({ m }: { m: VentaMetrics }) {
+export function DashboardVenta({
+  m,
+  breakdown,
+}: {
+  m: VentaMetrics;
+  breakdown: AdvisorBreakdownRow[] | null;
+}) {
   return (
-    <div className="space-y-6">
+    <DashboardSection tone="venta" title="Venta" subtitle="Pipeline comercial y cierre">
       {/* KPIs principales destacados */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <KpiCard
@@ -27,7 +35,7 @@ export function DashboardVenta({ m }: { m: VentaMetrics }) {
           value={formatAmount(m.pipelineGross, CCY) ?? DASH}
           accent="pipeline"
           emphasis
-          hint="Suma bruta de oportunidades vivas"
+          hint="Solo opps vivas creadas en el periodo"
         />
         <KpiCard
           label="Win rate global"
@@ -45,14 +53,17 @@ export function DashboardVenta({ m }: { m: VentaMetrics }) {
       </div>
 
       {/* KPIs secundarios */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
         <KpiCard label="Cotizaciones enviadas" value={formatCount(m.quotesSent)} />
         <KpiCard label="Leads" value={formatCount(m.leads)} />
         <KpiCard label="Leads calificados" value={formatCount(m.qualifiedLeads)} />
-        <KpiCard label="Oportunidades activas (con cotización)" value={formatCount(m.activeWithDraft)} />
+        <KpiCard label="Activas (con cotización)" value={formatCount(m.activeWithDraft)} accent="pipeline" />
         <KpiCard label="Loss rate" value={formatPercent(m.lossRate)} accent="lost" />
         <KpiCard label="Sales cycle promedio" value={formatDays(m.salesCycleDays)} hint="Creación → cierre" />
       </div>
+
+      {/* Desglose por vendedor — posición prominente (#4) */}
+      {breakdown ? <AdvisorBreakdown rows={breakdown} funnel="venta" /> : null}
 
       {/* Gráficas */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -61,7 +72,7 @@ export function DashboardVenta({ m }: { m: VentaMetrics }) {
         <LossesByReasonChart data={m.lossesByReason} currency={CCY} />
         <StageWinRateTable m={m} />
       </div>
-    </div>
+    </DashboardSection>
   );
 }
 
@@ -91,13 +102,9 @@ function StageWinRateTable({ m }: { m: VentaMetrics }) {
                     {formatCount(s.sample)}
                   </td>
                   <td className="py-1.5 pl-2 text-right tabular-nums">
-                    {s.smallSample ? (
-                      <span className="text-xs text-amber-600 dark:text-amber-400">Muestra pequeña</span>
-                    ) : (
-                      <span className="font-medium text-gray-800 dark:text-gray-100">
-                        {formatPercent(s.rate)}
-                      </span>
-                    )}
+                    <span className="font-medium text-gray-800 dark:text-gray-100">
+                      {formatPercent(s.rate)}
+                    </span>
                   </td>
                 </tr>
               ))}

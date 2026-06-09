@@ -45,6 +45,12 @@ export interface LivePipelineRow {
   actual_amount: string | null;
   estimated_amount: string | null;
 }
+export interface LivePostventaRow {
+  id: UUID;
+  assigned_advisor_id: UUID | null;
+  stage_id: UUID;
+  shopify_order_id: string | null;
+}
 export interface LostEntryRow {
   opportunity_id: UUID;
   assigned_advisor_id: UUID | null;
@@ -60,10 +66,6 @@ export interface StageEntryRow {
 export interface HistoryStageRow {
   opportunity_id: UUID;
   to_stage_id: UUID;
-}
-export interface OrderContactRow {
-  contact_id: UUID;
-  assigned_advisor_id: UUID | null;
 }
 
 // ============================================================
@@ -127,8 +129,17 @@ export async function listWonOppsInPeriod(
   return (data ?? []) as WonOppRow[];
 }
 
-/** KPIs 3/7 — snapshot de opps de venta vivas (no ganadas/perdidas/canceladas). */
-export async function listLivePipelineOpps(): Promise<LivePipelineRow[]> {
+/**
+ * KPIs 3/7 — opps de venta vivas (no ganadas/perdidas/canceladas)
+ * CREADAS en el periodo (M8.2 ajuste #5: Pipeline $ y Activas responden
+ * al filtro de fecha; "activa en el periodo" = creada en el periodo, sin
+ * reconstrucción de estado histórico). `won_at IS NULL` excluye ganadas
+ * en SQL; las perdidas se filtran por etapa en el servicio (#7).
+ */
+export async function listLivePipelineOpps(
+  startUtc: string,
+  endUtc: string,
+): Promise<LivePipelineRow[]> {
   const { supabase, organizationId } = getTenantScopedClient();
   const { data, error } = await supabase
     .from("opportunities")
@@ -137,6 +148,8 @@ export async function listLivePipelineOpps(): Promise<LivePipelineRow[]> {
     .eq("funnel", "venta")
     .is("cancelled_at", null)
     .is("won_at", null)
+    .gte("created_at", startUtc)
+    .lte("created_at", endUtc)
     .limit(ROW_CAP);
   if (error) throw error;
   return (data ?? []) as LivePipelineRow[];
@@ -292,21 +305,22 @@ export async function listProblematicCaseOpps(
 }
 
 /**
- * Post-venta KPI 3 — órdenes de los últimos 12 meses (ventana fija,
- * independiente del filtro de periodo) con su contacto, para calcular
- * la tasa de recompra (clientes con >1 order). Trae todos los estados
- * financieros: "recompra" = volvió a comprar, no solo pagó.
+ * Post-venta KPI 3 (M8.2 ajuste #10) — snapshot de opps post-venta NO
+ * canceladas, con su etapa y la orden de origen (`shopify_order_id`),
+ * para contar "Pedidos activos/vivos ahora en Post-venta" = órdenes
+ * distintas con al menos una opp post-venta abierta (el servicio filtra
+ * etapas terminales y dedupe por orden). Snapshot puro: NO se acota al
+ * periodo (es "ahora", no "creados en el periodo").
  */
-export async function listOrderContactsSince(
-  windowStartUtc: string,
-): Promise<OrderContactRow[]> {
+export async function listLivePostventaOpps(): Promise<LivePostventaRow[]> {
   const { supabase, organizationId } = getTenantScopedClient();
   const { data, error } = await supabase
-    .from("orders")
-    .select("contact_id, assigned_advisor_id")
+    .from("opportunities")
+    .select("id, assigned_advisor_id, stage_id, shopify_order_id")
     .eq("organization_id", organizationId)
-    .gte("created_at", windowStartUtc)
+    .eq("funnel", "post_venta")
+    .is("cancelled_at", null)
     .limit(ROW_CAP);
   if (error) throw error;
-  return (data ?? []) as OrderContactRow[];
+  return (data ?? []) as LivePostventaRow[];
 }
