@@ -169,6 +169,14 @@ export interface OpportunityRow {
   cancelled_at: ISODateString | null;
   cancellation_source: string | null;
   cancellation_note: string | null;
+  // Fecha real de creación de la Cotización en Shopify (created_at del
+  // Draft Order). NULL para opps nacidas en plataforma sin draft (lead
+  // R12, manual). Distinto de created_at (entrada a la BD). Migración 0025.
+  shopify_created_at: ISODateString | null;
+  // COALESCE(shopify_created_at, created_at) — eje temporal real para el
+  // dashboard. Columna GENERADA stored: NO escribible (excluida de
+  // Insert/Update). Migración 0025.
+  effective_created_at: ISODateString;
 }
 
 export interface OpportunityLineItemRow {
@@ -199,6 +207,14 @@ export interface OpportunityStageHistoryRow {
   changed_by_user_id: UUID | null;
   context: StageHistoryContext;
   changed_at: ISODateString;
+  // Fecha real del evento de Shopify detrás de la entrada de etapa (DO
+  // created_at para Cotización vía webhook; fecha del pedido para Ganada
+  // vía trigger). NULL para entradas de origen plataforma (manual).
+  // Migración 0025.
+  shopify_event_at: ISODateString | null;
+  // COALESCE(shopify_event_at, changed_at) — eje temporal real para el
+  // dashboard. Columna GENERADA stored: NO escribible. Migración 0025.
+  effective_event_at: ISODateString;
 }
 
 export interface OrderRow {
@@ -391,12 +407,23 @@ export interface Database {
       contacts: { Row: ContactRow; Insert: Insertable<ContactRow>; Update: Updatable<ContactRow> };
       pipeline_stages: { Row: PipelineStageRow; Insert: Insertable<PipelineStageRow>; Update: Updatable<PipelineStageRow> };
       loss_reasons: { Row: LossReasonRow; Insert: Insertable<LossReasonRow>; Update: Updatable<LossReasonRow> };
-      opportunities: { Row: OpportunityRow; Insert: Insertable<OpportunityRow>; Update: Updatable<OpportunityRow> };
+      opportunities: {
+        Row: OpportunityRow;
+        // effective_created_at es GENERADA → no escribible. shopify_created_at
+        // queda REQUERIDA en Insert (como orders en 0024): obliga a cada
+        // path de inserción a decidir conscientemente la fecha de Shopify
+        // (draft → normalized.createdAt; lead R12/manual → null).
+        Insert: Omit<Insertable<OpportunityRow>, "effective_created_at">;
+        Update: Omit<Updatable<OpportunityRow>, "effective_created_at">;
+      };
       opportunity_line_items: { Row: OpportunityLineItemRow; Insert: Insertable<OpportunityLineItemRow>; Update: Updatable<OpportunityLineItemRow> };
       opportunity_stage_history: {
         Row: OpportunityStageHistoryRow;
-        Insert: Omit<OpportunityStageHistoryRow, "id" | "changed_at"> & Partial<Pick<OpportunityStageHistoryRow, "id" | "changed_at">>;
-        Update: Updatable<OpportunityStageHistoryRow>;
+        // effective_event_at es GENERADA → no escribible. shopify_event_at
+        // es opcional en Insert (solo contextos Shopify lo pasan).
+        Insert: Omit<OpportunityStageHistoryRow, "id" | "changed_at" | "shopify_event_at" | "effective_event_at"> &
+          Partial<Pick<OpportunityStageHistoryRow, "id" | "changed_at" | "shopify_event_at">>;
+        Update: Omit<Updatable<OpportunityStageHistoryRow>, "effective_event_at">;
       };
       orders: { Row: OrderRow; Insert: Insertable<OrderRow>; Update: Updatable<OrderRow> };
       order_line_items: { Row: OrderLineItemRow; Insert: Insertable<OrderLineItemRow>; Update: Updatable<OrderLineItemRow> };

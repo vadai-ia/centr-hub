@@ -134,6 +134,10 @@ export async function evaluateAndCreateC2Opportunity(
     cancelled_at: null,
     cancellation_source: null,
     cancellation_note: null,
+    // Lead nacido en plataforma (R12) — sin Draft Order de Shopify. Su
+    // fecha real es created_at (la generada effective_created_at cae a
+    // él). No hay fecha de Shopify que forzar (migración 0025).
+    shopify_created_at: null,
   });
 
   await recordStageChange({
@@ -141,6 +145,8 @@ export async function evaluateAndCreateC2Opportunity(
     fromStageId: null,
     toStageId: initialStage.id,
     changedByUserId: null,
+    // Entrada a "Lead nuevo" nacida en plataforma → su fecha real es
+    // changed_at; no se pasa shopifyEventAt (migración 0025).
     context: "automation",
   });
 

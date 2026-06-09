@@ -40,7 +40,12 @@ export interface AdvisorOnlyRow {
 }
 export interface WonOppRow {
   assigned_advisor_id: UUID | null;
-  created_at: string;
+  /**
+   * Fecha efectiva de creación (COALESCE(shopify_created_at, created_at),
+   * migración 0025) — inicio del Sales cycle. Para opps de Shopify es la
+   * creación del Draft Order; para nacidas en plataforma, su created_at.
+   */
+  effective_created_at: string;
   won_at: string | null;
   actual_amount: string | null;
   estimated_amount: string | null;
@@ -97,7 +102,12 @@ export async function listPaidOrdersInPeriod(
   return (data ?? []) as PaidOrderRow[];
 }
 
-/** KPI 2 — opps de venta con draft ligada creadas en el periodo. */
+/**
+ * KPI 2 — opps de venta con draft ligada creadas en el periodo, por la
+ * fecha REAL de creación en Shopify (`effective_created_at` =
+ * COALESCE(shopify_created_at, created_at), migración 0025), no por
+ * `created_at` de BD (fecha de importación).
+ */
 export async function listDraftOppsCreatedInPeriod(
   startUtc: string,
   endUtc: string,
@@ -110,14 +120,19 @@ export async function listDraftOppsCreatedInPeriod(
     .eq("funnel", "venta")
     .is("cancelled_at", null)
     .not("shopify_draft_order_id", "is", null)
-    .gte("created_at", startUtc)
-    .lte("created_at", endUtc)
+    .gte("effective_created_at", startUtc)
+    .lte("effective_created_at", endUtc)
     .limit(ROW_CAP);
   if (error) throw error;
   return (data ?? []) as AdvisorOnlyRow[];
 }
 
-/** KPIs 6/8/12 — opps de venta con won_at en el periodo. */
+/**
+ * KPIs 6/8/12 — opps de venta con won_at en el periodo. `won_at` es la
+ * fecha REAL de ganada: el trigger F1→F2 la puebla desde la fecha del
+ * pedido en Shopify y el correctivo re-fechó las importadas (migración
+ * 0025), así que ya no es la fecha de importación.
+ */
 export async function listWonOppsInPeriod(
   startUtc: string,
   endUtc: string,
@@ -125,7 +140,7 @@ export async function listWonOppsInPeriod(
   const { supabase, organizationId } = getTenantScopedClient();
   const { data, error } = await supabase
     .from("opportunities")
-    .select("assigned_advisor_id, created_at, won_at, actual_amount, estimated_amount")
+    .select("assigned_advisor_id, effective_created_at, won_at, actual_amount, estimated_amount")
     .eq("organization_id", organizationId)
     .eq("funnel", "venta")
     .is("cancelled_at", null)
@@ -140,8 +155,10 @@ export async function listWonOppsInPeriod(
  * KPIs 3/7 — opps de venta vivas (no ganadas/perdidas/canceladas)
  * CREADAS en el periodo (M8.2 ajuste #5: Pipeline $ y Activas responden
  * al filtro de fecha; "activa en el periodo" = creada en el periodo, sin
- * reconstrucción de estado histórico). `won_at IS NULL` excluye ganadas
- * en SQL; las perdidas se filtran por etapa en el servicio (#7).
+ * reconstrucción de estado histórico). Por la fecha REAL de creación
+ * (`effective_created_at`, migración 0025), no por created_at de BD.
+ * `won_at IS NULL` excluye ganadas en SQL; las perdidas se filtran por
+ * etapa en el servicio (#7).
  */
 export async function listLivePipelineOpps(
   startUtc: string,
@@ -155,8 +172,8 @@ export async function listLivePipelineOpps(
     .eq("funnel", "venta")
     .is("cancelled_at", null)
     .is("won_at", null)
-    .gte("created_at", startUtc)
-    .lte("created_at", endUtc)
+    .gte("effective_created_at", startUtc)
+    .lte("effective_created_at", endUtc)
     .limit(ROW_CAP);
   if (error) throw error;
   return (data ?? []) as LivePipelineRow[];
@@ -181,8 +198,8 @@ export async function listLostEntriesInPeriod(
     .eq("organization_id", organizationId)
     .eq("to_stage_id", lostStageId)
     .is("opportunity.cancelled_at", null)
-    .gte("changed_at", startUtc)
-    .lte("changed_at", endUtc)
+    .gte("effective_event_at", startUtc)
+    .lte("effective_event_at", endUtc)
     .limit(ROW_CAP);
   if (error) throw error;
   type Raw = {
@@ -230,8 +247,8 @@ export async function listStageEntriesInPeriod(
     .eq("organization_id", organizationId)
     .in("to_stage_id", stageIds)
     .is("opportunity.cancelled_at", null)
-    .gte("changed_at", startUtc)
-    .lte("changed_at", endUtc)
+    .gte("effective_event_at", startUtc)
+    .lte("effective_event_at", endUtc)
     .limit(ROW_CAP);
   if (error) throw error;
   type Raw = {

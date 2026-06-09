@@ -81,8 +81,8 @@ function ventaRaw(): VentaRaw {
     ],
     draftOpps: [{ assigned_advisor_id: A }, { assigned_advisor_id: A }, { assigned_advisor_id: B }],
     wonOpps: [
-      { assigned_advisor_id: A, created_at: "2026-05-01T06:00:00.000Z", won_at: "2026-05-11T06:00:00.000Z", actual_amount: "100", estimated_amount: null },
-      { assigned_advisor_id: B, created_at: "2026-05-01T06:00:00.000Z", won_at: "2026-05-21T06:00:00.000Z", actual_amount: "50", estimated_amount: null },
+      { assigned_advisor_id: A, effective_created_at: "2026-05-01T06:00:00.000Z", won_at: "2026-05-11T06:00:00.000Z", actual_amount: "100", estimated_amount: null },
+      { assigned_advisor_id: B, effective_created_at: "2026-05-01T06:00:00.000Z", won_at: "2026-05-21T06:00:00.000Z", actual_amount: "50", estimated_amount: null },
     ],
     livePipeline: [
       { assigned_advisor_id: A, stage_id: CALIF.id, shopify_draft_order_id: null, actual_amount: null, estimated_amount: "40" },

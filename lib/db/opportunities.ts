@@ -544,6 +544,15 @@ export async function recordStageChange(input: {
   toStageId: UUID;
   changedByUserId: UUID | null;
   context: StageHistoryContext;
+  /**
+   * Fecha real del evento de Shopify detrás de esta entrada (migración
+   * 0025). Solo se pasa en contextos de origen Shopify — p.ej. la
+   * entrada a "Cotización" generada por `draft_orders/*` recibe el
+   * `created_at` del Draft Order. Las entradas de origen plataforma
+   * (manual) la omiten: queda NULL y el dashboard cae a `changed_at`,
+   * que ES la fecha real de la acción del usuario.
+   */
+  shopifyEventAt?: string | null;
 }): Promise<OpportunityStageHistoryRow> {
   const { supabase, organizationId } = getTenantScopedClient();
   const { data, error } = await supabase
@@ -555,11 +564,100 @@ export async function recordStageChange(input: {
       to_stage_id: input.toStageId,
       changed_by_user_id: input.changedByUserId,
       context: input.context,
+      shopify_event_at: input.shopifyEventAt ?? null,
     })
     .select("*")
     .single();
   if (error) throw error;
   return data;
+}
+
+// ============================================================
+// Correctivo de fechas (migración 0025) — helpers de enumeración
+// y re-fecha. Reusados por scripts/maintenance/backfill-opportunity-
+// shopify-dates.ts. Idempotentes por construcción (filtran lo NO
+// poblado todavía).
+// ============================================================
+
+/** Opp de Venta con Draft Order ligada pero sin `shopify_created_at`. */
+export interface OppMissingShopifyCreatedAt {
+  id: UUID;
+  shopify_draft_order_id: string;
+  created_at: string;
+}
+
+/**
+ * Opps de Venta provenientes de un Draft Order (shopify_draft_order_id
+ * no nulo) que aún no tienen poblado `shopify_created_at`. El correctivo
+ * les trae la fecha real desde Shopify (GET draft_orders + mapper).
+ */
+export async function listVentaOppsMissingShopifyCreatedAt(): Promise<
+  OppMissingShopifyCreatedAt[]
+> {
+  const { supabase, organizationId } = getTenantScopedClient();
+  const { data, error } = await supabase
+    .from("opportunities")
+    .select("id, shopify_draft_order_id, created_at")
+    .eq("organization_id", organizationId)
+    .eq("funnel", "venta")
+    .not("shopify_draft_order_id", "is", null)
+    .is("shopify_created_at", null)
+    .order("created_at", { ascending: true });
+  if (error) throw error;
+  return (data ?? []) as OppMissingShopifyCreatedAt[];
+}
+
+/** Opp ganada de Venta con pedido ligado — candidata a re-fecha de won_at. */
+export interface WonOppForRedate {
+  id: UUID;
+  shopify_order_id: string;
+  won_at: string;
+  created_at: string;
+}
+
+/**
+ * Opps de Venta GANADAS (won_at no nulo) con pedido ligado
+ * (shopify_order_id no nulo). El correctivo re-fecha `won_at` a la fecha
+ * real del pedido (`orders.shopify_created_at`) cuando difiere. Las
+ * ganadas manuales sin pedido NO entran aquí: su won_at es la fecha real
+ * de la acción de plataforma.
+ */
+export async function listWonVentaOppsWithOrder(): Promise<WonOppForRedate[]> {
+  const { supabase, organizationId } = getTenantScopedClient();
+  const { data, error } = await supabase
+    .from("opportunities")
+    .select("id, shopify_order_id, won_at, created_at")
+    .eq("organization_id", organizationId)
+    .eq("funnel", "venta")
+    .not("won_at", "is", null)
+    .not("shopify_order_id", "is", null)
+    .order("won_at", { ascending: true });
+  if (error) throw error;
+  return (data ?? []) as WonOppForRedate[];
+}
+
+/**
+ * Puebla `shopify_event_at` en las entradas de historial de UN contexto
+ * de UNA opp que todavía lo tengan NULL (la guarda de inmutabilidad de
+ * 0025 permite escribir SOLO esa columna). Devuelve cuántas filas tocó.
+ * Idempotente: el filtro `shopify_event_at IS NULL` evita re-escribir.
+ */
+export async function setStageHistoryShopifyEventAt(input: {
+  opportunityId: UUID;
+  context: StageHistoryContext;
+  shopifyEventAt: string;
+}): Promise<number> {
+  const { supabase, organizationId } = getTenantScopedClient();
+  const { data, error } = await supabase
+    .from("opportunity_stage_history")
+    .update({ shopify_event_at: input.shopifyEventAt })
+    .eq("organization_id", organizationId)
+    .eq("opportunity_id", input.opportunityId)
+    .eq("context", input.context)
+    .is("shopify_event_at", null)
+    .select("id");
+  if (error) throw error;
+  return (data ?? []).length;
 }
 
 export async function listStageHistory(

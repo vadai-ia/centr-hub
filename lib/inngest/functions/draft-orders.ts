@@ -223,6 +223,9 @@ export const draftOrdersCreate = inngest.createFunction(
         toStageId: stage.id,
         changedByUserId: null,
         context: "webhook",
+        // Entrada a "Cotización" generada por Shopify → su fecha real
+        // es la de creación del Draft Order, no now() (migración 0025).
+        shopifyEventAt: normalized.createdAt,
       });
       await replaceLineItems(opp.id, normalized.lineItems.map(mapLineItemForOpportunity));
       // Absorbe cualquier "Lead nuevo" R12-creado activo del mismo
@@ -256,6 +259,10 @@ function buildOpportunityInsertFromDraftOrder(args: {
     parent_opportunity_id: null,
     shopify_draft_order_id: args.normalized.shopifyDraftOrderId,
     shopify_order_id: null,
+    // Fecha real de creación de la Cotización en Shopify (created_at del
+    // Draft Order). El dashboard ubica la opp por esta fecha, no por
+    // created_at de BD (migración 0025). El mapper ya la extrae.
+    shopify_created_at: args.normalized.createdAt,
     display_reference: args.normalized.displayReference,
     actual_amount: args.normalized.totalAmount,
     estimated_amount: null,

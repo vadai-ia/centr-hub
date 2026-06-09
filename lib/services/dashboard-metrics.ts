@@ -223,7 +223,10 @@ export function computeVentaMetrics(raw: VentaRaw, scope: Scope): VentaMetrics {
   const wonCount = wonScoped.length;
   const cycleDays: number[] = [];
   for (const w of wonScoped) {
-    if (w.won_at) cycleDays.push(daysBetween(w.created_at, w.won_at));
+    // Sales cycle = de la creación REAL (effective_created_at: Draft
+    // Order en Shopify si aplica, si no created_at) a la ganada REAL
+    // (won_at re-fechado al pedido). Migración 0025.
+    if (w.won_at) cycleDays.push(daysBetween(w.effective_created_at, w.won_at));
   }
   const salesCycleDays = cycleDays.length
     ? cycleDays.reduce((a, b) => a + b, 0) / cycleDays.length
