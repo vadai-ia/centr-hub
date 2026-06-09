@@ -104,6 +104,12 @@ export async function archiveContactForWhaapyDeletion(
   //    fallo NO bloquea el archivado local (el maestro queda correcto).
   let shopifyTagged = false;
   let shopifySkipReason: string | null = null;
+  // Tags resultantes a espejar en el maestro local. `updateCustomerTags`
+  // actualiza Shopify pero el `customers/update` de vuelta se suprime por
+  // R11, así que el espejo local NO se entera del tag salvo que lo
+  // persistamos acá. Sin esto, `shopify_tags` queda stale y cada re-run
+  // re-PUTea el mismo tag (idempotencia imperfecta del lado Shopify).
+  let nextShopifyTags: string[] | null = null;
   if (!contact.shopify_customer_id) {
     shopifySkipReason = "no_shopify_identity";
   } else {
@@ -121,7 +127,7 @@ export async function archiveContactForWhaapyDeletion(
         if (!shopDomain) {
           shopifySkipReason = "no_shop_domain";
         } else {
-          await updateCustomerTags({
+          nextShopifyTags = await updateCustomerTags({
             ctx: { organizationId: contact.organization_id, shopDomain },
             contactId: contact.id,
             shopifyCustomerId: contact.shopify_customer_id,
@@ -157,6 +163,9 @@ export async function archiveContactForWhaapyDeletion(
       deleted_in_whaapy: true,
       last_modified_at: deletedAt,
       last_modified_source: "whaapy",
+      // Espejar el tag aplicado a Shopify (el webhook de vuelta se
+      // suprime por R11) → maestro consistente + re-runs idempotentes.
+      ...(nextShopifyTags ? { shopify_tags: nextShopifyTags } : {}),
     });
     await recordAuditEvent({
       actorUserId: null,

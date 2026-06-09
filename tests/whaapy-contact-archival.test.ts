@@ -158,6 +158,10 @@ describe("archiveContactForWhaapyDeletion", () => {
     expect(updateCustomerTagsSpy).toHaveBeenCalledTimes(1);
     const arg = updateCustomerTagsSpy.mock.calls[0][0] as { tagsToAdd: string[] };
     expect(arg.tagsToAdd).toEqual([WHAAPY_DELETED_SHOPIFY_TAG]);
+    // El tag se espeja en el maestro local (el webhook de vuelta se
+    // suprime por R11) → re-run idempotente (tag_already_present).
+    const stored = fake.getTable("contacts")[0] as unknown as ContactRow;
+    expect(stored.shopify_tags).toContain(WHAAPY_DELETED_SHOPIFY_TAG);
   });
 
   it("sin identidad Shopify → no etiqueta", async () => {
