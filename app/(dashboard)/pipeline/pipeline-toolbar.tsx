@@ -1,9 +1,10 @@
 "use client";
-import { useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import {
   setActiveFunnelPreference,
   setUnassignedFilterPreference,
 } from "@/lib/actions/pipeline";
+import { HIDE_CLOSED_DAYS_MAX, HIDE_CLOSED_DAYS_MIN } from "@/lib/constants";
 import type { Funnel, Role } from "@/lib/types/database";
 
 interface Props {
@@ -11,8 +12,12 @@ interface Props {
   role: Role;
   unassignedFilter: boolean;
   realtimeStatus: "connected" | "connecting" | "disconnected" | "stale";
+  /** Umbral global vigente (días) de auto-ocultar cerradas. */
+  hideClosedAfterDays: number;
   onFunnelChange: (f: Funnel) => void;
   onUnassignedToggle: (enabled: boolean) => void;
+  /** Persiste el umbral (solo admin). */
+  onHideClosedDaysChange: (days: number) => void | Promise<void>;
 }
 
 /**
@@ -30,11 +35,37 @@ export function PipelineToolbar({
   role,
   unassignedFilter,
   realtimeStatus,
+  hideClosedAfterDays,
   onFunnelChange,
   onUnassignedToggle,
+  onHideClosedDaysChange,
 }: Props) {
   const [isPending, startTransition] = useTransition();
   const isAdmin = role === "admin" || role === "superadmin";
+
+  // Draft local del umbral — se aplica al blur/Enter, no por tecla, para
+  // no recargar el tablero en cada dígito.
+  const [daysDraft, setDaysDraft] = useState<string>(String(hideClosedAfterDays));
+  useEffect(() => {
+    setDaysDraft(String(hideClosedAfterDays));
+  }, [hideClosedAfterDays]);
+
+  function commitDays() {
+    const parsed = Number(daysDraft);
+    if (!Number.isFinite(parsed)) {
+      setDaysDraft(String(hideClosedAfterDays));
+      return;
+    }
+    const clamped = Math.min(
+      HIDE_CLOSED_DAYS_MAX,
+      Math.max(HIDE_CLOSED_DAYS_MIN, Math.floor(parsed)),
+    );
+    if (clamped === hideClosedAfterDays) {
+      setDaysDraft(String(clamped));
+      return;
+    }
+    void onHideClosedDaysChange(clamped);
+  }
 
   function selectFunnel(next: Funnel) {
     if (next === funnel) return;
@@ -85,6 +116,34 @@ export function PipelineToolbar({
       )}
 
       <div className="flex-1" />
+
+      {isAdmin && (
+        <label
+          className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400 select-none"
+          title="Las oportunidades Ganadas y Perdidas se ocultan del tablero tras estos días desde su cierre. Es solo visualización: no se borran ni afectan los indicadores."
+        >
+          <span className="hidden sm:inline">Ocultar cerradas tras</span>
+          <span className="sm:hidden">Ocultar tras</span>
+          <input
+            type="number"
+            inputMode="numeric"
+            min={HIDE_CLOSED_DAYS_MIN}
+            max={HIDE_CLOSED_DAYS_MAX}
+            value={daysDraft}
+            onChange={(e) => setDaysDraft(e.target.value)}
+            onBlur={commitDays}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                e.currentTarget.blur();
+              }
+            }}
+            className="w-14 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-1.5 py-0.5 text-center tabular-nums text-gray-700 dark:text-gray-200"
+            aria-label="Días para ocultar oportunidades cerradas"
+          />
+          <span>días</span>
+        </label>
+      )}
 
       <RealtimeIndicator status={realtimeStatus} />
     </div>

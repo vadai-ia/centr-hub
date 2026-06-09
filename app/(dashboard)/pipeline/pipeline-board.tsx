@@ -17,6 +17,7 @@ import {
   loadInitialPipelineState,
   loadKanbanPageAction,
   moveStageAction,
+  setHideClosedDaysAction,
 } from "@/lib/actions/pipeline";
 import { OpportunityDialog } from "@/components/opportunity/opportunity-dialog";
 import type { KanbanOpportunity } from "@/lib/db/opportunities";
@@ -121,6 +122,18 @@ export function PipelineBoard({
   );
   const [countsByStage, setCountsByStage] = useState<Record<UUID, number>>(
     initial.countsByStage,
+  );
+  const [hiddenClosedByStage, setHiddenClosedByStage] = useState<Record<UUID, number>>(
+    initial.hiddenClosedByStage,
+  );
+  const [hideClosedAfterDays, setHideClosedAfterDays] = useState<number>(
+    initial.hideClosedAfterDays,
+  );
+  // Etapas cerradas en las que el usuario pidió "Ver cerradas" (muestra
+  // también las auto-ocultas). Local a la sesión de tablero; se resetea
+  // en cada applyState (toggle funnel/filtro/umbral/polling).
+  const [showClosedByStage, setShowClosedByStage] = useState<Set<UUID>>(
+    () => new Set(),
   );
   const [pendingTasksByOpp, setPendingTasksByOpp] = useState<Record<UUID, number>>(
     initial.pendingTasksByOpp,
@@ -228,6 +241,9 @@ export function PipelineBoard({
       setCardsByStage(state.cardsByStage);
       setHasMoreByStage(state.hasMoreByStage);
       setCountsByStage(state.countsByStage);
+      setHiddenClosedByStage(state.hiddenClosedByStage);
+      setHideClosedAfterDays(state.hideClosedAfterDays);
+      setShowClosedByStage(new Set());
       setPendingTasksByOpp(state.pendingTasksByOpp);
       setPageByStage(() => initialPageByStage(state.stages));
       if (updateAdvisor) setEffectiveAdvisorId(state.effectiveAdvisorId);
@@ -305,6 +321,7 @@ export function PipelineBoard({
       dateFrom: payload.dateFrom,
       dateTo: payload.dateTo,
       query: payload.query,
+      showClosed: showClosedByStage.has(stage.id),
     });
     if (!res.ok) {
       pushToast(res.message, "error");
@@ -317,6 +334,55 @@ export function PipelineBoard({
     setHasMoreByStage((cur) => ({ ...cur, [stage.id]: res.hasMore }));
     setPageByStage((cur) => ({ ...cur, [stage.id]: page }));
     return res;
+  }
+
+  // ----- Auto-ocultar cerradas (Fix de pipeline P1) -----
+  // "Ver cerradas" / "Ocultar cerradas" por columna cerrada: recarga la
+  // primera página de esa etapa con/sin el filtro de ocultar.
+  async function toggleClosedForStage(stage: PipelineStageRow) {
+    const willShow = !showClosedByStage.has(stage.id);
+    const payload = filtersToPayload(filters);
+    const res = await loadKanbanPageAction({
+      funnel,
+      stageId: stage.id,
+      page: 0,
+      assignedAdvisorId: effectiveAdvisorId,
+      dateFrom: payload.dateFrom,
+      dateTo: payload.dateTo,
+      query: payload.query,
+      showClosed: willShow,
+    });
+    if (!res.ok) {
+      pushToast(res.message, "error");
+      return;
+    }
+    setCardsByStage((cur) => ({ ...cur, [stage.id]: res.items }));
+    setHasMoreByStage((cur) => ({ ...cur, [stage.id]: res.hasMore }));
+    setPageByStage((cur) => ({ ...cur, [stage.id]: 0 }));
+    setShowClosedByStage((cur) => {
+      const next = new Set(cur);
+      if (willShow) next.add(stage.id);
+      else next.delete(stage.id);
+      return next;
+    });
+  }
+
+  // Cambia el umbral global (admin): persiste + recarga el estado para
+  // re-aplicar el ocultamiento con el valor nuevo.
+  async function changeHideClosedDays(days: number) {
+    const res = await setHideClosedDaysAction({ days });
+    if (!res.ok) {
+      pushToast(res.message, "error");
+      return;
+    }
+    setHideClosedAfterDays(res.days);
+    const state = await loadInitialPipelineState({
+      funnel,
+      unassignedFilter: isAdmin && unassignedFilter,
+      filters: filtersToPayload(filters),
+    });
+    if (state.ok) applyState(state.state, false);
+    pushToast(`Las cerradas se ocultan tras ${res.days} día(s).`, "success");
   }
 
   // ----- Drag-and-drop -----
@@ -454,8 +520,10 @@ export function PipelineBoard({
         role={role}
         unassignedFilter={isAdmin && unassignedFilter}
         realtimeStatus={realtimeStatus}
+        hideClosedAfterDays={hideClosedAfterDays}
         onFunnelChange={changeFunnel}
         onUnassignedToggle={changeUnassignedFilter}
+        onHideClosedDaysChange={changeHideClosedDays}
       />
 
       <PipelineFiltersBar
@@ -483,6 +551,10 @@ export function PipelineBoard({
                 showAdvisor={isAdmin}
                 page={pageByStage[stage.id] ?? 0}
                 totalCount={countsByStage[stage.id]}
+                hiddenClosedCount={hiddenClosedByStage[stage.id] ?? 0}
+                isClosedStage={stage.is_won || stage.is_lost}
+                showingClosed={showClosedByStage.has(stage.id)}
+                onToggleClosed={toggleClosedForStage}
                 pendingTasksByOpp={pendingTasksByOpp}
                 onLoadMore={loadMoreForStage}
                 onSelectOpportunity={handleSelectOpportunity}

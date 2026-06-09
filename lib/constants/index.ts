@@ -114,6 +114,24 @@ export const PIPELINE_REALTIME_DEBOUNCE_MS = 150 as const;
 export const PIPELINE_POLLING_FALLBACK_MS = 30_000 as const;
 export const PIPELINE_REALTIME_RECONNECT_TIMEOUT_MS = 30_000 as const;
 
+/**
+ * Auto-ocultar cerradas (anti-ruido — Fix de pipeline).
+ *
+ * `DEFAULT_HIDE_CLOSED_AFTER_DAYS` — umbral global por defecto: una opp
+ *   en etapa Ganada/Perdida se oculta del kanban tras este número de
+ *   días desde su cierre (won_at/lost_at). Editable por el admin desde
+ *   el propio pipeline; vive en `organizations.config.pipeline.
+ *   hide_closed_after_days`. Es SOLO visualización del kanban — NO
+ *   afecta KPIs, no borra, no cambia etapa, no cancela.
+ *
+ * `HIDE_CLOSED_DAYS_MIN/MAX` — límites de saneamiento del valor
+ *   configurable (0 = ocultar apenas se cierra; tope alto evita errores
+ *   de captura). El admin puede poner 0 para ocultar de inmediato.
+ */
+export const DEFAULT_HIDE_CLOSED_AFTER_DAYS = 7 as const;
+export const HIDE_CLOSED_DAYS_MIN = 0 as const;
+export const HIDE_CLOSED_DAYS_MAX = 365 as const;
+
 /** Cookie de preferencia del funnel activo del usuario en M5. */
 export const PIPELINE_FUNNEL_COOKIE = "centr_pipeline_funnel" as const;
 /** Cookie de preferencia del filtro admin "Sin asignar" en M5. */

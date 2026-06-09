@@ -276,6 +276,7 @@ function buildOpportunityInsertFromDraftOrder(args: {
     last_modified_at: args.effectiveUpdatedAt,
     last_modified_source: "shopify",
     won_at: null,
+    lost_at: null,
     invoice_sent_at: null,
     cancelled_at: null,
     cancellation_source: null,

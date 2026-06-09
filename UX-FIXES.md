@@ -15,6 +15,13 @@ Cada entrada documenta UN ajuste pendiente con la siguiente estructura:
 
 ## Entradas
 
+### "Ver cerradas" se colapsa si entra un polling fallback (Fix de pipeline P1)
+
+- **Componente o pantalla:** `app/(dashboard)/pipeline/` — botón "Ver cerradas (N)" por columna Ganada/Perdida (auto-ocultar cerradas).
+- **Issue detectado:** al expandir las cerradas de una etapa, el estado `showClosedByStage` es local al tablero y se resetea en `applyState`. Las acciones que lo resetean son intencionales (toggle de funnel/filtro/umbral) EXCEPTO el **polling fallback** (cada 30s cuando Realtime está caído): si el usuario expandió "Ver cerradas" y entra un poll, la columna se colapsa a la vista filtrada. Con Realtime funcionando (hook M5-DT-01) el poll casi no corre, así que el impacto real es bajo; pero conviene preservar el expandido a través de los polls (o re-fetchear las etapas expandidas con `showClosed: true` dentro de `handlePollingTick`).
+- **Sub-sesión de F7 sugerida:** C (componentes funcionales).
+- **Severidad:** baja.
+
 ### Landing diferenciado por rol al login (post-M2)
 
 - **Componente o pantalla:** `app/page.tsx` (redirect raíz tras autenticación).

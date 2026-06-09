@@ -168,16 +168,19 @@ export async function moveOpportunityStage(
   };
   if (targetStage.is_won) {
     updatePayload.won_at = nowIso;
+    updatePayload.lost_at = null;
     updatePayload.loss_reason_id = null;
   } else if (targetStage.is_lost) {
     updatePayload.loss_reason_id = input.lossReasonId ?? null;
     if (input.note) updatePayload.note = input.note;
     updatePayload.won_at = null;
+    updatePayload.lost_at = nowIso;
   } else {
     // Etapa intermedia: limpia flags terminales para que la card
-    // no quede con won_at residual si admin la retorna del estado
-    // ganada por corrección.
+    // no quede con won_at/lost_at residual si admin la retorna del
+    // estado ganada/perdida por corrección.
     updatePayload.won_at = null;
+    updatePayload.lost_at = null;
     updatePayload.loss_reason_id = null;
   }
 

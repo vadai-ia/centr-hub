@@ -10,15 +10,23 @@ import {
   searchContactIdsForQuery,
   type KanbanOpportunity,
 } from "@/lib/db/opportunities";
-import { listPendingTaskCountsByOpportunity } from "@/lib/db/operational";
+import { listPendingTaskCountsByOpportunity, recordAuditEvent } from "@/lib/db/operational";
 import { listLossReasons, listPipelineStages } from "@/lib/db/pipeline";
 import { getMembership, listActiveRealVendors } from "@/lib/db/users";
+import { getOrganizationById, updateOrganization } from "@/lib/db/organizations";
 import {
   moveOpportunityStage,
   type MoveOpportunityResult,
 } from "@/lib/services/pipeline-move";
+import {
+  closedFilterForStage,
+  computeClosedCutoffIso,
+  partitionClosedStages,
+  readHideClosedDays,
+  sanitizeHideClosedDays,
+} from "@/lib/services/pipeline-visibility";
 import { FUNNELS, PIPELINE_FUNNEL_COOKIE, PIPELINE_PAGE_SIZE, PIPELINE_UNASSIGNED_COOKIE } from "@/lib/constants";
-import type { Funnel, UUID } from "@/lib/types/database";
+import type { Funnel, Json, UUID } from "@/lib/types/database";
 import type {
   FetchOppActionResult,
   LoadPageActionResult,
@@ -123,6 +131,9 @@ const loadPageSchema = z.object({
   dateFrom: z.string().optional(),
   dateTo: z.string().optional(),
   query: z.string().max(200).optional(),
+  /** "Ver cerradas": si true, NO aplica el filtro de auto-ocultar para
+   *  esta etapa cerrada → trae también las cerradas viejas. */
+  showClosed: z.boolean().optional(),
 });
 
 /**
@@ -178,6 +189,22 @@ export async function loadKanbanPageAction(
         ? await searchContactIdsForQuery(input.query)
         : null;
 
+    // Auto-ocultar cerradas: salvo en modo "Ver cerradas", una etapa
+    // cerrada limita la página a las opps dentro de la ventana.
+    let closedFilter: { column: "won_at" | "lost_at"; sinceIso: string } | null =
+      null;
+    if (!input.showClosed) {
+      const [org, stages] = await Promise.all([
+        getOrganizationById(orgId),
+        listPipelineStages(input.funnel),
+      ]);
+      const stage = stages.find((s) => s.id === input.stageId);
+      if (stage) {
+        const days = readHideClosedDays(org?.config ?? null);
+        closedFilter = closedFilterForStage(stage, computeClosedCutoffIso(days));
+      }
+    }
+
     const items = await listKanbanOpportunities({
       funnel: input.funnel,
       stageId: input.stageId,
@@ -188,6 +215,7 @@ export async function loadKanbanPageAction(
       matchingContactIds,
       limit: PIPELINE_PAGE_SIZE + 1,
       offset: input.page * PIPELINE_PAGE_SIZE,
+      closedFilter,
     });
     const hasMore = items.length > PIPELINE_PAGE_SIZE;
     return {
@@ -326,10 +354,22 @@ export async function loadInitialPipelineState(opts: {
         ? await searchContactIdsForQuery(filterQuery)
         : null;
 
-    const [allStages, vendors, lossReasons, countsByStage] = await Promise.all([
+    const [allStages, vendors, lossReasons, org] = await Promise.all([
       listPipelineStages(opts.funnel),
       listActiveRealVendors(orgId),
       listLossReasons({ activeOnly: true }),
+      getOrganizationById(orgId),
+    ]);
+    const activeStages = allStages.filter((s) => s.is_active);
+
+    // Auto-ocultar cerradas (Fix de pipeline P1): umbral global de la
+    // org (default 7) → instante de corte. Las etapas cerradas se
+    // filtran por su fecha de cierre; las activas no se tocan.
+    const hideClosedAfterDays = readHideClosedDays(org?.config ?? null);
+    const cutoffIso = computeClosedCutoffIso(hideClosedAfterDays);
+    const { wonStageIds, lostStageIds } = partitionClosedStages(activeStages);
+
+    const [countResult, pageResults] = await Promise.all([
       countKanbanOpportunitiesByStage({
         funnel: opts.funnel,
         assignedAdvisorId: effectiveAdvisorId,
@@ -337,25 +377,27 @@ export async function loadInitialPipelineState(opts: {
         dateTo: filterDateTo,
         query: filterQuery,
         matchingContactIds,
+        closedHide: { cutoffIso, wonStageIds, lostStageIds },
       }),
+      Promise.all(
+        activeStages.map(async (stage) => {
+          const items = await listKanbanOpportunities({
+            funnel: opts.funnel,
+            stageId: stage.id,
+            assignedAdvisorId: effectiveAdvisorId,
+            dateFrom: filterDateFrom,
+            dateTo: filterDateTo,
+            query: filterQuery,
+            matchingContactIds,
+            limit: PIPELINE_PAGE_SIZE + 1,
+            closedFilter: closedFilterForStage(stage, cutoffIso),
+          });
+          return { stageId: stage.id, items };
+        }),
+      ),
     ]);
-    const activeStages = allStages.filter((s) => s.is_active);
-
-    const pageResults = await Promise.all(
-      activeStages.map(async (stage) => {
-        const items = await listKanbanOpportunities({
-          funnel: opts.funnel,
-          stageId: stage.id,
-          assignedAdvisorId: effectiveAdvisorId,
-          dateFrom: filterDateFrom,
-          dateTo: filterDateTo,
-          query: filterQuery,
-          matchingContactIds,
-          limit: PIPELINE_PAGE_SIZE + 1,
-        });
-        return { stageId: stage.id, items };
-      }),
-    );
+    const countsByStage = countResult.counts;
+    const hiddenClosedByStage = countResult.hiddenCounts;
 
     const cardsByStage: Record<UUID, KanbanOpportunity[]> = {};
     const hasMoreByStage: Record<UUID, boolean> = {};
@@ -380,6 +422,8 @@ export async function loadInitialPipelineState(opts: {
         cardsByStage,
         hasMoreByStage,
         countsByStage,
+        hiddenClosedByStage,
+        hideClosedAfterDays,
         pendingTasksByOpp,
         effectiveAdvisorId,
         advisors: vendors.map((v) => ({
@@ -408,4 +452,73 @@ export async function readFunnelPreference(): Promise<Funnel> {
 
 export async function readUnassignedFilterPreference(): Promise<boolean> {
   return cookies().get(PIPELINE_UNASSIGNED_COOKIE)?.value === "1";
+}
+
+const setHideClosedDaysSchema = z.object({
+  days: z.number().int(),
+});
+
+export type SetHideClosedDaysResult =
+  | { ok: true; days: number }
+  | { ok: false; reason: string; message: string };
+
+/**
+ * Ajusta el umbral global de auto-ocultar cerradas
+ * (`organizations.config.pipeline.hide_closed_after_days`). Solo admin.
+ * Es un ajuste de visualización del kanban — no toca opps ni KPIs.
+ *
+ * Vive en el pipeline (no en un módulo de Ajustes — Umbrales se difirió
+ * a V2): el control del pipeline llama a esta action y luego recarga el
+ * estado para re-aplicar el filtro con el nuevo valor.
+ */
+export async function setHideClosedDaysAction(
+  raw: unknown,
+): Promise<SetHideClosedDaysResult> {
+  const parsed = setHideClosedDaysSchema.safeParse(raw);
+  if (!parsed.success) {
+    return { ok: false, reason: "invalid_input", message: "Valor inválido." };
+  }
+  const session = await getSession();
+  if (session.status !== "ok") {
+    return { ok: false, reason: "no_session", message: "Sesión expirada." };
+  }
+  const role = session.data.activeOrg.role;
+  const isAdmin = role === "admin" || role === "superadmin";
+  if (!isAdmin) {
+    return {
+      ok: false,
+      reason: "forbidden",
+      message: "Solo un administrador puede cambiar este ajuste.",
+    };
+  }
+  const orgId = session.data.activeOrg.id;
+  const days = sanitizeHideClosedDays(parsed.data.days);
+
+  return withTenantContext(orgId, async () => {
+    const org = await getOrganizationById(orgId);
+    if (!org) {
+      return { ok: false, reason: "org_not_found", message: "Organización no encontrada." } as const;
+    }
+    const baseConfig: Record<string, Json> =
+      org.config && typeof org.config === "object" && !Array.isArray(org.config)
+        ? { ...(org.config as Record<string, Json>) }
+        : {};
+    const basePipeline: Record<string, Json> =
+      baseConfig.pipeline &&
+      typeof baseConfig.pipeline === "object" &&
+      !Array.isArray(baseConfig.pipeline)
+        ? { ...(baseConfig.pipeline as Record<string, Json>) }
+        : {};
+    basePipeline.hide_closed_after_days = days;
+    baseConfig.pipeline = basePipeline as Json;
+    await updateOrganization(orgId, { config: baseConfig as Json });
+    await recordAuditEvent({
+      actorUserId: session.data.userId,
+      eventType: "pipeline_hide_closed_days_changed",
+      entityType: "organization",
+      entityId: orgId,
+      payload: { hide_closed_after_days: days },
+    });
+    return { ok: true, days } as const;
+  }, { source: "user_session" });
 }

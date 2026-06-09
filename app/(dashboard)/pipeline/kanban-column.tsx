@@ -20,8 +20,18 @@ interface Props {
   page: number;
   isOverlay?: boolean;
   /** Conteo total de opps activas en esta etapa (lote polish M6).
-   *  Si no se provee, fallback al cards.length + "+" anterior. */
+   *  Si no se provee, fallback al cards.length + "+" anterior. Para
+   *  etapas cerradas es el conteo VISIBLE (excluye auto-ocultas). */
   totalCount?: number;
+  /** Auto-ocultar cerradas (Fix de pipeline P1): cerradas ocultas en
+   *  esta etapa (fuera de la ventana). Alimenta "Ver cerradas (N)". */
+  hiddenClosedCount?: number;
+  /** True si la etapa es Ganada o Perdida (puede tener cerradas ocultas). */
+  isClosedStage?: boolean;
+  /** True si el usuario activó "Ver cerradas" para esta etapa. */
+  showingClosed?: boolean;
+  /** Toggle "Ver cerradas" / "Ocultar cerradas" de la etapa. */
+  onToggleClosed?: (stage: PipelineStageRow) => void | Promise<void>;
   /** Conteo de tareas pendientes por opportunity_id (lote polish M6). */
   pendingTasksByOpp?: Record<UUID, number>;
   onLoadMore: (
@@ -50,6 +60,10 @@ export function KanbanColumn({
   page,
   isOverlay,
   totalCount,
+  hiddenClosedCount = 0,
+  isClosedStage = false,
+  showingClosed = false,
+  onToggleClosed,
   pendingTasksByOpp,
   onLoadMore,
   onSelectOpportunity,
@@ -62,6 +76,30 @@ export function KanbanColumn({
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [isTogglingClosed, setIsTogglingClosed] = useState(false);
+
+  const handleToggleClosed = useCallback(async () => {
+    if (!onToggleClosed || isTogglingClosed) return;
+    setIsTogglingClosed(true);
+    try {
+      await onToggleClosed(stage);
+    } finally {
+      setIsTogglingClosed(false);
+    }
+  }, [onToggleClosed, isTogglingClosed, stage]);
+
+  // Conteo del header: normalmente el visible; al "Ver cerradas" suma
+  // las ocultas reveladas para que el número refleje lo que se muestra.
+  const headerCount =
+    totalCount === undefined
+      ? hasMore
+        ? `${cards.length}+`
+        : cards.length
+      : showingClosed
+        ? totalCount + hiddenClosedCount
+        : totalCount;
+  const showClosedToggle =
+    isClosedStage && (hiddenClosedCount > 0 || showingClosed);
 
   const handleLoadMore = useCallback(async () => {
     if (isLoadingMore || !hasMore) return;
@@ -134,7 +172,7 @@ export function KanbanColumn({
             backgroundColor: `${stage.color}22`,
           }}
         >
-          {totalCount ?? (hasMore ? `${cards.length}+` : cards.length)}
+          {headerCount}
         </span>
       </div>
 
@@ -202,6 +240,22 @@ export function KanbanColumn({
             className="w-full mt-2 py-2 text-xs font-medium text-amber-700 dark:text-amber-300 hover:bg-white dark:hover:bg-gray-700 rounded transition-colors disabled:opacity-50"
           >
             {isLoadingMore ? "Cargando..." : "Cargar más"}
+          </button>
+        )}
+
+        {showClosedToggle && (
+          <button
+            type="button"
+            onClick={() => void handleToggleClosed()}
+            disabled={isTogglingClosed}
+            aria-expanded={showingClosed}
+            className="w-full mt-2 py-1.5 text-[11px] font-medium text-gray-500 dark:text-gray-400 hover:bg-white dark:hover:bg-gray-700 rounded border border-dashed border-gray-300 dark:border-gray-600 transition-colors disabled:opacity-50"
+          >
+            {isTogglingClosed
+              ? "Cargando..."
+              : showingClosed
+                ? "Ocultar cerradas"
+                : `Ver cerradas (${hiddenClosedCount})`}
           </button>
         )}
       </div>

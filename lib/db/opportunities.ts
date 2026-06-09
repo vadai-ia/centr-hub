@@ -266,6 +266,11 @@ export async function listKanbanOpportunities(opts: {
    *  this to avoid duplicate sub-queries when listing multiple stages
    *  with the same search. */
   matchingContactIds?: UUID[] | null;
+  /** Auto-ocultar cerradas (Fix de pipeline P1): para una etapa cerrada
+   *  (Ganada/Perdida) se mantienen visibles solo las opps con la fecha
+   *  de cierre `>= sinceIso` (o NULL — antigüedad desconocida no se
+   *  oculta). Se omite para etapas activas y para "Ver cerradas". */
+  closedFilter?: { column: "won_at" | "lost_at"; sinceIso: string } | null;
 }): Promise<KanbanOpportunity[]> {
   const { supabase, organizationId } = getTenantScopedClient();
 
@@ -296,6 +301,14 @@ export async function listKanbanOpportunities(opts: {
   }
   if (opts.dateFrom) query = query.gte("created_at", opts.dateFrom);
   if (opts.dateTo) query = query.lte("created_at", opts.dateTo);
+
+  // Auto-ocultar cerradas: muestra solo las cerradas dentro de la
+  // ventana (o con fecha NULL). Es un `.or()` independiente → se
+  // combina con AND respecto al `.or()` de búsqueda.
+  if (opts.closedFilter) {
+    const { column, sinceIso } = opts.closedFilter;
+    query = query.or(`${column}.is.null,${column}.gte.${sinceIso}`);
+  }
 
   if (hasQuery) {
     const idsList = (contactIds ?? []).slice(0, 5000);
@@ -347,7 +360,17 @@ export async function countKanbanOpportunitiesByStage(opts: {
   /** Pre-resolved contact_ids — caller suele compartirlos con
    *  `listKanbanOpportunities` para evitar la sub-query repetida. */
   matchingContactIds?: UUID[] | null;
-}): Promise<Record<UUID, number>> {
+  /** Auto-ocultar cerradas (Fix de pipeline P1): si se pasa, el conteo
+   *  bucketea cada etapa cerrada en VISIBLE (cierre dentro de la ventana
+   *  o NULL) vs OCULTA (cierre antes de `cutoffIso`). Sin esto, todo
+   *  cuenta como visible (comportamiento previo). Una sola query trae
+   *  `won_at`/`lost_at` y se bucketea en JS — sin query extra, sin lag. */
+  closedHide?: {
+    cutoffIso: string;
+    wonStageIds: UUID[];
+    lostStageIds: UUID[];
+  };
+}): Promise<{ counts: Record<UUID, number>; hiddenCounts: Record<UUID, number> }> {
   const { supabase, organizationId } = getTenantScopedClient();
 
   let contactIds = opts.matchingContactIds;
@@ -359,9 +382,11 @@ export async function countKanbanOpportunitiesByStage(opts: {
     ? opts.query!.trim().replace(/[,.()*%\\]/g, " ").slice(0, 80)
     : "";
 
+  // Trae las fechas de cierre solo si hay que bucketear ocultas.
+  const select = opts.closedHide ? "stage_id, won_at, lost_at" : "stage_id";
   let query = supabase
     .from("opportunities")
-    .select("stage_id")
+    .select(select)
     .eq("organization_id", organizationId)
     .eq("funnel", opts.funnel)
     .is("cancelled_at", null);
@@ -379,7 +404,7 @@ export async function countKanbanOpportunitiesByStage(opts: {
   if (hasQuery) {
     const idsList = (contactIds ?? []).slice(0, 5000);
     if (idsList.length === 0 && sanitized.length === 0) {
-      return {};
+      return { counts: {}, hiddenCounts: {} };
     }
     if (idsList.length === 0) {
       query = query.ilike("display_reference", `%${sanitized}%`);
@@ -398,11 +423,37 @@ export async function countKanbanOpportunitiesByStage(opts: {
 
   const { data, error } = await query;
   if (error) throw error;
+
   const counts: Record<UUID, number> = {};
-  for (const row of (data ?? []) as Array<{ stage_id: UUID }>) {
-    counts[row.stage_id] = (counts[row.stage_id] ?? 0) + 1;
+  const hiddenCounts: Record<UUID, number> = {};
+  const hide = opts.closedHide;
+  const wonSet = hide ? new Set(hide.wonStageIds) : null;
+  const lostSet = hide ? new Set(hide.lostStageIds) : null;
+
+  for (const row of (data ?? []) as unknown as Array<{
+    stage_id: UUID;
+    won_at?: string | null;
+    lost_at?: string | null;
+  }>) {
+    const stageId = row.stage_id;
+    // ¿Está oculta? Solo aplica a etapas cerradas con fecha de cierre
+    // ESTRICTAMENTE anterior al corte. NULL = antigüedad desconocida →
+    // visible (espeja el filtro de `listKanbanOpportunities`).
+    let isHidden = false;
+    if (hide) {
+      if (wonSet!.has(stageId)) {
+        isHidden = !!row.won_at && row.won_at < hide.cutoffIso;
+      } else if (lostSet!.has(stageId)) {
+        isHidden = !!row.lost_at && row.lost_at < hide.cutoffIso;
+      }
+    }
+    if (isHidden) {
+      hiddenCounts[stageId] = (hiddenCounts[stageId] ?? 0) + 1;
+    } else {
+      counts[stageId] = (counts[stageId] ?? 0) + 1;
+    }
   }
-  return counts;
+  return { counts, hiddenCounts };
 }
 
 /**

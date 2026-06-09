@@ -25,8 +25,16 @@ export interface PipelineInitialState {
   cardsByStage: Record<UUID, KanbanOpportunity[]>;
   hasMoreByStage: Record<UUID, boolean>;
   /** Conteo exacto por etapa (lote polish M6). Reemplaza al "50+"
-   *  derivado de cards.length + hasMore. */
+   *  derivado de cards.length + hasMore. Para etapas cerradas es el
+   *  conteo VISIBLE (excluye las auto-ocultas). */
   countsByStage: Record<UUID, number>;
+  /** Conteo de cerradas OCULTAS por etapa (Fix de pipeline P1). Solo
+   *  etapas Ganada/Perdida con opps fuera de la ventana. Alimenta el
+   *  botón "Ver cerradas (N)". 0/ausente para etapas activas. */
+  hiddenClosedByStage: Record<UUID, number>;
+  /** Umbral global vigente (días) para el auto-ocultar — pinta el
+   *  control admin del pipeline. */
+  hideClosedAfterDays: number;
   /** Conteo de tareas pendientes por opportunity_id (lote polish M6). */
   pendingTasksByOpp: Record<UUID, number>;
   effectiveAdvisorId: UUID | null | undefined;

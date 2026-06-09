@@ -130,6 +130,7 @@ export async function evaluateAndCreateC2Opportunity(
     last_modified_at: ts,
     last_modified_source: "platform",
     won_at: null,
+    lost_at: null,
     invoice_sent_at: null,
     cancelled_at: null,
     cancellation_source: null,

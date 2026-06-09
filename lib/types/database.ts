@@ -162,6 +162,10 @@ export interface OpportunityRow {
   created_at: ISODateString;
   updated_at: ISODateString;
   won_at: ISODateString | null;
+  // Momento en que entró a una etapa Perdida (espejo de won_at). Lo
+  // setea pipeline-move al mover a etapa is_lost; NULL si nunca se
+  // perdió. Usado por el auto-ocultar del kanban (0026). No afecta KPIs.
+  lost_at: ISODateString | null;
   invoice_sent_at: ISODateString | null;
   // Cancelación administrativa (0014). cancelled_at IS NULL → activa.
   // cancellation_source: 'shopify_draft_deleted' | 'admin_manual' |
