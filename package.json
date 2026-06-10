@@ -25,7 +25,9 @@
     "maintenance:cancel-deleted-draft-opportunities": "tsx --tsconfig scripts/tsconfig.json scripts/maintenance/cancel-deleted-draft-opportunities.ts",
     "maintenance:archive-whaapy-deleted-contacts": "tsx --tsconfig scripts/tsconfig.json scripts/maintenance/archive-whaapy-deleted-contacts.ts",
     "maintenance:reconcile-advisor-attribution": "tsx --tsconfig scripts/tsconfig.json scripts/maintenance/reconcile-advisor-attribution.ts",
-    "maintenance:diagnose-advisor-population": "tsx --tsconfig scripts/tsconfig.json scripts/maintenance/diagnose-advisor-population.ts"
+    "maintenance:diagnose-advisor-population": "tsx --tsconfig scripts/tsconfig.json scripts/maintenance/diagnose-advisor-population.ts",
+    "maintenance:diagnose-users-and-advisors": "tsx --tsconfig scripts/tsconfig.json scripts/maintenance/diagnose-users-and-advisors.ts",
+    "maintenance:seed-test-vendor": "tsx --tsconfig scripts/tsconfig.json scripts/maintenance/seed-test-vendor.ts"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.1.0",

@@ -1,10 +1,18 @@
-export default function UsuariosPage() {
-  return (
-    <div className="text-center py-16 text-gray-400 dark:text-gray-500">
-      <p className="text-lg font-medium text-gray-600 dark:text-gray-300">
-        Usuarios
-      </p>
-      <p className="mt-2 text-sm">Esta sección se construye en M11</p>
-    </div>
-  );
+import { loadAdminUsers } from "@/lib/actions/admin-users";
+import { UsuariosScreen } from "./usuarios-screen";
+
+/**
+ * Admin → Usuarios (M9.2). El guard de rol vive en el layout de admin;
+ * `loadAdminUsers` revalida sesión + rol. "Histórico" no se lista (R10).
+ */
+export default async function UsuariosPage() {
+  const res = await loadAdminUsers();
+  if (!res.ok) {
+    return (
+      <div className="max-w-3xl mx-auto py-16 text-center text-gray-500 dark:text-gray-400">
+        <p>{res.message}</p>
+      </div>
+    );
+  }
+  return <UsuariosScreen initialUsers={res.users} />;
 }

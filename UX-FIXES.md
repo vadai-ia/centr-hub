@@ -105,3 +105,9 @@ Cada entrada documenta UN ajuste pendiente con la siguiente estructura:
 - **Issue detectado:** en mobile el sidebar NO se colapsa — ocupa parte de la pantalla, comprime el pipeline y dificulta la navegación. Se necesita responsive completo: (a) sidebar colapsable a icon-only en tablet y oculto detrás de drawer/hamburger en mobile; (b) navbar adaptado a mobile; (c) todas las vistas del dashboard adaptadas (pipeline, admin, dashboard, mi-día, whaapy, contactos) revisando paddings, fuentes, layout de columnas, modales fullscreen en mobile. El drag-and-drop touch + scroll horizontal de columnas del kanban SÍ funcionan hoy — el problema es el chrome del dashboard que lo rodea, no el kanban en sí.
 - **Sub-sesión de F7 sugerida:** B (layout/dashboard) como base + propagación a A, C y D.
 - **Severidad:** alta — sin responsive el producto es desktop-only, no viable para vendedores en campo.
+### Pantalla Usuarios (M9.2) — polish visual
+
+- **Componente o pantalla:** `app/(dashboard)/admin/usuarios/` (lista de usuarios + modales invitar/vincular/editar/desactivar).
+- **Issue detectado:** la pantalla quedó funcional con un layout de tarjetas-fila simple (badges de rol/estado/login, botones de acción inline) consistente con el resto del admin (etapas/mapeo-tags), responsive y dark-mode OK. Pendiente de F7: armonizar densidad/espaciados de las filas con el sistema de diseño final, revisar el wrap de los botones de acción en breakpoints intermedios, y los color-pickers de los modales (paleta de invitar + input de color del editar) para que sigan el patrón visual definitivo.
+- **Sub-sesión de F7 sugerida:** D (admin) — junto con etapas/motivos/mapeo-tags.
+- **Severidad:** baja — no bloquea operación; es pulido de consistencia visual.

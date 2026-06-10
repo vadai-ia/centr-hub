@@ -32,6 +32,31 @@ export async function getOpportunityById(id: UUID): Promise<OpportunityRow | nul
 }
 
 /**
+ * Lista las oportunidades ACTIVAS (no terminales, no canceladas)
+ * asignadas a un membership. "Activa" = `cancelled_at IS NULL AND
+ * won_at IS NULL AND lost_at IS NULL`. Usado por el flujo de
+ * desactivación (M9.2, Block 3): bloquea desactivar si hay pendientes y
+ * ofrece reasignarlas. Devuelve filas completas (para reasignar y
+ * mostrar referencia).
+ */
+export async function listActiveOpportunitiesByAdvisor(
+  membershipId: UUID,
+): Promise<OpportunityRow[]> {
+  const { supabase, organizationId } = getTenantScopedClient();
+  const { data, error } = await supabase
+    .from("opportunities")
+    .select("*")
+    .eq("organization_id", organizationId)
+    .eq("assigned_advisor_id", membershipId)
+    .is("cancelled_at", null)
+    .is("won_at", null)
+    .is("lost_at", null)
+    .order("created_at", { ascending: true });
+  if (error) throw error;
+  return (data ?? []) as OpportunityRow[];
+}
+
+/**
  * Resuelve la oportunidad por Draft Order ID. Incluye canceladas
  * intencionalmente — el UNIQUE constraint `(organization_id,
  * shopify_draft_order_id)` garantiza ≤1 fila, y los workers de

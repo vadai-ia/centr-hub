@@ -346,6 +346,33 @@ Una vez habilitado el hook + invalidadas las sesiones:
 - **NO** modificar `current_organization_id()` para leer de `app_metadata.organization_id`. La función espera el claim en la raíz; cualquier cambio rompe la consistencia entre Barrera 1 (JWT) y Barrera 2 (setting de sesión server-side, que ya escribe a la raíz vía `set_config`). Si la lógica del hook necesita evolucionar, se cambia el hook, no la función de resolución.
 - **NO** retirar el polling fallback (`PIPELINE_POLLING_FALLBACK_MS`) hasta que M5-DT-03 se ejecute con validación empírica de que Realtime entrega eventos consistentemente. El hook habilita el camino feliz; el polling sigue como red de seguridad mientras tanto.
 
+## Setup M9.2 — gestión de usuarios, invitaciones y vínculo de login
+
+Documentado al cerrar M9.2 (junio 2026). La pantalla **Admin → Usuarios** gestiona el equipo (roles admin/vendedor, color, estado), invita vendedores nuevos por email, vincula login a asesores existentes (Gina/Pepe) sin duplicarlos, y desactiva con reasignación previa. Modelo: un **asesor ES un `membership` con `role='vendedor'`** (no hay tabla `advisors`); `assigned_advisor_id` de opps/contactos/órdenes apunta a `memberships.id`. El usuario sistema "Histórico" (`is_system_user=true`) nunca se lista.
+
+### Pasos operativos obligatorios (NO son código)
+
+1. **Aplicar la migración 0028** (`repair_auth_user_tokens`) a la BD (SQL Editor / `supabase db push`). Sin ella, "Vincular login" para Gina/Pepe falla con mensaje accionable. Razón completa: ver `ERRORES.md` → "Filas auth.users insertadas por SQL crudo…".
+
+2. **Email de invitaciones (Supabase built-in — decisión del operador en M9.2):** el flujo usa `inviteUserByEmail` (vendedor nuevo) y `resetPasswordForEmail` (vincular login / reenviar). Ambos aterrizan en `/auth/confirm` (página que YA maneja `type=invite|recovery` desde M2). En el Dashboard de Supabase:
+   - **Authentication → URL Configuration:** `Site URL` apuntando al dominio de producción; agregar `https://<dominio>/auth/confirm` (y `http://localhost:3000/auth/confirm` para pruebas locales) a **Redirect URLs**.
+   - **Authentication → Emails:** confirmar que las plantillas "Invite user" y "Reset password" están habilitadas. El SMTP built-in de Supabase Free tiene rate limits bajos (suficiente para Gina/Pepe/Prueba); si en V2 sube el volumen, configurar SMTP propio o evaluar Resend (requiere aprobación de stack).
+   - **Vercel env:** `NEXT_PUBLIC_SITE_URL` con el dominio de producción (el código cae a `http://localhost:3000` si falta — correcto en local, NO en prod).
+
+3. **Vendedor de prueba (validación del milestone):** `npm run maintenance:seed-test-vendor -- --org-slug centr --email vendedor.prueba@centr.test --password '<clave>'`. Crea "Vendedor Prueba" con login inmediato (sin depender de email) para validar la vista de vendedor, reasignación y desactivación SIN tocar a Gina/Pepe. Idempotente.
+
+### Vínculo de login = repair-in-place (no duplicar asesores)
+
+Gina y Pepe ya existen como `memberships` con atribuciones reales pero su fila `auth.users` es un placeholder insertado por SQL crudo. "Vincular login" (1) repara la fila vía el RPC 0028, (2) le fija el email real con `updateUserById` (mismo `user_id`), (3) envía el link de definir contraseña. Como las FKs cuelgan de `membership.id`/`user_id` (que NO cambian), las opps/órdenes atribuidas quedan intactas. **NUNCA** se invita a Gina/Pepe como usuario nuevo (crearía un asesor duplicado y huérfanaría sus atribuciones).
+
+### Reasignación manual de oportunidades marcada como manual (no la pisan los hooks)
+
+La reasignación manual (detalle de opp, y el flujo de desactivación) pasa por el núcleo compartido `lib/services/opportunity-reassignment.ts`, que emite el audit `opportunity_reassigned` con `actor_user_id` no nulo — exactamente lo que la guarda del hook `reattribute_postventa_child_advisor` (0022) detecta para NO pisar. La F1 de Venta además está protegida por la regla "solo NULL" (0023): un valor no-NULL (incluida la reasignación manual) nunca se sobrescribe, ni por los hooks de `orders/*` ni por la reconciliación horaria. El guard estático `tests/manual-reassignment-guard-contract.test.ts` asierta que ambos lados (TS que emite, SQL que detecta) siguen hablando el mismo evento — si alguien cambia un string sin el otro, CI falla. **NO** cambiar el string del evento en un lado sin el otro.
+
+### Vista de vendedor — scoping a nivel data (no solo UI)
+
+Un `vendedor` ve solo lo suyo y eso está forzado en la **capa de datos**, no solo ocultando en UI: las actions de pipeline/contactos/dashboard fuerzan `effectiveAdvisorId = membership.id` para no-admins, y los loaders de detalle (`loadOpportunityDetailForDialog`, `loadContactDetail`) verifican que `assigned_advisor_id` coincide con el membership del vendedor antes de devolver datos (si no, audit `*_access_forbidden` + `not_found`, sin filtrar IDs). El layout `app/(dashboard)/admin/*` redirige a no-admins. **NO** exponer una nueva lectura alcanzable por vendedor sin aplicar el mismo scope por asesor.
+
 ## Cambios al stack
 
 Cualquier modificación al stack documentado en `package.json` (agregar dependencia, subir versión mayor, cambiar provider externo) requiere aprobación explícita del operador antes de comitearse. Razón: el stack está fijado por experiencias previas (Kibah, FindMed, Hemenesy) y cualquier desviación inesperada introduce riesgo operacional.

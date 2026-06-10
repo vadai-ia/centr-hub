@@ -18,7 +18,7 @@ import {
   getContactTimeline,
   type TimelineEvent,
 } from "@/lib/services/timeline";
-import { getOpportunityById, updateOpportunity } from "@/lib/db/opportunities";
+import { reassignOpportunityAdvisor } from "@/lib/services/opportunity-reassignment";
 import {
   getMembership,
   listActiveRealVendors,
@@ -53,7 +53,6 @@ import { CONTACTS_PAGE_SIZE } from "@/lib/constants";
 import type {
   ContactRow,
   Json,
-  OpportunityRow,
   Role,
   UUID,
 } from "@/lib/types/database";
@@ -867,68 +866,17 @@ async function reassignOpportunity(
   newMembershipId: UUID | null,
   actorUserId: UUID,
 ): Promise<ReassignResult> {
-  const opp = await getOpportunityById(opportunityId);
-  if (!opp) {
-    return {
-      ok: false,
-      reason: "entity_not_found",
-      message: "La oportunidad ya no existe.",
-    };
+  // Delega en el núcleo compartido (M9.2) que garantiza el contrato
+  // "marcado como manual" (audit `opportunity_reassigned` con actor),
+  // de modo que los hooks automáticos no pisen la reasignación.
+  const res = await reassignOpportunityAdvisor({
+    opportunityId,
+    newMembershipId,
+    actorUserId,
+  });
+  if (!res.ok) {
+    return { ok: false, reason: res.reason, message: res.message };
   }
-  const previous = opp.assigned_advisor_id;
-  if (previous === newMembershipId) {
-    return { ok: true, entityType: "opportunity", entityId: opportunityId };
-  }
-
-  const snapshot = { ...opp };
-  const nowIso = new Date().toISOString();
-  let updated: OpportunityRow;
-  try {
-    updated = await updateOpportunity(opportunityId, {
-      assigned_advisor_id: newMembershipId,
-      last_modified_at: nowIso,
-      last_modified_source: "platform",
-    });
-  } catch (e) {
-    return {
-      ok: false,
-      reason: "internal_error",
-      message:
-        e instanceof Error ? e.message : "No se pudo actualizar la oportunidad.",
-    };
-  }
-  void updated;
-
-  try {
-    await recordAuditEvent({
-      actorUserId,
-      eventType: "opportunity_reassigned",
-      entityType: "opportunity",
-      entityId: opportunityId,
-      payload: {
-        from_membership_id: previous,
-        to_membership_id: newMembershipId,
-        contact_id: opp.contact_id,
-      },
-    });
-  } catch {
-    try {
-      await updateOpportunity(opportunityId, {
-        assigned_advisor_id: snapshot.assigned_advisor_id,
-        last_modified_at: snapshot.last_modified_at,
-        last_modified_source: snapshot.last_modified_source,
-      });
-    } catch {
-      // best-effort
-    }
-    return {
-      ok: false,
-      reason: "internal_error",
-      message:
-        "No se pudo registrar el cambio en auditoría. La reasignación se revirtió.",
-    };
-  }
-
   return { ok: true, entityType: "opportunity", entityId: opportunityId };
 }
 
