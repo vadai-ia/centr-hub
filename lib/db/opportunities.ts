@@ -53,6 +53,76 @@ export async function findOpportunityByDraftOrderId(
 }
 
 /**
+ * Resuelve la opp de Venta (F1) que espeja un `shopify_order_id` dado.
+ *
+ * Fix de atribución de asesor (caso Eduardo Badir): el webhook de la
+ * orden de Shopify NO trae `draft_order_id`, así que la orden no puede
+ * enlazarse a su opp por esa vía y queda huérfana (`opportunity_id`
+ * NULL) — lo que bloqueaba los hooks de re-atribución 0022/0023. La opp
+ * SÍ conoce su `shopify_order_id` (lo puebla el trigger F1→F2 al ganar),
+ * así que resolvemos el enlace por ese campo.
+ *
+ * Filtra `funnel = 'venta'` para devolver la F1 madre, NUNCA la hija de
+ * Post-venta (que espeja el mismo `shopify_order_id`). Incluye canceladas
+ * (mismo criterio que `findOpportunityByDraftOrderId`): el enlace es
+ * trazabilidad; los hooks de re-atribución deciden por su cuenta. ≤1 fila
+ * (una orden nace de una sola completación de draft).
+ */
+export async function findVentaOpportunityIdByShopifyOrderId(
+  shopifyOrderId: string,
+): Promise<UUID | null> {
+  const { supabase, organizationId } = getTenantScopedClient();
+  const { data, error } = await supabase
+    .from("opportunities")
+    .select("id")
+    .eq("organization_id", organizationId)
+    .eq("funnel", "venta")
+    .eq("shopify_order_id", shopifyOrderId)
+    .order("created_at", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return (data?.id as UUID) ?? null;
+}
+
+/**
+ * Candidatas de Venta para el cron de reconciliación de asesor: opps de
+ * Venta SIN asesor que espejan un pedido (shopify_order_id no nulo) y NO
+ * canceladas. El RPC `reattribute_venta_opportunity_advisor` decide por
+ * cada una si el pedido tiene asesor del que heredar (rellena solo NULL).
+ */
+export async function listUnassignedVentaOppIdsWithOrder(): Promise<UUID[]> {
+  const { supabase, organizationId } = getTenantScopedClient();
+  const { data, error } = await supabase
+    .from("opportunities")
+    .select("id")
+    .eq("organization_id", organizationId)
+    .eq("funnel", "venta")
+    .is("assigned_advisor_id", null)
+    .is("cancelled_at", null)
+    .not("shopify_order_id", "is", null);
+  if (error) throw error;
+  return (data ?? []).map((r) => (r as { id: UUID }).id);
+}
+
+/**
+ * Hijas de Post-venta (con madre) para el cron de reconciliación. El RPC
+ * `reattribute_postventa_child_advisor` alinea cada una con el asesor de
+ * su orden si difiere (idempotente: noop si ya está alineada).
+ */
+export async function listPostventaChildOppIdsForReconcile(): Promise<UUID[]> {
+  const { supabase, organizationId } = getTenantScopedClient();
+  const { data, error } = await supabase
+    .from("opportunities")
+    .select("id")
+    .eq("organization_id", organizationId)
+    .eq("funnel", "post_venta")
+    .not("parent_opportunity_id", "is", null);
+  if (error) throw error;
+  return (data ?? []).map((r) => (r as { id: UUID }).id);
+}
+
+/**
  * Resuelve el id de la hija de Post-venta de una F1 dada (su
  * `parent_opportunity_id`). El trigger F1→F2 crea como máximo una hija
  * por F1 (guard `child_already_exists`), así que ≤1 fila. Incluye

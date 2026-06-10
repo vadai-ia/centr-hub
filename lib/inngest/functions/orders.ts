@@ -22,7 +22,10 @@ import {
   replaceOrderLineItems,
   updateOrder,
 } from "@/lib/db/orders";
-import { findOpportunityByDraftOrderId } from "@/lib/db/opportunities";
+import {
+  findOpportunityByDraftOrderId,
+  findVentaOpportunityIdByShopifyOrderId,
+} from "@/lib/db/opportunities";
 import {
   reattributePostventaChildForOrder,
   reattributeVentaOpportunityForOrder,
@@ -129,9 +132,7 @@ async function upsertOrderShell(
     );
   }
 
-  const opportunityId = await maybeResolveOpportunityFromDraftOrder(
-    normalized.shopifyDraftOrderId,
-  );
+  const opportunityId = await resolveVentaOpportunityIdForOrder(normalized);
   const tagAssignment = await resolveTagAssignmentForOrder(normalized);
 
   const existing = await findOrderByShopifyOrderId(normalized.shopifyOrderId);
@@ -217,12 +218,33 @@ function mapLineItemForOrder(li: NormalizedOrder["lineItems"][number]) {
   };
 }
 
-async function maybeResolveOpportunityFromDraftOrder(
-  draftOrderId: string | null,
+/**
+ * Resuelve la opp de Venta (F1) a la que pertenece esta orden, para
+ * enlazarla (`orders.opportunity_id`) y para que los hooks de
+ * re-atribución 0022/0023 puedan correr.
+ *
+ * Orden de resolución:
+ *   1. Por `draft_order_id` del payload — el camino "canónico", pero
+ *      Shopify NO lo envía en el webhook de orders en este setup, así
+ *      que casi siempre da null (toda orden quedaba huérfana → los hooks
+ *      nunca disparaban; ver ERRORES.md "Opp 'sin asignar' …").
+ *   2. Fallback por `shopify_order_id`: la opp de Venta espeja ese campo
+ *      (lo puebla el trigger F1→F2 al ganar), así que aunque la orden no
+ *      conozca el draft, la opp sí conoce la orden. Cierra la asimetría.
+ *
+ * Si la opp todavía no espeja el `shopify_order_id` (carrera: la orden
+ * aterrizó antes de que el draft se completara), devuelve null — ese caso
+ * lo cubre la completación del draft (trigger F1→F2 lee la orden) y, como
+ * red, el cron horario de reconciliación.
+ */
+async function resolveVentaOpportunityIdForOrder(
+  normalized: NormalizedOrder,
 ): Promise<UUID | null> {
-  if (!draftOrderId) return null;
-  const opp = await findOpportunityByDraftOrderId(draftOrderId);
-  return opp?.id ?? null;
+  if (normalized.shopifyDraftOrderId) {
+    const opp = await findOpportunityByDraftOrderId(normalized.shopifyDraftOrderId);
+    if (opp) return opp.id;
+  }
+  return findVentaOpportunityIdByShopifyOrderId(normalized.shopifyOrderId);
 }
 
 // ============================================================
@@ -287,13 +309,25 @@ function makeOrderWorker(args: {
         //       hija con el de la orden.
         // Ambas RPC son idempotentes y tocan funnels distintos (venta vs
         // post_venta), así que no se pisan ni duplican trabajo.
-        if (order.opportunity_id && order.assigned_advisor_id) {
+        //
+        // Fix Eduardo Badir: la condición resuelve la opp de Venta por
+        // `order.opportunity_id` (ya enlazado arriba por shopify_order_id)
+        // O por el fallback directo a shopify_order_id — antes el gate
+        // exigía `order.opportunity_id`, que era SIEMPRE NULL (Shopify no
+        // manda draft_order_id), y por eso los hooks NUNCA disparaban en
+        // vivo. Ver ERRORES.md "Opp 'sin asignar' …".
+        const ventaOpportunityId =
+          order.opportunity_id ??
+          (order.assigned_advisor_id
+            ? await findVentaOpportunityIdByShopifyOrderId(order.shopify_order_id)
+            : null);
+        if (ventaOpportunityId && order.assigned_advisor_id) {
           await reattributeVentaOpportunityForOrder({
-            opportunityId: order.opportunity_id,
+            opportunityId: ventaOpportunityId,
             source: args.topic,
           });
           await reattributePostventaChildForOrder({
-            parentOpportunityId: order.opportunity_id,
+            parentOpportunityId: ventaOpportunityId,
             source: args.topic,
           });
         }

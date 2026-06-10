@@ -42,6 +42,18 @@ export async function getOrganizationBySlug(
   return data ?? null;
 }
 
+/**
+ * IDs de todas las organizaciones. Cross-tenant por diseño — lo usa el
+ * cron de reconciliación de asesor (red de seguridad) para iterar cada
+ * org dentro de su propio `withTenantContext`. Cliente admin (sin RLS).
+ */
+export async function listAllOrganizationIds(): Promise<UUID[]> {
+  const supabase = getSupabaseAdminClient();
+  const { data, error } = await supabase.from("organizations").select("id");
+  if (error) throw error;
+  return (data ?? []).map((r) => (r as { id: UUID }).id);
+}
+
 export async function getOrganizationByShopifyDomain(
   domain: string,
 ): Promise<OrganizationRow | null> {

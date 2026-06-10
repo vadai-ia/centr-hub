@@ -213,7 +213,13 @@ export const draftOrdersCreate = inngest.createFunction(
           normalized,
           stageId: stage.id,
           contactId: contact.id,
-          assignedAdvisorId: tagAssignment ?? contact.assigned_advisor_id ?? null,
+          // Regla de prioridad opp>contacto: la opp toma el asesor del TAG
+          // del draft, o queda NULL — NUNCA hereda el asesor HISTÓRICO del
+          // contacto (que es ruido de pedidos viejos). El asesor real lo
+          // rellena la orden vía el hook 0023 (solo NULL). R12 (lead sin
+          // draft) sí hereda del contacto — ahí el contacto es el dueño
+          // actual; este cambio es acotado al path de draft. Ver ERRORES.md.
+          assignedAdvisorId: tagAssignment ?? null,
           effectiveUpdatedAt,
         }),
       );
@@ -354,7 +360,13 @@ export const draftOrdersUpdate = inngest.createFunction(
             normalized,
             stageId: stage.id,
             contactId: contact.id,
-            assignedAdvisorId: tagAssignment ?? contact.assigned_advisor_id ?? null,
+            // Regla de prioridad opp>contacto: la opp toma el asesor del TAG
+          // del draft, o queda NULL — NUNCA hereda el asesor HISTÓRICO del
+          // contacto (que es ruido de pedidos viejos). El asesor real lo
+          // rellena la orden vía el hook 0023 (solo NULL). R12 (lead sin
+          // draft) sí hereda del contacto — ahí el contacto es el dueño
+          // actual; este cambio es acotado al path de draft. Ver ERRORES.md.
+          assignedAdvisorId: tagAssignment ?? null,
             effectiveUpdatedAt,
           }),
         );
