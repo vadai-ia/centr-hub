@@ -43,7 +43,7 @@ export function AdvisorBreakdown({
                   <th className="py-2 px-3 font-medium text-right">Ganadas</th>
                   <th className="py-2 px-3 font-medium text-right">Perdidas</th>
                   <th className="py-2 px-3 font-medium text-right">Win rate</th>
-                  <th className="py-2 px-4 font-medium text-right">Pipeline $</th>
+                  <th className="py-2 px-4 font-medium text-right">Pipeline $ actual</th>
                 </>
               ) : (
                 <>

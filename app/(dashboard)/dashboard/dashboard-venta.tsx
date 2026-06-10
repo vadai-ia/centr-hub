@@ -23,8 +23,10 @@ const CCY = DEFAULT_CURRENCY;
 const TT = {
   revenue:
     "Suma de pedidos pagados en el periodo, contados por la fecha de pago real de Shopify. Solo pedidos con estado pagado.",
-  pipeline:
-    "Suma de los montos de las oportunidades vivas (ni ganadas, ni perdidas, ni canceladas) creadas en el periodo. Es bruto: sin ponderar. Usa el monto real, o el estimado si aún no hay real.",
+  pipelineNow:
+    "Foto del momento: suma de los montos de las oportunidades vivas AHORA (ni ganadas, ni perdidas, ni canceladas). NO depende del filtro de fecha, solo del asesor. Es bruto: sin ponderar. Usa el monto real, o el estimado si aún no hay real.",
+  pipelinePeriod:
+    "Suma de los montos de las oportunidades vivas que se CREARON en el periodo seleccionado. Responde al filtro de fecha. Es bruto: sin ponderar. Usa el monto real, o el estimado si aún no hay real.",
   winRate:
     "De las oportunidades cerradas en el periodo: Ganadas ÷ (Ganadas + Perdidas). No incluye canceladas. Muestra — si no hubo cierres.",
   won: "Oportunidades de Venta marcadas como ganadas en el periodo, por su fecha real de ganada (la fecha del pedido en Shopify).",
@@ -35,7 +37,7 @@ const TT = {
   quotes:
     "Oportunidades de Venta con cotización (Draft Order de Shopify) creadas en el periodo, por su fecha real de creación en Shopify. No incluye canceladas.",
   active:
-    "Oportunidades vivas creadas en el periodo que ya tienen cotización (Draft Order) y están en la etapa Cotización o posterior.",
+    "Foto del momento: oportunidades vivas AHORA con cotización (Draft Order) en la etapa Cotización o posterior. NO depende del filtro de fecha, solo del asesor. Coincide con lo que muestra el pipeline.",
   lossRate:
     "De las oportunidades cerradas en el periodo: Perdidas ÷ (Ganadas + Perdidas). No incluye canceladas.",
   cycle:
@@ -60,6 +62,28 @@ function SubGroup({ title, children }: { title: string; children: ReactNode }) {
   );
 }
 
+/**
+ * Sección "Estado actual" — métricas snapshot que NO responden al filtro
+ * de fecha (solo al de asesor). Se separa visualmente de las métricas de
+ * periodo (recuadro propio + chip "Foto del momento") para que quede
+ * claro que ignoran el rango de fechas — esa confusión originó el ajuste.
+ */
+function EstadoActualGroup({ children }: { children: ReactNode }) {
+  return (
+    <div className="space-y-2.5 rounded-xl border border-dashed border-gray-300 dark:border-gray-600 bg-gray-50/60 dark:bg-gray-800/40 p-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-300">
+          Estado actual
+        </p>
+        <span className="inline-flex items-center gap-1 rounded-full bg-gray-200/80 dark:bg-gray-700/80 px-2 py-0.5 text-[10px] font-medium text-gray-600 dark:text-gray-300">
+          <span aria-hidden>📸</span> Foto del momento · no depende del filtro de fecha
+        </span>
+      </div>
+      {children}
+    </div>
+  );
+}
+
 export function DashboardVenta({
   m,
   breakdown,
@@ -69,6 +93,25 @@ export function DashboardVenta({
 }) {
   return (
     <DashboardSection tone="venta" title="Venta" subtitle="Pipeline comercial y cierre">
+      <EstadoActualGroup>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <KpiCard
+            label="Activas (con cotización)"
+            value={formatCount(m.activeWithDraft)}
+            accent="pipeline"
+            tooltip={TT.active}
+          />
+          <KpiCard
+            label="Pipeline $ actual"
+            value={formatAmount(m.pipelineGrossNow, CCY) ?? DASH}
+            accent="pipeline"
+            icon={<IconPipeline />}
+            hint="Bruto · vivas ahora"
+            tooltip={TT.pipelineNow}
+          />
+        </div>
+      </EstadoActualGroup>
+
       <SubGroup title="Resultados clave">
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <KpiCard
@@ -80,13 +123,13 @@ export function DashboardVenta({
             tooltip={TT.revenue}
           />
           <KpiCard
-            label="Pipeline $ (bruto)"
-            value={formatAmount(m.pipelineGross, CCY) ?? DASH}
+            label="Pipeline $ en el periodo"
+            value={formatAmount(m.pipelineGrossPeriod, CCY) ?? DASH}
             accent="pipeline"
             emphasis
             icon={<IconPipeline />}
-            hint="Solo opps vivas creadas en el periodo"
-            tooltip={TT.pipeline}
+            hint="Bruto · opps creadas en el periodo"
+            tooltip={TT.pipelinePeriod}
           />
           <KpiCard
             label="Win rate global"
@@ -109,16 +152,10 @@ export function DashboardVenta({
       </SubGroup>
 
       <SubGroup title="Embudo de venta">
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           <KpiCard label="Leads" value={formatCount(m.leads)} tooltip={TT.leads} />
           <KpiCard label="Leads calificados" value={formatCount(m.qualifiedLeads)} tooltip={TT.qualified} />
           <KpiCard label="Cotizaciones enviadas" value={formatCount(m.quotesSent)} tooltip={TT.quotes} />
-          <KpiCard
-            label="Activas (con cotización)"
-            value={formatCount(m.activeWithDraft)}
-            accent="pipeline"
-            tooltip={TT.active}
-          />
         </div>
       </SubGroup>
 

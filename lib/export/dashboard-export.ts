@@ -26,7 +26,8 @@ export type ExportKpiKey =
   // Venta
   | "revenue"
   | "quotesSent"
-  | "pipelineGross"
+  | "pipelineGrossNow"
+  | "pipelineGrossPeriod"
   | "leads"
   | "qualifiedLeads"
   | "wonCount"
@@ -75,11 +76,12 @@ export function exportKpiOptions(data: DashboardData): ExportKpiOption[] {
     // Venta
     { key: "revenue", label: "Venta · Revenue cerrado" },
     { key: "quotesSent", label: "Venta · Cotizaciones enviadas" },
-    { key: "pipelineGross", label: "Venta · Pipeline $ (bruto)" },
+    { key: "activeWithDraft", label: "Venta · Activas con cotización (actual)" },
+    { key: "pipelineGrossNow", label: "Venta · Pipeline $ actual (bruto)" },
+    { key: "pipelineGrossPeriod", label: "Venta · Pipeline $ en el periodo (bruto)" },
     { key: "leads", label: "Venta · Leads" },
     { key: "qualifiedLeads", label: "Venta · Leads calificados" },
     { key: "wonCount", label: "Venta · Oportunidades ganadas" },
-    { key: "activeWithDraft", label: "Venta · Oportunidades activas (con cotización)" },
     { key: "winRateGlobal", label: "Venta · Win rate global" },
     { key: "lossRate", label: "Venta · Loss rate" },
     { key: "salesCycleDays", label: "Venta · Sales cycle promedio" },
@@ -124,11 +126,12 @@ export function buildExportModel(
   };
   pushV("revenue", "Revenue cerrado", formatAmount(v.revenue, CCY) ?? DASH);
   pushV("quotesSent", "Cotizaciones enviadas", formatCount(v.quotesSent));
-  pushV("pipelineGross", "Pipeline $ (bruto)", formatAmount(v.pipelineGross, CCY) ?? DASH);
+  pushV("activeWithDraft", "Activas con cotización (actual)", formatCount(v.activeWithDraft));
+  pushV("pipelineGrossNow", "Pipeline $ actual (bruto)", formatAmount(v.pipelineGrossNow, CCY) ?? DASH);
+  pushV("pipelineGrossPeriod", "Pipeline $ en el periodo (bruto)", formatAmount(v.pipelineGrossPeriod, CCY) ?? DASH);
   pushV("leads", "Leads", formatCount(v.leads));
   pushV("qualifiedLeads", "Leads calificados", formatCount(v.qualifiedLeads));
   pushV("wonCount", "Oportunidades ganadas", formatCount(v.wonCount));
-  pushV("activeWithDraft", "Oportunidades activas (con cotización)", formatCount(v.activeWithDraft));
   pushV("winRateGlobal", "Win rate global", formatPercent(v.winRateGlobal));
   pushV("lossRate", "Loss rate", formatPercent(v.lossRate));
   pushV("salesCycleDays", "Sales cycle promedio", formatDays(v.salesCycleDays));
@@ -160,7 +163,7 @@ export function buildExportModel(
   if (selected.has("ventaBreakdown") && data.ventaBreakdown) {
     sections.push({
       heading: "Venta · Desglose por vendedor",
-      columns: ["Vendedor", "Revenue", "Cotiz.", "Ganadas", "Perdidas", "Win rate", "Pipeline $"],
+      columns: ["Vendedor", "Revenue", "Cotiz.", "Ganadas", "Perdidas", "Win rate", "Pipeline $ actual"],
       rows: data.ventaBreakdown.map((r) => [
         r.name,
         formatAmount(r.revenue, CCY) ?? DASH,
@@ -215,7 +218,8 @@ function isDatasetEmpty(data: DashboardData): boolean {
     v.qualifiedLeads === 0 &&
     v.wonCount === 0 &&
     v.wonVsLost.lost === 0 &&
-    v.pipelineGross === 0 &&
+    v.pipelineGrossNow === 0 &&
+    v.pipelineGrossPeriod === 0 &&
     v.activeWithDraft === 0 &&
     p.ordersCount === 0 &&
     p.activeOrders === 0 &&

@@ -3,6 +3,7 @@ import {
   listDraftOppsCreatedInPeriod,
   listFullHistoryForOpportunities,
   listLivePipelineOpps,
+  listLivePipelineSnapshot,
   listLivePostventaOpps,
   listLostEntriesInPeriod,
   listOrdersCreatedInPeriod,
@@ -83,7 +84,10 @@ export interface VentaRaw {
   paidOrders: Awaited<ReturnType<typeof listPaidOrdersInPeriod>>;
   draftOpps: Awaited<ReturnType<typeof listDraftOppsCreatedInPeriod>>;
   wonOpps: WonOppRow[];
+  /** Opps vivas CREADAS en el periodo → "Pipeline $ en el periodo". */
   livePipeline: LivePipelineRow[];
+  /** Opps vivas AHORA (snapshot) → "Activas" + "Pipeline $ actual". */
+  livePipelineSnapshot: LivePipelineRow[];
   lostEntries: LostEntryRow[];
   stageEntries: StageEntryRow[];
   /** oppId → posición máxima NO-perdida alcanzada (para avance KPI9). */
@@ -123,12 +127,21 @@ async function fetchVentaRaw(period: ResolvedPeriod): Promise<VentaRaw> {
   const boundaries = await resolveVentaStageBoundaries();
   const lostStageId = boundaries.lostStage?.id ?? null;
 
-  const [paidOrders, draftOpps, wonOpps, livePipeline, lostEntries, stageEntries, lossReasons] =
-    await Promise.all([
+  const [
+    paidOrders,
+    draftOpps,
+    wonOpps,
+    livePipeline,
+    livePipelineSnapshot,
+    lostEntries,
+    stageEntries,
+    lossReasons,
+  ] = await Promise.all([
       listPaidOrdersInPeriod(period.startUtc, period.endUtc),
       listDraftOppsCreatedInPeriod(period.startUtc, period.endUtc),
       listWonOppsInPeriod(period.startUtc, period.endUtc),
       listLivePipelineOpps(period.startUtc, period.endUtc),
+      listLivePipelineSnapshot(),
       lostStageId
         ? listLostEntriesInPeriod(lostStageId, period.startUtc, period.endUtc)
         : Promise.resolve([] as LostEntryRow[]),
@@ -158,6 +171,7 @@ async function fetchVentaRaw(period: ResolvedPeriod): Promise<VentaRaw> {
     draftOpps,
     wonOpps,
     livePipeline,
+    livePipelineSnapshot,
     lostEntries,
     stageEntries,
     maxNonLostPos,
@@ -186,14 +200,26 @@ export function computeVentaMetrics(raw: VentaRaw, scope: Scope): VentaMetrics {
   // KPI2 Cotizaciones enviadas.
   const quotesSent = raw.draftOpps.filter((d) => matchScope(d.assigned_advisor_id, scope)).length;
 
-  // KPI3 Pipeline $ BRUTO + KPI7 activas con draft (de Cotización en adelante).
-  let pipelineGross = 0;
-  let activeWithDraft = 0;
+  // Pipeline $ EN EL PERIODO (bruto) — opps vivas CREADAS en el periodo
+  // (responde al filtro de fecha).
+  let pipelineGrossPeriod = 0;
   for (const opp of raw.livePipeline) {
     if (!matchScope(opp.assigned_advisor_id, scope)) continue;
     const stage = boundaries.byId.get(opp.stage_id);
     if (!stage || stage.is_won || stage.is_lost) continue; // solo vivas
-    pipelineGross += amountOf(opp);
+    pipelineGrossPeriod += amountOf(opp);
+  }
+
+  // SNAPSHOT del ahora (NO responde al filtro de fecha): Pipeline $ actual
+  // (bruto) + Activas con cotización (Cotización en adelante). Misma
+  // definición de "viva" que el kanban del pipeline → coinciden.
+  let pipelineGrossNow = 0;
+  let activeWithDraft = 0;
+  for (const opp of raw.livePipelineSnapshot) {
+    if (!matchScope(opp.assigned_advisor_id, scope)) continue;
+    const stage = boundaries.byId.get(opp.stage_id);
+    if (!stage || stage.is_won || stage.is_lost) continue; // solo vivas
+    pipelineGrossNow += amountOf(opp);
     if (opp.shopify_draft_order_id !== null && stage.position >= boundaries.cotizacionPosition) {
       activeWithDraft += 1;
     }
@@ -282,7 +308,8 @@ export function computeVentaMetrics(raw: VentaRaw, scope: Scope): VentaMetrics {
   return {
     revenue,
     quotesSent,
-    pipelineGross,
+    pipelineGrossNow,
+    pipelineGrossPeriod,
     leads: leadOpps.size,
     qualifiedLeads: qualifiedOpps.size,
     wonCount,
@@ -441,7 +468,9 @@ function breakdownRow(
     wonCount: v?.wonCount ?? 0,
     lostCount: v?.wonVsLost.lost ?? 0,
     winRate: v?.winRateGlobal ?? null,
-    pipelineGross: v?.pipelineGross ?? 0,
+    // Snapshot (actual), comparable con el kanban — consistente con las
+    // tarjetas de "Estado actual".
+    pipelineGross: v?.pipelineGrossNow ?? 0,
     ordersCount: p?.ordersCount ?? 0,
     activeOrders: p?.activeOrders ?? 0,
     problematicCases: p?.problematicCases ?? 0,

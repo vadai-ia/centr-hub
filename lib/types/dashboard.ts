@@ -35,14 +35,30 @@ export interface LossByReason {
   amount: number;
 }
 
-/** KPIs del Funnel Venta (12). */
+/** KPIs del Funnel Venta. */
 export interface VentaMetrics {
   revenue: number; // 1
   quotesSent: number; // 2
-  pipelineGross: number; // 3 — BRUTO, sin ponderar
+  /**
+   * Pipeline $ ACTUAL — BRUTO, sin ponderar. SNAPSHOT del ahora: suma de
+   * opps vivas en este momento. NO responde al filtro de fecha (solo al
+   * de asesor). Comparable con el kanban del pipeline.
+   */
+  pipelineGrossNow: number;
+  /**
+   * Pipeline $ EN EL PERIODO — BRUTO. Suma de opps vivas CREADAS en el
+   * periodo. SÍ responde al filtro de fecha. Definición simple (creada en
+   * el periodo), sin reconstrucción histórica.
+   */
+  pipelineGrossPeriod: number;
   leads: number; // 4
   qualifiedLeads: number; // 5
   wonCount: number; // 6
+  /**
+   * Activas (con cotización) — SNAPSHOT del ahora: opps vivas con Draft
+   * Order de Cotización en adelante. NO responde al filtro de fecha (solo
+   * al de asesor). Coincide con el conteo del kanban del pipeline.
+   */
   activeWithDraft: number; // 7
   winRateGlobal: number | null; // 8
   winRateByStage: StageWinRate[]; // 9
@@ -79,6 +95,11 @@ export interface AdvisorBreakdownRow {
   wonCount: number;
   lostCount: number;
   winRate: number | null;
+  /**
+   * Pipeline $ del vendedor — SNAPSHOT del ahora (comparable con el
+   * kanban), NO el del periodo. Así la columna del desglose es
+   * consistente con las tarjetas de "Estado actual".
+   */
   pipelineGross: number;
   // Post-venta
   ordersCount: number;

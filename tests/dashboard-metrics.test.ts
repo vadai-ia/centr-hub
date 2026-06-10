@@ -84,12 +84,26 @@ function ventaRaw(): VentaRaw {
       { assigned_advisor_id: A, effective_created_at: "2026-05-01T06:00:00.000Z", won_at: "2026-05-11T06:00:00.000Z", actual_amount: "100", estimated_amount: null },
       { assigned_advisor_id: B, effective_created_at: "2026-05-01T06:00:00.000Z", won_at: "2026-05-21T06:00:00.000Z", actual_amount: "50", estimated_amount: null },
     ],
+    // "Pipeline $ en el periodo" — opps vivas CREADAS en el periodo.
     livePipeline: [
       { assigned_advisor_id: A, stage_id: CALIF.id, shopify_draft_order_id: null, actual_amount: null, estimated_amount: "40" },
       { assigned_advisor_id: A, stage_id: COTIZ.id, shopify_draft_order_id: "d1", actual_amount: "100", estimated_amount: null },
       { assigned_advisor_id: B, stage_id: DISENO.id, shopify_draft_order_id: "d2", actual_amount: "60", estimated_amount: null },
       // Excluidas del pipeline $ (etapa ganada/perdida):
       { assigned_advisor_id: A, stage_id: GANADA.id, shopify_draft_order_id: "d3", actual_amount: "999", estimated_amount: null },
+      { assigned_advisor_id: A, stage_id: PERDIDA.id, shopify_draft_order_id: null, actual_amount: "500", estimated_amount: null },
+    ],
+    // SNAPSHOT del ahora ("Activas" + "Pipeline $ actual") — superset del
+    // periodo: incluye una opp en Cotización con draft CREADA antes del
+    // periodo pero viva hoy (d4). Reproduce el caso "kanban=2 con draft,
+    // pero snapshot=2" que el filtro de fecha escondía.
+    livePipelineSnapshot: [
+      { assigned_advisor_id: A, stage_id: CALIF.id, shopify_draft_order_id: null, actual_amount: null, estimated_amount: "40" },
+      { assigned_advisor_id: A, stage_id: COTIZ.id, shopify_draft_order_id: "d1", actual_amount: "100", estimated_amount: null },
+      { assigned_advisor_id: B, stage_id: DISENO.id, shopify_draft_order_id: "d2", actual_amount: "60", estimated_amount: null },
+      // Vieja-pero-viva, fuera del periodo → solo el snapshot la captura:
+      { assigned_advisor_id: A, stage_id: COTIZ.id, shopify_draft_order_id: "d4", actual_amount: "80", estimated_amount: null },
+      // Perdida → excluida del snapshot por etapa terminal:
       { assigned_advisor_id: A, stage_id: PERDIDA.id, shopify_draft_order_id: null, actual_amount: "500", estimated_amount: null },
     ],
     lostEntries: [
@@ -120,11 +134,14 @@ describe("computeVentaMetrics — scope 'all'", () => {
   it("cotizaciones enviadas = conteo de drafts", () => {
     expect(m.quotesSent).toBe(3);
   });
-  it("pipeline $ bruto coalesce actual||estimated y excluye ganadas/perdidas", () => {
-    expect(m.pipelineGross).toBe(200); // 40 + 100 + 60
+  it("pipeline $ EN EL PERIODO bruto coalesce actual||estimated, excluye ganadas/perdidas", () => {
+    expect(m.pipelineGrossPeriod).toBe(200); // 40 + 100 + 60 (creadas en periodo)
   });
-  it("activas con cotización = solo con draft y posición ≥ Cotización", () => {
-    expect(m.activeWithDraft).toBe(1); // solo la opp en Cotización
+  it("pipeline $ ACTUAL (snapshot) suma vivas ahora, incluye vieja-pero-viva, excluye perdida", () => {
+    expect(m.pipelineGrossNow).toBe(280); // 40 + 100 + 60 + 80 (d4 fuera de periodo); 500 perdida fuera
+  });
+  it("activas con cotización = snapshot del ahora (con draft, posición ≥ Cotización)", () => {
+    expect(m.activeWithDraft).toBe(2); // d1 y d4 (la vieja-pero-viva); el filtro de fecha escondía d4
   });
   it("leads = opps distintas que entraron a la etapa inicial", () => {
     expect(m.leads).toBe(2); // o1, o2
@@ -162,8 +179,9 @@ describe("computeVentaMetrics — scope por asesor A", () => {
   it("filtra revenue/cotizaciones/pipeline al asesor", () => {
     expect(m.revenue).toBe(300);
     expect(m.quotesSent).toBe(2);
-    expect(m.pipelineGross).toBe(140);
-    expect(m.activeWithDraft).toBe(1);
+    expect(m.pipelineGrossPeriod).toBe(140); // CALIF 40 + COTIZ 100 (DISENO es de B)
+    expect(m.pipelineGrossNow).toBe(220); // snapshot A: 40 + 100 + 80 (d4)
+    expect(m.activeWithDraft).toBe(2); // d1 y d4 de A
   });
   it("leads y calificados del asesor", () => {
     expect(m.leads).toBe(1); // solo o1 (o2 es de B)

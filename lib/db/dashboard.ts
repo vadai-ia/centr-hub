@@ -152,13 +152,18 @@ export async function listWonOppsInPeriod(
 }
 
 /**
- * KPIs 3/7 — opps de venta vivas (no ganadas/perdidas/canceladas)
- * CREADAS en el periodo (M8.2 ajuste #5: Pipeline $ y Activas responden
- * al filtro de fecha; "activa en el periodo" = creada en el periodo, sin
- * reconstrucción de estado histórico). Por la fecha REAL de creación
- * (`effective_created_at`, migración 0025), no por created_at de BD.
+ * "Pipeline $ en el periodo" — opps de venta vivas (no
+ * ganadas/perdidas/canceladas) CREADAS en el periodo, por la fecha REAL
+ * de creación (`effective_created_at`, migración 0025), no por created_at
+ * de BD. Definición simple "creada en el periodo y viva", sin
+ * reconstrucción de estado histórico (Ajuste métricas estado vs periodo).
  * `won_at IS NULL` excluye ganadas en SQL; las perdidas se filtran por
- * etapa en el servicio (#7).
+ * etapa en el servicio.
+ *
+ * OJO: esta query SÍ responde al filtro de fecha. El conteo de "Activas"
+ * y "Pipeline $ actual" (snapshot del ahora) NO usa esta query — usa
+ * `listLivePipelineSnapshot` (sin fecha). Ver Ajuste métricas estado vs
+ * periodo + `ERRORES.md`.
  */
 export async function listLivePipelineOpps(
   startUtc: string,
@@ -174,6 +179,34 @@ export async function listLivePipelineOpps(
     .is("won_at", null)
     .gte("effective_created_at", startUtc)
     .lte("effective_created_at", endUtc)
+    .limit(ROW_CAP);
+  if (error) throw error;
+  return (data ?? []) as LivePipelineRow[];
+}
+
+/**
+ * "Activas (con cotización)" + "Pipeline $ actual" — SNAPSHOT del ahora.
+ * Opps de venta vivas (no ganadas/perdidas/canceladas) SIN filtro de
+ * fecha: refleja lo que está vivo en este momento, igual que el kanban
+ * del pipeline (`listKanbanOpportunities`: `cancelled_at IS NULL`,
+ * funnel venta, etapa no terminal). El servicio filtra por scope (asesor)
+ * y excluye etapas terminales por flag (`is_won`/`is_lost`).
+ *
+ * Misma forma y mismo costo que `listLivePipelineOpps`, pero sin las dos
+ * cláusulas de fecha — por eso coincide con el conteo del kanban (que
+ * tampoco filtra por fecha de creación por default). Resuelve la
+ * inconsistencia "kanban 4 vs dashboard 2" (Ajuste métricas estado vs
+ * periodo). `won_at IS NULL` excluye ganadas en SQL.
+ */
+export async function listLivePipelineSnapshot(): Promise<LivePipelineRow[]> {
+  const { supabase, organizationId } = getTenantScopedClient();
+  const { data, error } = await supabase
+    .from("opportunities")
+    .select("assigned_advisor_id, stage_id, shopify_draft_order_id, actual_amount, estimated_amount")
+    .eq("organization_id", organizationId)
+    .eq("funnel", "venta")
+    .is("cancelled_at", null)
+    .is("won_at", null)
     .limit(ROW_CAP);
   if (error) throw error;
   return (data ?? []) as LivePipelineRow[];
