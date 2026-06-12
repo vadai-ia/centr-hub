@@ -51,3 +51,36 @@ export function formatAmount(
   }
   return fmt.format(num);
 }
+
+const compactFormatters = new Map<string, Intl.NumberFormat>();
+
+/**
+ * Formato monetario COMPACTO para montos grandes en tarjetas/indicadores
+ * (Mi Día, M1v2): `$1.2M`, `$45k`. Bajo $10,000 cae al formato completo
+ * (un "$8,500" se lee mejor que "$8.5k"). Devuelve null para null/NaN.
+ */
+export function formatAmountCompact(
+  amount: Numeric | number | null,
+  currency: string,
+): string | null {
+  if (amount === null || amount === undefined) return null;
+  const num = typeof amount === "string" ? Number(amount) : amount;
+  if (Number.isNaN(num)) return null;
+  if (Math.abs(num) < 10_000) return formatAmount(num, currency);
+  const key = currency;
+  let fmt = compactFormatters.get(key);
+  if (!fmt) {
+    try {
+      fmt = new Intl.NumberFormat("es-MX", {
+        style: "currency",
+        currency,
+        notation: "compact",
+        maximumFractionDigits: 1,
+      });
+      compactFormatters.set(key, fmt);
+    } catch {
+      return `${Math.round(num).toLocaleString("es-MX")} ${currency}`;
+    }
+  }
+  return fmt.format(num);
+}

@@ -7,6 +7,7 @@ import type { Role } from "@/lib/types/database";
 // Branding se posponen a V2: ocultos de la nav. Sus rutas redirigen
 // limpio a /pipeline si se fuerza la URL directa.
 const VENDOR_TABS = [
+  { href: "/mi-dia", label: "Mi Día" },
   { href: "/pipeline", label: "Pipeline" },
   { href: "/contactos", label: "Contactos" },
   { href: "/whaapy", label: "Whaapy" },
@@ -17,6 +18,7 @@ const ADMIN_PAGES = [
   { href: "/admin/etapas", label: "Etapas del pipeline" },
   { href: "/admin/motivos", label: "Motivos de pérdida" },
   { href: "/admin/mapeo-tags", label: "Mapeo de tags" },
+  { href: "/admin/reglas", label: "Reglas" },
   { href: "/admin/usuarios", label: "Usuarios" },
 ] as const;
 

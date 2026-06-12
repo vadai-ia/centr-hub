@@ -9,6 +9,7 @@ import { whaapyOutboundFunctions } from "./whaapy-outbound";
 import { shopifyOutboundFunctions } from "./shopify-outbound";
 import { tagReprocessFunctions } from "./tag-reprocess";
 import { advisorReconciliationFunctions } from "./advisor-reconciliation";
+import { ruleEvaluationFunctions } from "./rule-evaluation";
 
 /**
  * Registro completo de funciones Inngest para servir desde
@@ -28,4 +29,5 @@ export const allFunctions = [
   ...shopifyOutboundFunctions,
   ...tagReprocessFunctions,
   ...advisorReconciliationFunctions,
+  ...ruleEvaluationFunctions,
 ];

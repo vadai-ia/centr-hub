@@ -211,6 +211,18 @@ export async function updateNotification(
   return data;
 }
 
+export async function getNotificationById(id: UUID): Promise<NotificationRow | null> {
+  const { supabase, organizationId } = getTenantScopedClient();
+  const { data, error } = await supabase
+    .from("notifications")
+    .select("*")
+    .eq("id", id)
+    .eq("organization_id", organizationId)
+    .maybeSingle();
+  if (error) throw error;
+  return data ?? null;
+}
+
 export async function listNotificationsForUser(userId: UUID): Promise<NotificationRow[]> {
   const { supabase, organizationId } = getTenantScopedClient();
   const { data, error } = await supabase
@@ -221,6 +233,76 @@ export async function listNotificationsForUser(userId: UUID): Promise<Notificati
     .order("due_at", { ascending: true, nullsFirst: false });
   if (error) throw error;
   return data ?? [];
+}
+
+/**
+ * Tareas snoozeadas cuyo `snoozed_until` ya venció (<= ahora). El cron
+ * horario las reactiva a `pending` (CLAUDE.md: la reactivación es por
+ * proceso programado, NO temporizador en cliente).
+ */
+export async function listDueSnoozedTasks(nowIso: string): Promise<TaskRow[]> {
+  const { supabase, organizationId } = getTenantScopedClient();
+  const { data, error } = await supabase
+    .from("tasks")
+    .select("*")
+    .eq("organization_id", organizationId)
+    .eq("status", "snoozed")
+    .not("snoozed_until", "is", null)
+    .lte("snoozed_until", nowIso)
+    .limit(5000);
+  if (error) throw error;
+  return data ?? [];
+}
+
+/** Avisos snoozeados vencidos — reactivados por el cron horario. */
+export async function listDueSnoozedNotifications(
+  nowIso: string,
+): Promise<NotificationRow[]> {
+  const { supabase, organizationId } = getTenantScopedClient();
+  const { data, error } = await supabase
+    .from("notifications")
+    .select("*")
+    .eq("organization_id", organizationId)
+    .eq("status", "snoozed")
+    .not("snoozed_until", "is", null)
+    .lte("snoozed_until", nowIso)
+    .limit(5000);
+  if (error) throw error;
+  return data ?? [];
+}
+
+/**
+ * user_ids de los admins/superadmins ACTIVOS de la org (tenant-scoped).
+ * Destinatarios de `notify_admin`. `notifications.user_id` referencia
+ * `user_profiles.id` = `memberships.user_id`.
+ */
+export async function listOrgAdminUserIds(): Promise<UUID[]> {
+  const { supabase, organizationId } = getTenantScopedClient();
+  const { data, error } = await supabase
+    .from("memberships")
+    .select("user_id")
+    .eq("organization_id", organizationId)
+    .eq("is_active", true)
+    .in("role", ["admin", "superadmin"]);
+  if (error) throw error;
+  return (data ?? []).map((r) => (r as { user_id: UUID }).user_id);
+}
+
+/**
+ * user_id del membership (asesor). Destinatario de `notify_advisor`:
+ * `opportunities.assigned_advisor_id` es un membership.id; el aviso se
+ * dirige al user_id detrás. Devuelve null si el membership no existe.
+ */
+export async function getMembershipUserId(membershipId: UUID): Promise<UUID | null> {
+  const { supabase, organizationId } = getTenantScopedClient();
+  const { data, error } = await supabase
+    .from("memberships")
+    .select("user_id")
+    .eq("organization_id", organizationId)
+    .eq("id", membershipId)
+    .maybeSingle();
+  if (error) throw error;
+  return (data?.user_id as UUID) ?? null;
 }
 
 // ============================================================

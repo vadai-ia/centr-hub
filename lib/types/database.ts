@@ -326,6 +326,11 @@ export interface TaskRow {
   due_at: ISODateString | null;
   status: TaskStatus;
   snoozed_until: ISODateString | null;
+  // Procedencia: regla de automatización que generó esta tarea (M1v2,
+  // migración 0029). NULL para tareas manuales. Habilita idempotencia R4
+  // (no duplicar mientras haya una abierta de la misma regla) y el motivo
+  // "generada por regla" en Mi Día.
+  created_by_rule_id: UUID | null;
   created_at: ISODateString;
   updated_at: ISODateString;
   completed_at: ISODateString | null;
@@ -442,7 +447,16 @@ export interface Database {
         Insert: Omit<ActivityRow, "id" | "created_at"> & Partial<Pick<ActivityRow, "id" | "created_at">>;
         Update: Updatable<ActivityRow>;
       };
-      tasks: { Row: TaskRow; Insert: Insertable<TaskRow>; Update: Updatable<TaskRow> };
+      tasks: {
+        Row: TaskRow;
+        // created_by_rule_id es nullable y opcional en Insert: las tareas
+        // manuales (la mayoría de los callers V1) la omiten; solo el motor
+        // de reglas la setea. Sin este Omit quedaría REQUERIDA en cada
+        // insert (lección Insertable + lost_at, ERRORES.md).
+        Insert: Omit<Insertable<TaskRow>, "created_by_rule_id"> &
+          Partial<Pick<TaskRow, "created_by_rule_id">>;
+        Update: Updatable<TaskRow>;
+      };
       notifications: { Row: NotificationRow; Insert: Insertable<NotificationRow>; Update: Updatable<NotificationRow> };
       audit_log: {
         Row: AuditLogRow;

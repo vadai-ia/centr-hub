@@ -151,3 +151,66 @@ export function daysBetween(startUtc: string, endUtc: string): number {
   const end = DateTime.fromISO(endUtc, { zone: "utc" });
   return end.diff(start, "days").days;
 }
+
+/**
+ * Límites del "hoy" en zona MX, en UTC ISO. Mi Día (M1v2) clasifica
+ * tareas/avisos en Atrasadas/Hoy según estos límites — NUNCA con
+ * `new Date()` crudo del servidor (CLAUDE.md "Timezone").
+ */
+export function todayBoundsUtc(): { startUtc: string; endUtc: string } {
+  const now = DateTime.now().setZone(TIMEZONE);
+  return {
+    startUtc: now.startOf("day").toUTC().toISO()!,
+    endUtc: now.endOf("day").toUTC().toISO()!,
+  };
+}
+
+/** Fin del día de HOY + 6 días (fin de "esta semana") en UTC ISO, zona MX. */
+export function endOfWeekWindowUtc(): string {
+  return DateTime.now()
+    .setZone(TIMEZONE)
+    .endOf("day")
+    .plus({ days: 6 })
+    .toUTC()
+    .toISO()!;
+}
+
+/**
+ * Reactivación de snooze a UTC ISO desde una opción rápida, calculada en
+ * zona MX. "tomorrow" = mañana 09:00 MX (la reactivación real la dispara
+ * el cron horario, así que una card "hasta mañana 9 AM" reaparece entre
+ * 9:00 y 9:59 — aceptable y comunicado, CLAUDE.md). Cuida el borde
+ * 23:55 → "mañana" es el día calendario siguiente en MX, no en UTC.
+ */
+export function snoozeUntilUtc(option: "1h" | "3h" | "tomorrow"): string {
+  const now = DateTime.now().setZone(TIMEZONE);
+  if (option === "1h") return now.plus({ hours: 1 }).toUTC().toISO()!;
+  if (option === "3h") return now.plus({ hours: 3 }).toUTC().toISO()!;
+  return now
+    .plus({ days: 1 })
+    .set({ hour: 9, minute: 0, second: 0, millisecond: 0 })
+    .toUTC()
+    .toISO()!;
+}
+
+/** Clave de día (`yyyy-MM-dd`) de un timestamp UTC, evaluada en MX. */
+export function dayKeyInTz(utcIso: string): string {
+  return DateTime.fromISO(utcIso, { zone: "utc" })
+    .setZone(TIMEZONE)
+    .toFormat("yyyy-MM-dd");
+}
+
+/** Clave de día (`yyyy-MM-dd`) de HOY en MX. */
+export function todayKeyInTz(): string {
+  return DateTime.now().setZone(TIMEZONE).toFormat("yyyy-MM-dd");
+}
+
+/** Las últimas N claves de día (`yyyy-MM-dd`) en MX, de la más vieja a hoy. */
+export function lastNDayKeys(n: number): string[] {
+  const today = DateTime.now().setZone(TIMEZONE).startOf("day");
+  const keys: string[] = [];
+  for (let i = n - 1; i >= 0; i--) {
+    keys.push(today.minus({ days: i }).toFormat("yyyy-MM-dd"));
+  }
+  return keys;
+}

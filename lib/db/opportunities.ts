@@ -605,6 +605,49 @@ export async function getKanbanOpportunityById(
 }
 
 /**
+ * Resuelve un set de opps con contact embebido para las cards de Mi Día
+ * (M1v2). INCLUYE canceladas (la card las muestra inline) y opps en
+ * cualquier etapa — el set viene de las tareas/avisos del usuario, no del
+ * kanban. Devuelve KanbanOpportunity (mismo shape que el kanban) para
+ * reusar formato de monto/contacto. Las opps borradas físicamente
+ * simplemente no aparecen (el caller renderiza fallback).
+ */
+export async function listKanbanOpportunitiesByIds(
+  ids: UUID[],
+): Promise<KanbanOpportunity[]> {
+  if (ids.length === 0) return [];
+  const { supabase, organizationId } = getTenantScopedClient();
+  const { data, error } = await supabase
+    .from("opportunities")
+    .select(KANBAN_OPPORTUNITY_SELECT)
+    .eq("organization_id", organizationId)
+    .in("id", ids.slice(0, 5000));
+  if (error) throw error;
+  return (data ?? []) as unknown as KanbanOpportunity[];
+}
+
+/**
+ * Oportunidades SIN asesor y activas (no cancelada, no ganada, no
+ * perdida) para Mi Día del admin (M1v2, Bloque C): las que puede tomar o
+ * asignar a un vendedor desde ahí. Devuelve el shape de card del kanban.
+ */
+export async function listUnassignedActiveOpportunityCards(): Promise<KanbanOpportunity[]> {
+  const { supabase, organizationId } = getTenantScopedClient();
+  const { data, error } = await supabase
+    .from("opportunities")
+    .select(KANBAN_OPPORTUNITY_SELECT)
+    .eq("organization_id", organizationId)
+    .is("assigned_advisor_id", null)
+    .is("cancelled_at", null)
+    .is("won_at", null)
+    .is("lost_at", null)
+    .order("last_modified_at", { ascending: false })
+    .limit(200);
+  if (error) throw error;
+  return (data ?? []) as unknown as KanbanOpportunity[];
+}
+
+/**
  * Marca una oportunidad como cancelada sin transición de etapa.
  * NO crea entrada en `opportunity_stage_history` — la cancelación
  * es un side-flag, no un cambio de etapa.
@@ -804,6 +847,36 @@ export async function setStageHistoryShopifyEventAt(input: {
     .select("id");
   if (error) throw error;
   return (data ?? []).length;
+}
+
+/**
+ * Para un set de opps, el `changed_at` MÁS RECIENTE de su entrada a una
+ * etapa dada (`to_stage_id = stageId`). Usado por el motor de reglas
+ * (stage_aging): "cuánto lleva la opp en la etapa actual". Devuelve un
+ * Map oppId → ISO; las opps sin entrada registrada a esa etapa se omiten
+ * (el caller cae a `opp.created_at`).
+ */
+export async function listStageEntryTimes(
+  opportunityIds: UUID[],
+  toStageId: UUID,
+): Promise<Map<UUID, string>> {
+  const out = new Map<UUID, string>();
+  if (opportunityIds.length === 0) return out;
+  const { supabase, organizationId } = getTenantScopedClient();
+  const { data, error } = await supabase
+    .from("opportunity_stage_history")
+    .select("opportunity_id, changed_at")
+    .eq("organization_id", organizationId)
+    .eq("to_stage_id", toStageId)
+    .in("opportunity_id", opportunityIds.slice(0, 20000))
+    .order("changed_at", { ascending: true })
+    .limit(20000);
+  if (error) throw error;
+  // Orden ascendente → el último write por opp gana (entrada más reciente).
+  for (const r of (data ?? []) as Array<{ opportunity_id: UUID; changed_at: string }>) {
+    out.set(r.opportunity_id, r.changed_at);
+  }
+  return out;
 }
 
 export async function listStageHistory(

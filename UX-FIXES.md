@@ -105,6 +105,20 @@ Cada entrada documenta UN ajuste pendiente con la siguiente estructura:
 - **Issue detectado:** en mobile el sidebar NO se colapsa — ocupa parte de la pantalla, comprime el pipeline y dificulta la navegación. Se necesita responsive completo: (a) sidebar colapsable a icon-only en tablet y oculto detrás de drawer/hamburger en mobile; (b) navbar adaptado a mobile; (c) todas las vistas del dashboard adaptadas (pipeline, admin, dashboard, mi-día, whaapy, contactos) revisando paddings, fuentes, layout de columnas, modales fullscreen en mobile. El drag-and-drop touch + scroll horizontal de columnas del kanban SÍ funcionan hoy — el problema es el chrome del dashboard que lo rodea, no el kanban en sí.
 - **Sub-sesión de F7 sugerida:** B (layout/dashboard) como base + propagación a A, C y D.
 - **Severidad:** alta — sin responsive el producto es desktop-only, no viable para vendedores en campo.
+### Mi Día (M1v2) — íconos emoji, popover de snooze y "cerrada por X"
+
+- **Componente o pantalla:** `app/(dashboard)/mi-dia/` — campanita (`mi-dia-bell.tsx`), racha/sidebar (`mi-dia-sidebar.tsx`), popover de Posponer (`mi-dia-card.tsx`).
+- **Issue detectado:** (a) se usan **emoji** como íconos (🔔 campanita, 🔥/💤 racha, ✓ check de completar) — funcionales pero inconsistentes con un set de íconos profesional; F7 debe reemplazarlos por un icon set propio alineado a la identidad Centr. (b) El popover de "Posponer" se cierra por `onMouseLeave` (no por click-outside ni Escape) — en touch puede quedar abierto; conviene un dismiss robusto. (c) **Autoría de completado no surfaced:** cuando el admin cierra la tarea de un vendedor desde la Vista equipo, el actor real queda en `audit_log` pero la UI del vendedor no muestra "cerrada por X". El dato existe (audit + `created_by_rule_id` para origen); F7/V2 puede surfacearlo en el detalle de la tarea/timeline para que el vendedor sepa quién la cerró.
+- **Sub-sesión de F7 sugerida:** C (componentes funcionales).
+- **Severidad:** baja-media — funcional y consistente con el patrón actual; es pulido + una mejora de trazabilidad visible.
+
+### Admin → Reglas (M1v2) — composer y consistencia visual
+
+- **Componente o pantalla:** `app/(dashboard)/admin/reglas/` (lista + modal composer `rule-form-modal.tsx`).
+- **Issue detectado:** la pantalla quedó funcional siguiendo el patrón admin (etapas/motivos): lista por funnel, toggle activar/desactivar, modal de crear/editar. Pendiente F7: armonizar densidad/espaciados con el sistema final, el toggle on/off custom (hoy Tailwind a mano), y la jerarquía del composer (los campos dinámicos por tipo de disparador aparecen/desaparecen sin transición). Acento indigo a migrar a la paleta Centr (blanco/negro + amarillo) cuando se definan tokens.
+- **Sub-sesión de F7 sugerida:** D (admin/configuración).
+- **Severidad:** baja — no bloquea operación; pulido de consistencia.
+
 ### Pantalla Usuarios (M9.2) — polish visual
 
 - **Componente o pantalla:** `app/(dashboard)/admin/usuarios/` (lista de usuarios + modales invitar/vincular/editar/desactivar).

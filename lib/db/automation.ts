@@ -74,6 +74,85 @@ export async function updateRule(
   return data;
 }
 
+export async function deleteRule(id: UUID): Promise<void> {
+  const { supabase, organizationId } = getTenantScopedClient();
+  const { error } = await supabase
+    .from("automation_rules")
+    .delete()
+    .eq("id", id)
+    .eq("organization_id", organizationId);
+  if (error) throw error;
+}
+
+/**
+ * Idempotencia R4 (create_task): ¿ya hay una tarea ABIERTA
+ * (pending|snoozed) generada por esta regla para este sujeto? Si la hay,
+ * el motor NO crea otra (no duplicar mientras la anterior siga viva). La
+ * procedencia se materializa en `tasks.created_by_rule_id` (0029).
+ */
+export async function hasOpenRuleTask(input: {
+  ruleId: UUID;
+  opportunityId?: UUID | null;
+  contactId?: UUID | null;
+}): Promise<boolean> {
+  const { supabase, organizationId } = getTenantScopedClient();
+  let query = supabase
+    .from("tasks")
+    .select("id", { count: "exact", head: true })
+    .eq("organization_id", organizationId)
+    .eq("created_by_rule_id", input.ruleId)
+    .in("status", ["pending", "snoozed"]);
+  if (input.opportunityId) query = query.eq("opportunity_id", input.opportunityId);
+  else if (input.contactId) query = query.eq("contact_id", input.contactId);
+  const { count, error } = await query;
+  if (error) throw error;
+  return (count ?? 0) > 0;
+}
+
+/**
+ * Idempotencia R4 (notify_*): ¿ya hay un aviso ABIERTO (pending|snoozed)
+ * de esta regla para este sujeto? La procedencia vive en
+ * `notifications.origin='rule'` + `origin_reference->>'rule_id'`.
+ */
+export async function hasOpenRuleNotification(input: {
+  ruleId: UUID;
+  opportunityId?: UUID | null;
+  contactId?: UUID | null;
+}): Promise<boolean> {
+  const { supabase, organizationId } = getTenantScopedClient();
+  let query = supabase
+    .from("notifications")
+    .select("id", { count: "exact", head: true })
+    .eq("organization_id", organizationId)
+    .eq("origin", "rule")
+    .eq("origin_reference->>rule_id", input.ruleId)
+    .in("status", ["pending", "snoozed"]);
+  if (input.opportunityId) query = query.eq("opportunity_id", input.opportunityId);
+  else if (input.contactId) query = query.eq("contact_id", input.contactId);
+  const { count, error } = await query;
+  if (error) throw error;
+  return (count ?? 0) > 0;
+}
+
+/**
+ * Circuit breaker: cuántas ejecuciones registró una regla desde `sinceIso`.
+ * Si excede el umbral por tick/hora, el motor la desactiva con alerta.
+ */
+export async function countRuleExecutionsSince(
+  ruleId: UUID,
+  sinceIso: string,
+): Promise<number> {
+  const { supabase, organizationId } = getTenantScopedClient();
+  const { count, error } = await supabase
+    .from("rule_executions")
+    .select("id", { count: "exact", head: true })
+    .eq("organization_id", organizationId)
+    .eq("rule_id", ruleId)
+    .gte("executed_at", sinceIso);
+  if (error) throw error;
+  return count ?? 0;
+}
+
 export async function recordRuleExecution(input: {
   ruleId: UUID;
   opportunityId?: UUID | null;

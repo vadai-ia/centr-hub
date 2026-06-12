@@ -1,7 +1,18 @@
-import { redirect } from "next/navigation";
+import { loadAdminRules } from "@/lib/actions/admin-rules";
+import { ReglasScreen } from "./reglas-screen";
 
-// V2 — pospuesto. Oculto de la navegación en V1 (M7.2, Bloque 1).
-// El acceso por URL directa redirige limpio al pipeline.
-export default function ReglasPage() {
-  redirect("/pipeline");
+// M1v2 — Bloque A3. Motor de Reglas: el admin crea/edita/elimina reglas
+// de automatización y activa/desactiva las preconfiguradas. Server
+// Component que pre-carga reglas + etapas y delega la interacción al
+// client component.
+export default async function ReglasPage() {
+  const res = await loadAdminRules();
+  if (!res.ok) {
+    return (
+      <div className="p-6">
+        <p className="text-sm text-red-600 dark:text-red-400">{res.message}</p>
+      </div>
+    );
+  }
+  return <ReglasScreen initialRules={res.rules} stages={res.stages} />;
 }
