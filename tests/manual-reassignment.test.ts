@@ -114,3 +114,85 @@ describe("reassignOpportunityAdvisor (marcado como manual)", () => {
     if (!res.ok) expect(res.reason).toBe("entity_not_found");
   });
 });
+
+/**
+ * Cascada de pertenencia (correctivo M1v2): el contenido accionable
+ * pertenece a la OPP, no a la persona. Al reasignar, las tareas y avisos
+ * ABIERTOS de la opp siguen a la opp (pasan al nuevo asesor); las
+ * completadas y las de OTRA opp no se tocan. Si la opp queda sin asesor,
+ * el admin de respaldo los custodia.
+ */
+describe("reassignOpportunityAdvisor — cascada de tareas y avisos", () => {
+  const USER_B = "user-b";
+
+  function seedMemberships() {
+    fake.setTable("memberships", [
+      { id: ADVISOR_B, user_id: USER_B, organization_id: ORG, role: "vendedor", is_active: true },
+      { id: "m-admin", user_id: ADMIN, organization_id: ORG, role: "admin", is_active: true },
+    ]);
+  }
+
+  it("mueve tareas y avisos ABIERTOS de la opp al nuevo asesor; no toca completadas ni otra opp", async () => {
+    seedMemberships();
+    fake.setTable("tasks", [
+      { id: "task-open", organization_id: ORG, opportunity_id: "opp-1", assigned_user_id: ADMIN, status: "pending" },
+      { id: "task-snoozed", organization_id: ORG, opportunity_id: "opp-1", assigned_user_id: ADMIN, status: "snoozed" },
+      { id: "task-done", organization_id: ORG, opportunity_id: "opp-1", assigned_user_id: ADMIN, status: "completed" },
+      { id: "task-other", organization_id: ORG, opportunity_id: "opp-2", assigned_user_id: ADMIN, status: "pending" },
+    ]);
+    fake.setTable("notifications", [
+      { id: "notif-open", organization_id: ORG, opportunity_id: "opp-1", user_id: ADMIN, status: "pending" },
+      { id: "notif-other", organization_id: ORG, opportunity_id: "opp-2", user_id: ADMIN, status: "pending" },
+    ]);
+
+    const res = await withTenantContext(
+      ORG,
+      () =>
+        reassignOpportunityAdvisor({
+          opportunityId: "opp-1",
+          newMembershipId: ADVISOR_B,
+          actorUserId: ADMIN,
+        }),
+      { source: "test" },
+    );
+    expect(res.ok).toBe(true);
+
+    const tasks = fake.getTable("tasks");
+    const byId = (id: string) => tasks.find((t) => t.id === id)!;
+    expect(byId("task-open").assigned_user_id).toBe(USER_B);
+    expect(byId("task-snoozed").assigned_user_id).toBe(USER_B);
+    // Completada = historial: no se mueve.
+    expect(byId("task-done").assigned_user_id).toBe(ADMIN);
+    // Otra opp: intacta.
+    expect(byId("task-other").assigned_user_id).toBe(ADMIN);
+
+    const notifs = fake.getTable("notifications");
+    expect(notifs.find((n) => n.id === "notif-open")!.user_id).toBe(USER_B);
+    expect(notifs.find((n) => n.id === "notif-other")!.user_id).toBe(ADMIN);
+  });
+
+  it("reasignar a 'sin asesor' (NULL) deja las tareas abiertas en custodia del admin", async () => {
+    seedMemberships();
+    fake.setTable("tasks", [
+      { id: "task-open", organization_id: ORG, opportunity_id: "opp-1", assigned_user_id: ADVISOR_A, status: "pending" },
+    ]);
+    fake.setTable("notifications", []);
+
+    const res = await withTenantContext(
+      ORG,
+      () =>
+        reassignOpportunityAdvisor({
+          opportunityId: "opp-1",
+          newMembershipId: null,
+          actorUserId: ADMIN,
+        }),
+      { source: "test" },
+    );
+    expect(res.ok).toBe(true);
+
+    const opp = fake.getTable("opportunities")[0];
+    expect(opp.assigned_advisor_id).toBeNull();
+    // La tarea no se pierde: la custodia el admin de respaldo.
+    expect(fake.getTable("tasks")[0].assigned_user_id).toBe(ADMIN);
+  });
+});

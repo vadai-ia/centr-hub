@@ -153,6 +153,43 @@ export async function listTasksForOpportunity(
 }
 
 /**
+ * Tareas ABIERTAS (pending|snoozed) de una oportunidad. Usado por la
+ * cascada de reasignación: el contenido accionable pertenece a la opp, no
+ * a la persona, así que al cambiar el asesor sus tareas abiertas siguen a
+ * la opp. Las completadas (historial) NO entran.
+ */
+export async function listOpenTasksForOpportunity(
+  opportunityId: UUID,
+): Promise<TaskRow[]> {
+  const { supabase, organizationId } = getTenantScopedClient();
+  const { data, error } = await supabase
+    .from("tasks")
+    .select("*")
+    .eq("organization_id", organizationId)
+    .eq("opportunity_id", opportunityId)
+    .in("status", ["pending", "snoozed"])
+    .limit(5000);
+  if (error) throw error;
+  return data ?? [];
+}
+
+/** Avisos ABIERTOS (pending|snoozed) de una opp — análogo a las tareas. */
+export async function listOpenNotificationsForOpportunity(
+  opportunityId: UUID,
+): Promise<NotificationRow[]> {
+  const { supabase, organizationId } = getTenantScopedClient();
+  const { data, error } = await supabase
+    .from("notifications")
+    .select("*")
+    .eq("organization_id", organizationId)
+    .eq("opportunity_id", opportunityId)
+    .in("status", ["pending", "snoozed"])
+    .limit(5000);
+  if (error) throw error;
+  return data ?? [];
+}
+
+/**
  * Cuenta tareas pendientes por oportunidad para un set de IDs.
  * Usado por el kanban (M6 polish) para mostrar contador en cards.
  * Si no hay opps, devuelve mapa vacío.
