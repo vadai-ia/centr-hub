@@ -17,7 +17,6 @@ import {
 } from "@/lib/time/period";
 import type {
   NotificationOrigin,
-  NotificationRow,
   TaskRow,
   UUID,
 } from "@/lib/types/database";
@@ -35,12 +34,15 @@ import type {
 export type Urgency = "overdue" | "today" | "week";
 
 export interface MiDiaMotivo {
-  kind: "task" | "notification";
+  // El centro de Mi Día muestra SOLO tareas (M1v2 correctivo). Los avisos
+  // viven exclusivamente en la campanita. `kind` se conserva como "task"
+  // literal por compatibilidad de tipos con los consumidores.
+  kind: "task";
   id: UUID;
   title: string;
-  source: NotificationOrigin; // manual | rule | system
+  source: NotificationOrigin; // manual | rule (el texto explica el porqué)
   taskType: string | null;
-  notificationType: string | null;
+  notificationType: null;
   message: string | null;
   dueAt: string | null;
   urgency: Urgency;
@@ -128,12 +130,14 @@ export async function loadMiDiaForUser(input: {
   const stageMap = new Map(stages.map((s) => [s.id, s]));
 
   // --- Motivos abiertos (pending) agrupados por oportunidad ---
+  // El CENTRO se construye SOLO desde tareas (misma fuente que el detalle
+  // de la oportunidad → sin divergencia). Los avisos pendientes alimentan
+  // exclusivamente la campanita más abajo.
   const pendingTasks = tasks.filter((t) => t.status === "pending");
   const pendingNotifs = notifications.filter((n) => n.status === "pending");
 
   const oppIds = new Set<UUID>();
   for (const t of pendingTasks) if (t.opportunity_id) oppIds.add(t.opportunity_id);
-  for (const n of pendingNotifs) if (n.opportunity_id) oppIds.add(n.opportunity_id);
 
   const cardsData = await listKanbanOpportunitiesByIds(Array.from(oppIds));
   const oppById = new Map(cardsData.map((o) => [o.id, o]));
@@ -179,22 +183,6 @@ export async function loadMiDiaForUser(input: {
       urgency,
     });
   }
-  for (const n of pendingNotifs) {
-    if (!n.opportunity_id) continue; // los sin-opp viven solo en la campanita
-    const card = ensureCard(n.opportunity_id);
-    const urgency = bucket(n.due_at, startUtc, endUtc);
-    card.motivos.push({
-      kind: "notification",
-      id: n.id,
-      title: n.title,
-      source: n.origin,
-      taskType: null,
-      notificationType: n.notification_type,
-      message: n.message,
-      dueAt: n.due_at,
-      urgency,
-    });
-  }
 
   // Urgencia de la card = la más alta entre sus motivos.
   const cards: MiDiaCard[] = [];
@@ -220,7 +208,7 @@ export async function loadMiDiaForUser(input: {
     (acc, c) => acc + c.amountValue,
     0,
   );
-  const completedToday = countCompletedToday(tasks, notifications, startUtc);
+  const completedToday = countCompletedToday(tasks, startUtc);
 
   // --- Campanita: todos los avisos pendientes (incl. sin opp) ---
   const bell: MiDiaBellItem[] = pendingNotifs
@@ -262,17 +250,13 @@ export async function loadMiDiaForUser(input: {
   };
 }
 
-function countCompletedToday(
-  tasks: TaskRow[],
-  notifications: NotificationRow[],
-  startUtc: string,
-): number {
+function countCompletedToday(tasks: TaskRow[], startUtc: string): number {
+  // Solo tareas — "Completadas hoy" es el logro accionable del día, en
+  // línea con la racha (también basada en tareas). Los avisos se descartan
+  // desde la campanita, no cuentan como completados.
   let n = 0;
   for (const t of tasks) {
     if (t.status === "completed" && t.completed_at && t.completed_at >= startUtc) n += 1;
-  }
-  for (const x of notifications) {
-    if (x.status === "completed" && x.completed_at && x.completed_at >= startUtc) n += 1;
   }
   return n;
 }

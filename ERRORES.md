@@ -17,6 +17,18 @@ Cada entrada documenta UN bug o lección con la siguiente estructura:
 
 ## Entradas
 
+### M1v2 correctivo — Mi Día pintaba opps sin tarea: el centro mezclaba tareas + avisos (doble fuente)
+
+- **Milestone donde se detectó:** M1v2 correctivo (junio 2026). Validación en producción Centr.
+- **Síntoma:** una oportunidad aparecía en Mi Día ("Requieren tu atención") con el motivo de una regla (ej. "Oportunidad estancada 72h"), pero al abrir el detalle de esa opp la sección Tareas decía "0 pendientes". El motivo pintado no tenía tarea real detrás.
+- **Causa raíz (doble fuente de verdad):** el centro de Mi Día derivaba sus cards de DOS fuentes — `tasks` **+** `notifications` — agrupadas por `opportunity_id` como `motivos` ([mi-dia.ts](lib/services/mi-dia.ts), `loadMiDiaForUser`). Una card aparecía si la opp tenía tarea pendiente **O aviso pendiente**. El detalle de la opp, en cambio, lee SOLO `tasks` (`listTasksForOpportunity`). Como el motor crea avisos `notify_admin` con `opportunity_id` para opps **sin asesor** (donde `create_task` y `notify_advisor` se omitían con `no_advisor`, pero `notify_admin` NO depende del asesor de la opp → [rules-engine.ts](lib/services/rules-engine.ts) `applyRuleToSubject`), una opp sin asesor producía **solo el aviso al admin** y NINGUNA tarea → aflora como card en el Mi Día del admin con cero tareas detrás. General además para reglas solo-`notify_admin` ("Seguimiento para cierre tardío", "Caso problemático abierto >48h"), que por diseño nunca crean tarea y siempre generaban card-fantasma. Idempotencia independiente (`hasOpenRuleTask` vs `hasOpenRuleNotification`) agravaba: completar la tarea pero no el aviso dejaba la card viva.
+- **Workaround / fix (3 piezas):**
+  1. **Centro = SOLO tareas.** `loadMiDiaForUser` ya no agrega notificaciones a los `motivos`; `oppIds` se arma solo desde `pendingTasks`. Misma fuente que el detalle de la opp → sin divergencia. `MiDiaMotivo.kind` queda como literal `"task"`. Los avisos viven exclusivamente en la campanita (`bell`, sin cambio). `countCompletedToday` se acota a tareas (consistente con la racha).
+  2. **Toda regla `create_task` crea la tarea, incluso sin asesor.** `applyRuleToSubject` recibe un `fallbackAdminUserId` (admin de menor `user_id`, determinista para no duplicar entre ticks); si la opp/contacto no tiene asesor, la tarea se asigna al admin en vez de omitirse (`create_task:admin_fallback` en el resultado de `rule_executions`). Decisión del operador: una opp accionable NUNCA queda sin tarea, porque el centro ahora depende 100% de que la tarea exista. `notify_advisor` sigue requiriendo asesor (es para el asesor); `notify_admin` no cambia.
+  3. **Limpieza de consumidores:** `mi-dia-screen.tsx` y `mi-dia-admin-team.tsx` ya no ramifican `kind === "task"` ni importan las actions de notificación (los motivos son siempre tareas).
+- **Sin migración:** el fix es 100% de capa de servicio/UI. La regla "Oportunidad estancada 72h" ya creaba tarea (0030); el bug era que se omitía cuando faltaba asesor + que el aviso pintaba la card igual.
+- **Lección:** si dos vistas que deben mostrar "lo mismo" leen fuentes distintas (centro = tasks+notifications; detalle = tasks), divergen por construcción — convergir a una sola fuente es el fix, no parchar la sincronización. Y cuando una vista pasa a depender 100% de que un registro exista (tarea), toda rama que antes lo omitía (opp sin asesor) debe garantizar su creación con un destinatario de respaldo, o el sujeto desaparece en silencio.
+
 ### M1v2 — Motor de Reglas + Mi Día: decisiones, gotchas y pasos operativos
 
 - **Milestone:** M1v2 (primer milestone V2). Motor de reglas (Bloque A) + Mi Día vendedor/admin (B/C) + tiempo real (D).

@@ -3,7 +3,7 @@ import { useCallback, useState, useTransition } from "react";
 import type { MiDiaTeamMember } from "@/lib/services/mi-dia-admin";
 import type { MiDiaData, MiDiaMotivo } from "@/lib/services/mi-dia";
 import { loadMiDiaMemberAction } from "@/lib/actions/mi-dia-admin";
-import { snoozeTaskAction, snoozeNotificationAction, completeNotificationAction } from "@/lib/actions/mi-dia";
+import { snoozeTaskAction } from "@/lib/actions/mi-dia";
 import { toggleTaskCompletedAction } from "@/lib/actions/opportunities-m6";
 import { MiDiaCardItem } from "./mi-dia-card";
 import type { SnoozeOption } from "./mi-dia-screen";
@@ -51,9 +51,7 @@ export function MiDiaAdminTeam({
     (m: MiDiaMotivo) => {
       setExiting((p) => new Set(p).add(m.id));
       startTransition(async () => {
-        await (m.kind === "task"
-          ? toggleTaskCompletedAction({ taskId: m.id })
-          : completeNotificationAction({ id: m.id }));
+        await toggleTaskCompletedAction({ taskId: m.id });
         setTimeout(reload, 280);
       });
     },
@@ -64,9 +62,7 @@ export function MiDiaAdminTeam({
     (m: MiDiaMotivo, option: SnoozeOption) => {
       setExiting((p) => new Set(p).add(m.id));
       startTransition(async () => {
-        await (m.kind === "task"
-          ? snoozeTaskAction({ id: m.id, option })
-          : snoozeNotificationAction({ id: m.id, option }));
+        await snoozeTaskAction({ id: m.id, option });
         setTimeout(reload, 280);
       });
     },
@@ -136,11 +132,11 @@ export function MiDiaAdminTeam({
         <button
           key={m.membershipId}
           onClick={() => loadMember(m)}
-          className="flex w-full items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-4 text-left hover:border-indigo-300 dark:border-slate-700 dark:bg-slate-800"
+          className="flex w-full items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-sm transition-all hover:border-indigo-200 hover:shadow-md dark:border-slate-700 dark:bg-slate-800 dark:hover:border-indigo-800"
         >
-          <div className="flex items-center gap-2">
-            <span className="inline-block h-3 w-3 rounded-full" style={{ backgroundColor: m.color }} />
-            <span className="font-medium text-slate-900 dark:text-slate-100">
+          <div className="flex items-center gap-2.5">
+            <span className="inline-block h-3.5 w-3.5 rounded-full ring-2 ring-white dark:ring-slate-800" style={{ backgroundColor: m.color }} />
+            <span className="font-semibold text-slate-900 dark:text-slate-100">
               {m.name ?? "Vendedor"}
             </span>
           </div>

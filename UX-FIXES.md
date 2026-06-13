@@ -15,6 +15,13 @@ Cada entrada documenta UN ajuste pendiente con la siguiente estructura:
 
 ## Entradas
 
+### M1v2 correctivo — Mi Día y Reglas ya tienen identidad visual (indigo→violeta + ámbar); propagar la paleta de marca final
+
+- **Componente o pantalla:** `app/(dashboard)/mi-dia/*` (header de indicadores, cards, campanita, racha en sidebar, empty state) y `app/(dashboard)/admin/reglas/*` (rule rows, toggle, header). Nuevo `components/ui/switch.tsx` (toggle reutilizable).
+- **Issue detectado / decisión aplicada:** el correctivo M1v2 sacó Mi Día del molde plano y le dio jerarquía + profundidad + color semántico (rose=atraso real, emerald=logro, indigo=en curso, ámbar=racha/energía), reusando la paleta semántica del Dashboard (M8.2) y un acento de identidad **indigo→violeta** + **ámbar→naranja** (racha). Campanita rediseñada (botón grande con badge que late en rose si hay alertas). Racha convertida en widget hero con pips de 7 días + barra de progreso. Toggle de Reglas reconstruido con el patrón flex + `border-2 border-transparent` (a prueba de deformación) en `components/ui/switch.tsx`. **Nota para F7:** cuando se defina la paleta de marca final de Centr (blanco/negro + amarillo `#FFD400`, ver entrada "Paleta de marca"), estos gradientes indigo/violeta deben re-tokenizarse a los colores de marca — hoy están hardcodeados en clases Tailwind. La identidad ya existe; F7 la alinea a la marca, no la crea de cero.
+- **Sub-sesión de F7 sugerida:** C (componentes funcionales) + D (admin/reglas); depende de la definición de tokens de B.
+- **Severidad:** baja (es polish ya entregado; F7 solo re-tokeniza a marca).
+
 ### "Ver cerradas" se colapsa si entra un polling fallback (Fix de pipeline P1)
 
 - **Componente o pantalla:** `app/(dashboard)/pipeline/` — botón "Ver cerradas (N)" por columna Ganada/Perdida (auto-ocultar cerradas).

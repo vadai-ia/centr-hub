@@ -23,7 +23,7 @@ export function MiDiaUnassigned({
   if (cards.length === 0) return null;
 
   return (
-    <section className="rounded-xl border border-amber-200 bg-amber-50/50 p-4 dark:border-amber-900/40 dark:bg-amber-900/10">
+    <section className="rounded-2xl border border-amber-200 bg-gradient-to-br from-amber-50 to-amber-50/30 p-4 shadow-sm dark:border-amber-900/40 dark:from-amber-900/15 dark:to-amber-900/5">
       <button
         onClick={() => setOpen((o) => !o)}
         className="flex w-full items-center gap-2 text-left text-sm font-semibold text-amber-800 dark:text-amber-300"
@@ -80,7 +80,7 @@ function UnassignedRow({
   }
 
   return (
-    <div className="rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-800">
+    <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-700 dark:bg-slate-800">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2">

@@ -129,6 +129,13 @@ async function evaluateTimeRules(
   );
   const stages = await listPipelineStages();
   const adminUserIds = await listOrgAdminUserIds();
+  // Destinatario de respaldo para `create_task` cuando la opp/contacto NO
+  // tiene asesor: la tarea se asigna al admin (decisión del operador,
+  // M1v2 correctivo) para que NUNCA quede una opp accionable sin tarea —
+  // el centro de Mi Día ahora depende 100% de que la tarea exista. Pick
+  // determinista (el admin de menor id) para no duplicar entre ticks.
+  const fallbackAdminUserId =
+    [...adminUserIds].sort()[0] ?? null;
   const nowMs = Date.parse(nowIso);
 
   let actionsApplied = 0;
@@ -156,7 +163,13 @@ async function evaluateTimeRules(
 
       const actions = parseActions(rule);
       for (const subject of subjects) {
-        const applied = await applyRuleToSubject(rule, actions, subject, adminUserIds);
+        const applied = await applyRuleToSubject(
+          rule,
+          actions,
+          subject,
+          adminUserIds,
+          fallbackAdminUserId,
+        );
         actionsApplied += applied;
       }
     } catch (err) {
@@ -349,6 +362,7 @@ async function applyRuleToSubject(
   actions: RuleAction[],
   subject: CandidateSubject,
   adminUserIds: UUID[],
+  fallbackAdminUserId: UUID | null,
 ): Promise<number> {
   const taken: string[] = [];
   const skipped: string[] = [];
@@ -381,14 +395,18 @@ async function applyRuleToSubject(
       const advisorUserId = subject.advisorMembershipId
         ? await getMembershipUserId(subject.advisorMembershipId)
         : null;
-      if (!advisorUserId) {
-        skipped.push("create_task:no_advisor");
+      // Sin asesor → la tarea se asigna al admin de respaldo. El centro de
+      // Mi Día ahora muestra SOLO tareas, así que una opp sin asesor NO
+      // puede quedar sin tarea o desaparecería del centro (M1v2 correctivo).
+      const assigneeUserId = advisorUserId ?? fallbackAdminUserId;
+      if (!assigneeUserId) {
+        skipped.push("create_task:no_assignee");
         continue;
       }
       await createTask({
         contact_id: subject.contactId ?? null,
         opportunity_id: subject.opportunityId ?? null,
-        assigned_user_id: advisorUserId,
+        assigned_user_id: assigneeUserId,
         task_type: action.task_type,
         title: action.title,
         description: action.description ?? null,
@@ -398,7 +416,7 @@ async function applyRuleToSubject(
         completed_at: null,
         created_by_rule_id: rule.id,
       });
-      taken.push("create_task");
+      taken.push(advisorUserId ? "create_task" : "create_task:admin_fallback");
     } else if (action.type === "notify_advisor") {
       if (openNotif) {
         skipped.push("notify_advisor:already_open");

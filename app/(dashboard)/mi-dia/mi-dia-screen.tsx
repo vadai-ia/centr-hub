@@ -2,7 +2,7 @@
 import { useCallback, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import type { MiDiaData, MiDiaMotivo } from "@/lib/services/mi-dia";
-import { loadMiDiaAction, snoozeTaskAction, snoozeNotificationAction, completeNotificationAction } from "@/lib/actions/mi-dia";
+import { loadMiDiaAction, snoozeTaskAction } from "@/lib/actions/mi-dia";
 import { toggleTaskCompletedAction, createTaskForOpportunityAction } from "@/lib/actions/opportunities-m6";
 import { MiDiaHeader } from "./mi-dia-header";
 import { MiDiaCardItem } from "./mi-dia-card";
@@ -13,6 +13,7 @@ import { MiDiaUnassigned } from "./mi-dia-unassigned";
 import { MiDiaAdminTeam } from "./mi-dia-admin-team";
 import { loadMiDiaAdminExtrasAction } from "@/lib/actions/mi-dia-admin";
 import type { MiDiaAdminExtras } from "@/lib/services/mi-dia-admin";
+import { IconSun } from "./mi-dia-icons";
 
 interface Props {
   initialData: MiDiaData;
@@ -74,24 +75,18 @@ export function MiDiaScreen({
     [refresh],
   );
 
+  // Los motivos del centro son SIEMPRE tareas (los avisos viven en la
+  // campanita), así que completar/posponer opera sobre la tarea.
   const onComplete = useCallback(
     (m: MiDiaMotivo) => {
-      animateOut(m.id, () =>
-        m.kind === "task"
-          ? toggleTaskCompletedAction({ taskId: m.id })
-          : completeNotificationAction({ id: m.id }),
-      );
+      animateOut(m.id, () => toggleTaskCompletedAction({ taskId: m.id }));
     },
     [animateOut],
   );
 
   const onSnooze = useCallback(
     (m: MiDiaMotivo, option: SnoozeOption) => {
-      animateOut(m.id, () =>
-        m.kind === "task"
-          ? snoozeTaskAction({ id: m.id, option })
-          : snoozeNotificationAction({ id: m.id, option }),
-      );
+      animateOut(m.id, () => snoozeTaskAction({ id: m.id, option }));
     },
     [animateOut],
   );
@@ -135,8 +130,13 @@ export function MiDiaScreen({
     <div className="mx-auto max-w-7xl p-4 sm:p-6">
       <div className="mb-5 flex items-start justify-between gap-4">
         <div>
-          <div className="flex items-center gap-2">
-            <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100">Mi Día</h1>
+          <div className="flex items-center gap-2.5">
+            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 text-white shadow-sm shadow-indigo-300/50 dark:shadow-indigo-900/40">
+              <IconSun className="h-5 w-5" />
+            </span>
+            <h1 className="bg-gradient-to-r from-slate-900 to-slate-600 bg-clip-text text-2xl font-bold text-transparent dark:from-white dark:to-slate-400">
+              Mi Día
+            </h1>
             {rtStatus === "offline" && (
               <span
                 title="Sin conexión en vivo — actualizando cada 30 s"
@@ -147,7 +147,7 @@ export function MiDiaScreen({
               </span>
             )}
           </div>
-          <p className="mt-0.5 text-sm text-slate-500 dark:text-slate-400">
+          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
             Lo que necesita tu atención hoy, una oportunidad a la vez.
           </p>
         </div>
@@ -187,11 +187,13 @@ export function MiDiaScreen({
               {/* Sección prioritaria — solo 3 cards */}
               <section>
                 <h2 className="mb-3 flex items-center gap-2">
-                  <span className="text-sm font-semibold uppercase tracking-wide text-slate-700 dark:text-slate-300">
+                  <span className="h-4 w-1 rounded-full bg-gradient-to-b from-indigo-500 to-violet-600" />
+                  <span className="text-sm font-bold uppercase tracking-wide text-slate-700 dark:text-slate-300">
                     Requieren tu atención
                   </span>
                   {overdueTotal > 0 && (
-                    <span className="rounded-full bg-rose-100 px-2 py-0.5 text-xs font-medium text-rose-700 dark:bg-rose-900/40 dark:text-rose-300">
+                    <span className="inline-flex items-center gap-1 rounded-full bg-rose-100 px-2 py-0.5 text-xs font-semibold text-rose-700 dark:bg-rose-900/40 dark:text-rose-300">
+                      <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-rose-500" />
                       {overdueTotal} atrasada{overdueTotal === 1 ? "" : "s"}
                     </span>
                   )}
@@ -289,11 +291,13 @@ function tabCls(active: boolean): string {
 
 function EmptyState() {
   return (
-    <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-slate-200 bg-white py-16 text-center dark:border-slate-700 dark:bg-slate-800">
-      <div className="mb-3 flex h-14 w-14 items-center justify-center rounded-full bg-emerald-100 text-2xl dark:bg-emerald-900/40">
-        ✓
+    <div className="flex flex-col items-center justify-center rounded-2xl border border-emerald-100 bg-gradient-to-br from-emerald-50/70 to-white py-16 text-center shadow-sm dark:border-emerald-900/40 dark:from-emerald-950/30 dark:to-slate-800">
+      <div className="mb-3 flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-emerald-400 to-emerald-500 text-white shadow-md shadow-emerald-300/50 dark:shadow-emerald-900/40">
+        <svg className="h-8 w-8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round">
+          <polyline points="20 6 9 17 4 12" />
+        </svg>
       </div>
-      <p className="text-lg font-medium text-slate-800 dark:text-slate-100">
+      <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">
         Sin pendientes ahora. Buen trabajo.
       </p>
       <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
