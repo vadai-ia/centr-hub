@@ -5,6 +5,7 @@ import {
   updateRule,
   recordRuleExecution,
   hasOpenRuleTask,
+  hasRecentlyCompletedRuleTask,
   hasOpenRuleNotification,
   countRuleExecutionsSince,
 } from "@/lib/db/automation";
@@ -29,6 +30,7 @@ import { lastPlatformActivityForOpportunities } from "@/lib/services/activity-ag
 import {
   isTimeTrigger,
   thresholdHoursFromConfig,
+  reinsistCooldownSinceIso,
   stageAgingConfigSchema,
   noActivityConfigSchema,
   contactNoActivityConfigSchema,
@@ -162,6 +164,14 @@ async function evaluateTimeRules(
       }
 
       const actions = parseActions(rule);
+      // Cooldown de re-insistencia: una tarea de regla completada se
+      // vuelve a crear solo tras un período COMPLETO de la propia regla
+      // desde que se completó (no al tick siguiente). Cada regla insiste a
+      // su ritmo = su umbral de tiempo.
+      const thresholdHours = thresholdHoursFromConfig(
+        (rule.trigger_config ?? {}) as Parameters<typeof thresholdHoursFromConfig>[0],
+      );
+      const cooldownSinceIso = reinsistCooldownSinceIso(nowMs, thresholdHours);
       for (const subject of subjects) {
         const applied = await applyRuleToSubject(
           rule,
@@ -169,6 +179,7 @@ async function evaluateTimeRules(
           subject,
           adminUserIds,
           fallbackAdminUserId,
+          cooldownSinceIso,
         );
         actionsApplied += applied;
       }
@@ -363,6 +374,7 @@ async function applyRuleToSubject(
   subject: CandidateSubject,
   adminUserIds: UUID[],
   fallbackAdminUserId: UUID | null,
+  cooldownSinceIso: string | null,
 ): Promise<number> {
   const taken: string[] = [];
   const skipped: string[] = [];
@@ -391,6 +403,20 @@ async function applyRuleToSubject(
       if (openTask) {
         skipped.push("create_task:already_open");
         continue;
+      }
+      // Re-insistir solo tras un período completo de la regla desde que se
+      // completó la última tarea de esta regla para este sujeto.
+      if (cooldownSinceIso) {
+        const recentlyDone = await hasRecentlyCompletedRuleTask({
+          ruleId: rule.id,
+          opportunityId: subject.opportunityId ?? null,
+          contactId: subject.contactId ?? null,
+          sinceIso: cooldownSinceIso,
+        });
+        if (recentlyDone) {
+          skipped.push("create_task:cooldown");
+          continue;
+        }
       }
       const advisorUserId = subject.advisorMembershipId
         ? await getMembershipUserId(subject.advisorMembershipId)

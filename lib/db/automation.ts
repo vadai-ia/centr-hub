@@ -110,6 +110,34 @@ export async function hasOpenRuleTask(input: {
 }
 
 /**
+ * Cooldown de re-insistencia (create_task): ¿esta regla COMPLETÓ una tarea
+ * para este sujeto en/después de `sinceIso`? Si la hay, el motor NO recrea
+ * todavía — espera a que vuelva a transcurrir el período propio de la regla
+ * desde que se completó, para insistir a su propio ritmo (no en el tick
+ * siguiente). `sinceIso` lo calcula el motor como `now - thresholdHours`.
+ */
+export async function hasRecentlyCompletedRuleTask(input: {
+  ruleId: UUID;
+  opportunityId?: UUID | null;
+  contactId?: UUID | null;
+  sinceIso: string;
+}): Promise<boolean> {
+  const { supabase, organizationId } = getTenantScopedClient();
+  let query = supabase
+    .from("tasks")
+    .select("id", { count: "exact", head: true })
+    .eq("organization_id", organizationId)
+    .eq("created_by_rule_id", input.ruleId)
+    .eq("status", "completed")
+    .gte("completed_at", input.sinceIso);
+  if (input.opportunityId) query = query.eq("opportunity_id", input.opportunityId);
+  else if (input.contactId) query = query.eq("contact_id", input.contactId);
+  const { count, error } = await query;
+  if (error) throw error;
+  return (count ?? 0) > 0;
+}
+
+/**
  * Idempotencia R4 (notify_*): ¿ya hay un aviso ABIERTO (pending|snoozed)
  * de esta regla para este sujeto? La procedencia vive en
  * `notifications.origin='rule'` + `origin_reference->>'rule_id'`.

@@ -153,6 +153,23 @@ export function thresholdHoursFromConfig(cfg: {
   return null;
 }
 
+/**
+ * Ventana de cooldown de re-insistencia para `create_task`: una tarea de
+ * regla completada se vuelve a crear solo tras un período COMPLETO del
+ * propio umbral de la regla desde que se completó (no al tick siguiente).
+ * Devuelve el ISO de corte (`now - thresholdHours`): si la última tarea de
+ * la regla para el sujeto se completó EN/DESPUÉS de ese corte, todavía no
+ * se reinsiste. `null` si la regla no tiene umbral de tiempo (sin cooldown).
+ * Cada regla insiste a SU ritmo — el valor no es fijo, sale de su umbral.
+ */
+export function reinsistCooldownSinceIso(
+  nowMs: number,
+  thresholdHours: number | null,
+): string | null {
+  if (thresholdHours == null) return null;
+  return new Date(nowMs - thresholdHours * 3_600_000).toISOString();
+}
+
 // ------------------------------------------------------------
 // Descripción en lenguaje claro (admin UI)
 // ------------------------------------------------------------
