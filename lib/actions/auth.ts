@@ -35,7 +35,16 @@ export async function signInWithPassword(
   redirect("/pipeline");
 }
 
-export async function signInWithMagicLink(
+/**
+ * Envía el link de recuperación de contraseña (Supabase built-in). Es el
+ * único flujo de acceso sin contraseña conocido: el magic link
+ * (`signInWithOtp`) se retiró porque su token de un solo uso lo consumen
+ * los escáneres de correo (`otp_expired` al hacer click) — ver ERRORES.md.
+ * El link aterriza en `/auth/confirm` (flujo implícito, type=recovery),
+ * que ya muestra el formulario para definir contraseña nueva.
+ * Respuesta genérica para no filtrar qué correos existen.
+ */
+export async function requestPasswordReset(
   formData: FormData,
 ): Promise<AuthActionState> {
   const emailResult = emailSchema.safeParse(formData.get("email"));
@@ -44,18 +53,19 @@ export async function signInWithMagicLink(
 
   const supabase = getSupabaseServerClient();
   const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
-  const { error } = await supabase.auth.signInWithOtp({
-    email: emailResult.data,
-    options: {
-      emailRedirectTo: `${siteUrl}/auth/callback`,
-    },
-  });
+  const { error } = await supabase.auth.resetPasswordForEmail(
+    emailResult.data,
+    { redirectTo: `${siteUrl}/auth/confirm` },
+  );
 
   if (error) {
     return { error: "No se pudo enviar el email. Intenta más tarde." };
   }
 
-  return { success: "Te enviamos un link al correo. Revisa tu bandeja." };
+  return {
+    success:
+      "Si el correo está registrado, te enviamos un link para restablecer tu contraseña. Revisa tu bandeja.",
+  };
 }
 
 export async function signOut(): Promise<void> {

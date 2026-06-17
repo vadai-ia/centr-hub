@@ -2,10 +2,10 @@
 import { useEffect, useState } from "react";
 import {
   signInWithPassword,
-  signInWithMagicLink,
+  requestPasswordReset,
 } from "@/lib/actions/auth";
 
-type Mode = "password" | "magic";
+type Mode = "password" | "recovery";
 
 export function LoginForm() {
   const [mode, setMode] = useState<Mode>("password");
@@ -17,11 +17,25 @@ export function LoginForm() {
 
   useEffect(() => {
     const hash = window.location.hash;
-    if (hash && new URLSearchParams(hash.substring(1)).get("access_token")) {
+    const params = new URLSearchParams(hash.substring(1));
+    if (hash && params.get("access_token")) {
       // Supabase sent auth tokens to /login instead of /auth/confirm.
       // Preserve the hash and hand off to the handler that knows what to do.
       window.location.replace("/auth/confirm" + hash);
       return;
+    }
+    // Un link expirado/consumido (ej. recovery clickeado tarde) aterriza
+    // como `#error=...&error_description=...`. Sin esto, el usuario veía
+    // un login en blanco sin explicación.
+    if (hash && params.get("error")) {
+      const desc = params.get("error_description");
+      setError(
+        desc
+          ? desc.replace(/\+/g, " ")
+          : "El enlace expiró o ya se usó. Solicita uno nuevo.",
+      );
+      // Limpia el hash para que no reaparezca al recargar.
+      window.history.replaceState(null, "", window.location.pathname);
     }
     setReady(true);
   }, []);
@@ -43,20 +57,20 @@ export function LoginForm() {
     }
   }
 
-  async function handleMagicSubmit(e: React.FormEvent<HTMLFormElement>) {
+  async function handleRecoverySubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setError(null);
     setSuccess(null);
     setIsPending(true);
     const formData = new FormData(e.currentTarget);
-    const result = await signInWithMagicLink(formData);
+    const result = await requestPasswordReset(formData);
     setIsPending(false);
     if (result?.error) setError(result.error);
     else if (result?.success) setSuccess(result.success);
   }
 
   function toggleMode() {
-    setMode((m) => (m === "password" ? "magic" : "password"));
+    setMode((m) => (m === "password" ? "recovery" : "password"));
     setError(null);
     setSuccess(null);
   }
@@ -119,14 +133,14 @@ export function LoginForm() {
         </form>
       )}
 
-      {mode === "magic" && (
-        <form onSubmit={handleMagicSubmit} className="space-y-3">
+      {mode === "recovery" && (
+        <form onSubmit={handleRecoverySubmit} className="space-y-3">
           <div>
-            <label htmlFor="email-magic" className={labelClass}>
+            <label htmlFor="email-recovery" className={labelClass}>
               Correo electrónico
             </label>
             <input
-              id="email-magic"
+              id="email-recovery"
               name="email"
               type="email"
               required
@@ -136,10 +150,10 @@ export function LoginForm() {
             />
           </div>
           <button type="submit" disabled={isPending} className={btnClass}>
-            {isPending ? "Enviando..." : "Enviar link de acceso"}
+            {isPending ? "Enviando..." : "Enviar link para restablecer contraseña"}
           </button>
           <p className="text-xs text-gray-500 dark:text-gray-400 text-center">
-            Recibirás un link en tu correo para entrar sin contraseña.
+            Recibirás un link en tu correo para definir una contraseña nueva.
           </p>
         </form>
       )}
@@ -150,8 +164,8 @@ export function LoginForm() {
         className="w-full text-center text-xs text-indigo-600 dark:text-indigo-400 hover:underline underline-offset-2"
       >
         {mode === "password"
-          ? "¿Olvidaste tu contraseña? Inicia sesión sin contraseña"
-          : "← Volver a iniciar con contraseña"}
+          ? "¿Olvidaste tu contraseña?"
+          : "← Volver a iniciar sesión"}
       </button>
     </div>
   );
