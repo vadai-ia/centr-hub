@@ -76,13 +76,21 @@ export interface UpdateCustomerInput {
   ctx: OutboundContext;
   contactId: UUID;
   shopifyCustomerId: string;
+  /**
+   * SOLO campos escalares del customer. La dirección NO va aquí: el
+   * PUT de customer con un `addresses[]` sin `id` APENDA una dirección
+   * nueva en vez de actualizar la existente (Shopify la trata como
+   * alta). La sincronización de dirección vive en
+   * `syncCustomerDefaultAddress` (endpoint dedicado por `address_id`).
+   * Ver ERRORES.md "Edición de dirección desde la plataforma duplicaba
+   * la dirección en Shopify".
+   */
   fields: Partial<{
     first_name: string | null;
     last_name: string | null;
     email: string | null;
     phone: string | null;
     note: string | null;
-    addresses: Array<Record<string, unknown>>;
   }>;
 }
 
@@ -109,6 +117,140 @@ export async function updateCustomer(input: UpdateCustomerInput): Promise<void> 
     entityId: input.contactId,
     payload: { shopify_customer_id: input.shopifyCustomerId },
   });
+}
+
+// ============================================================
+// syncCustomerDefaultAddress — actualización de dirección EN SITIO
+// ============================================================
+
+/** Forma mínima de un Shopify Customer Address que nos interesa. */
+interface ShopifyCustomerAddress {
+  id: number | string;
+  default?: boolean;
+  [key: string]: unknown;
+}
+
+export interface SyncCustomerAddressInput {
+  ctx: OutboundContext;
+  contactId: UUID;
+  shopifyCustomerId: string;
+  /**
+   * Dirección del maestro YA mapeada al Address de Shopify
+   * (`structuredAddressToShopify` — claves canónicas + country_code/
+   * province_code). Si es null/vacía → no-op (este fix NO borra; vaciar
+   * la dirección en el maestro queda fuera de alcance — gap R3 conocido,
+   * ver ERRORES.md).
+   */
+  address: Record<string, string> | null;
+}
+
+export interface SyncCustomerAddressResult {
+  action: "updated" | "created" | "skipped";
+  addressId: string | null;
+}
+
+/**
+ * Sincroniza la dirección del maestro a Shopify ACTUALIZANDO la
+ * dirección predeterminada existente por su `address_id`, resuelto
+ * vía GET en el momento (no se confía en un id guardado localmente —
+ * `parseStoredAddress` lo descarta y los contactos nacidos en la
+ * plataforma nunca lo tuvieron).
+ *
+ * Camino correcto del contrato de Shopify (la causa del bug de
+ * duplicación era usar el array `addresses` del PUT de customer):
+ *   - Existe dirección (default o, si no hay default marcada, la
+ *     primera) → `PUT /customers/{id}/addresses/{address_id}.json`
+ *     (actualiza EN SITIO, no crea).
+ *   - No existe ninguna → `POST /customers/{id}/addresses.json` +
+ *     `PUT .../addresses/{new_id}/default.json` (alta + marca default).
+ *
+ * R11 (anti-bucle): `markOutboundWrite` ANTES de escribir; el eco
+ * `customers/update` que Shopify emite cae en la ventana de 30s del
+ * marker (mismo contacto) y se descarta en M3 (`discardIfOwnEcho`).
+ *
+ * Idempotente: un retry de Inngest re-GETea, encuentra la default ya
+ * actualizada y la re-escribe con el mismo valor (sin duplicar).
+ */
+export async function syncCustomerDefaultAddress(
+  input: SyncCustomerAddressInput,
+): Promise<SyncCustomerAddressResult> {
+  if (!input.address || Object.keys(input.address).length === 0) {
+    return { action: "skipped", addressId: null };
+  }
+  await ensureOutboundAllowed(input.ctx.organizationId);
+  await markOutboundWrite({
+    contactId: input.contactId,
+    source: PLATFORM_ORIGIN_MARKER,
+  });
+
+  // 1. Resolver el address_id objetivo desde Shopify (la default, o la
+  //    primera si no hay default marcada — así nunca creamos duplicado
+  //    cuando ya existe una dirección).
+  const fetched = await shopifyRest<{
+    customer?: {
+      default_address?: ShopifyCustomerAddress | null;
+      addresses?: ShopifyCustomerAddress[] | null;
+    };
+  }>(input.ctx, "GET", `/customers/${input.shopifyCustomerId}.json`);
+  const customer = fetched.customer;
+  const addresses = customer?.addresses ?? [];
+  const target =
+    customer?.default_address ?? (addresses.length > 0 ? addresses[0] : null);
+
+  if (target?.id) {
+    const addressId = String(target.id);
+    await shopifyRest(
+      input.ctx,
+      "PUT",
+      `/customers/${input.shopifyCustomerId}/addresses/${addressId}.json`,
+      { address: { id: Number(addressId), ...input.address } },
+    );
+    await recordAuditEvent({
+      actorUserId: null,
+      eventType: "shopify_customer_address_synced_outbound",
+      entityType: "contact",
+      entityId: input.contactId,
+      payload: {
+        shopify_customer_id: input.shopifyCustomerId,
+        address_id: addressId,
+        action: "updated",
+      },
+    });
+    return { action: "updated", addressId };
+  }
+
+  // 2. No hay ninguna dirección → alta + marca como default.
+  const created = await shopifyRest<{
+    customer_address?: { id: number | string };
+  }>(
+    input.ctx,
+    "POST",
+    `/customers/${input.shopifyCustomerId}/addresses.json`,
+    { address: input.address },
+  );
+  const newId = created?.customer_address?.id
+    ? String(created.customer_address.id)
+    : null;
+  if (newId) {
+    await shopifyRest(
+      input.ctx,
+      "PUT",
+      `/customers/${input.shopifyCustomerId}/addresses/${newId}/default.json`,
+      {},
+    );
+  }
+  await recordAuditEvent({
+    actorUserId: null,
+    eventType: "shopify_customer_address_synced_outbound",
+    entityType: "contact",
+    entityId: input.contactId,
+    payload: {
+      shopify_customer_id: input.shopifyCustomerId,
+      address_id: newId,
+      action: "created",
+    },
+  });
+  return { action: "created", addressId: newId };
 }
 
 function composeNoteWithMarker(existingNote: string | null): string | null {

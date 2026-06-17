@@ -7,6 +7,7 @@ import {
 import { withTenantContext } from "@/lib/tenant/context";
 import {
   updateCustomer,
+  syncCustomerDefaultAddress,
   BackfillSuppressedError,
 } from "@/lib/shopify/outbound";
 import { ShopifyApiError } from "@/lib/shopify/admin-client";
@@ -23,12 +24,16 @@ import { parseStoredAddress, structuredAddressToShopify } from "@/lib/contacts/a
  * worker:
  *   1. Verifica que la org no esté en backfill (la función outbound
  *      ya lo hace internamente — re-verificamos para abortar barato).
- *   2. Llama a `updateCustomer` con los campos editables (firstName,
- *      lastName, email, phone, note). El address se omite por ahora
- *      porque el shape jsonb del maestro no corresponde directamente
- *      con el shape `addresses[]` que Shopify espera — la traducción
- *      formal queda para un milestone futuro (Centr no lo pidió en M6).
- *   3. Si falla con error retriable (429, 5xx) → throw para que
+ *   2. Llama a `updateCustomer` con los campos escalares editables
+ *      (firstName, lastName, email, phone, note).
+ *   3. Sincroniza la dirección por separado con
+ *      `syncCustomerDefaultAddress` (endpoint dedicado por `address_id`).
+ *      NO se manda en el array `addresses[]` del PUT de customer: eso
+ *      apendaba una dirección nueva en vez de actualizar la existente
+ *      (Shopify lo trata como alta → duplicado). Ver ERRORES.md
+ *      "Edición de dirección desde la plataforma duplicaba la dirección
+ *      en Shopify".
+ *   4. Si falla con error retriable (429, 5xx) → throw para que
  *      Inngest reintente. Si no es retriable → audit log + return.
  *
  * Defensa anti-bucle (R11): `updateCustomer` invoca `markOutboundWrite`
@@ -89,8 +94,8 @@ export const shopifyOutboundContactUpdate = inngest.createFunction(
         const { first, last } = splitName(fullName);
 
         // Mapea la dirección estructurada del maestro al Address de
-        // Shopify (claves coinciden). Si está vacía → no se manda
-        // `addresses` (no se pisa la dirección existente en Shopify).
+        // Shopify (claves coinciden). Si está vacía → null → la sync de
+        // dirección es no-op (no se pisa la dirección existente).
         const shopifyAddress = structuredAddressToShopify(
           parseStoredAddress(address),
           phone,
@@ -107,8 +112,15 @@ export const shopifyOutboundContactUpdate = inngest.createFunction(
               email,
               phone,
               note: internalNote,
-              ...(shopifyAddress ? { addresses: [shopifyAddress] } : {}),
             },
+          });
+          // Dirección por su propio recurso (address_id resuelto vía
+          // GET) — NUNCA en el array del PUT de customer (apendaría).
+          await syncCustomerDefaultAddress({
+            ctx: { organizationId: envelope.organizationId, shopDomain },
+            contactId: envelope.contactId,
+            shopifyCustomerId,
+            address: shopifyAddress,
           });
           return { contactId: envelope.contactId, shopifyCustomerId };
         } catch (e) {
