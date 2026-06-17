@@ -365,6 +365,14 @@ Documentado al cerrar M9.2 (junio 2026). La pantalla **Admin → Usuarios** gest
 
 Gina y Pepe ya existen como `memberships` con atribuciones reales pero su fila `auth.users` es un placeholder insertado por SQL crudo. "Vincular login" (1) repara la fila vía el RPC 0028, (2) le fija el email real con `updateUserById` (mismo `user_id`), (3) envía el link de definir contraseña. Como las FKs cuelgan de `membership.id`/`user_id` (que NO cambian), las opps/órdenes atribuidas quedan intactas. **NUNCA** se invita a Gina/Pepe como usuario nuevo (crearía un asesor duplicado y huérfanaría sus atribuciones).
 
+### Correo de vendedor — campo editable permanente (fix junio 2026)
+
+El correo **no es un campo de perfil** — vive solo en `auth.users.email` (es la credencial de login); no hay columna de email en `memberships`/`user_profiles`. El modal Editar usuario lo muestra **siempre visible y editable**, vía `updateUserEmailAction` ([lib/actions/admin-users.ts](lib/actions/admin-users.ts)) que ramifica por estado de la fila auth y SIN tocar el `user_id` (atribución intacta):
+- **placeholder** (fila cruda no cargable): repara con el RPC 0028 y fija el email → pasa a "pendiente". Es la misma mecánica que "Vincular login".
+- **pending/active**: `updateUserById({ email, email_confirm: true })` (cambio inmediato, sin doble confirmación). Un usuario YA activo iniciará sesión con el correo nuevo — no se invalida su sesión (el RLS depende de `organization_id`, no del email); el admin le comunica el correo nuevo (operativo, no técnico).
+- Valida formato (Zod `.email()`) y rechaza **duplicados** (otro `auth.user` con ese correo) por el error de GoTrue. El correo no puede quedar vacío.
+- **No envía email automáticamente:** el envío del acceso queda como acción explícita ("Reenviar"/"Invitar"). Flujo del cliente: el admin escribe el correo real cuando Centr lo entregue, guarda, y desde ahí manda la invitación. Audit `user_email_updated`.
+
 ### Reasignación manual de oportunidades marcada como manual (no la pisan los hooks)
 
 La reasignación manual (detalle de opp, y el flujo de desactivación) pasa por el núcleo compartido `lib/services/opportunity-reassignment.ts`, que emite el audit `opportunity_reassigned` con `actor_user_id` no nulo — exactamente lo que la guarda del hook `reattribute_postventa_child_advisor` (0022) detecta para NO pisar. La F1 de Venta además está protegida por la regla "solo NULL" (0023): un valor no-NULL (incluida la reasignación manual) nunca se sobrescribe, ni por los hooks de `orders/*` ni por la reconciliación horaria. El guard estático `tests/manual-reassignment-guard-contract.test.ts` asierta que ambos lados (TS que emite, SQL que detecta) siguen hablando el mismo evento — si alguien cambia un string sin el otro, CI falla. **NO** cambiar el string del evento en un lado sin el otro.

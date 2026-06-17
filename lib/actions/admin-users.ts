@@ -162,6 +162,104 @@ export async function updateUserProfileAction(
   );
 }
 
+const emailSchema = z.object({
+  membershipId: z.string().uuid(),
+  email: z.string().trim().email("Email inválido."),
+});
+
+/**
+ * Edita el correo (credencial de login) de un usuario gestionable. El
+ * correo NO es un campo de perfil — vive en `auth.users`, así que se
+ * sincroniza con GoTrue. Ramifica por estado de la fila auth:
+ *   - placeholder (fila cruda no cargable): la repara (migración 0028) y
+ *     le fija el email → pasa a "pendiente"; el admin envía el acceso con
+ *     "Reenviar".
+ *   - pending/active: fija el email vía `updateUserById` (email_confirm),
+ *     SIN tocar el `user_id` → atribución intacta. Un usuario ya activo
+ *     iniciará sesión con el correo nuevo (no se invalida su sesión: el
+ *     RLS depende de organization_id, no del email).
+ * Valida formato (Zod) y rechaza duplicados (otro usuario con ese correo,
+ * detectado por el error de GoTrue). No envía ningún email: el envío del
+ * acceso queda como acción explícita ("Reenviar"/"Invitar").
+ */
+export async function updateUserEmailAction(
+  raw: unknown,
+): Promise<UsersActionResult> {
+  const parsed = emailSchema.safeParse(raw);
+  if (!parsed.success) {
+    return {
+      ok: false,
+      message: parsed.error.issues[0]?.message ?? "Datos inválidos.",
+    };
+  }
+  const admin = await resolveAdmin();
+  if (!admin.ok) return admin;
+
+  const email = parsed.data.email.toLowerCase();
+
+  return withTenantContext(
+    admin.ctx.orgId,
+    async () => {
+      const memberships = await listManageableMemberships(admin.ctx.orgId);
+      const target = memberships.find((m) => m.id === parsed.data.membershipId);
+      if (!target) {
+        return { ok: false, message: "El usuario ya no existe en la organización." };
+      }
+
+      const info = await getAuthUserInfo(target.user_id);
+      // Idempotente: ya tiene exactamente ese correo → nada que hacer.
+      if (!info.loadError && info.email?.toLowerCase() === email) {
+        const users = await buildManagedUsers(admin.ctx.orgId, admin.ctx.userId);
+        return { ok: true, users };
+      }
+
+      // Fila cruda (placeholder) no cargable → repararla antes de editar.
+      if (info.loadError) {
+        try {
+          await repairAuthUserTokens(target.user_id);
+        } catch (e) {
+          return {
+            ok: false,
+            message:
+              "No se pudo reparar la cuenta de auth. ¿Aplicaste la migración 0028? " +
+              (e instanceof Error ? `Detalle: ${e.message}` : ""),
+          };
+        }
+      }
+
+      const setEmail = await setAuthUserEmail(
+        target.user_id,
+        email,
+        target.profile.full_name,
+      );
+      if (!setEmail.ok) {
+        const dup = /already|registered|exists|duplicate|in use/i.test(
+          setEmail.message,
+        );
+        return {
+          ok: false,
+          message: dup
+            ? "Ese correo ya está en uso por otra cuenta. Usa un correo distinto."
+            : `No se pudo actualizar el correo: ${setEmail.message}`,
+        };
+      }
+
+      await recordAuditEvent({
+        actorUserId: admin.ctx.userId,
+        eventType: "user_email_updated",
+        entityType: "membership",
+        entityId: target.id,
+        payload: { user_id: target.user_id, new_email: email },
+      });
+
+      revalidatePath("/admin/usuarios");
+      const users = await buildManagedUsers(admin.ctx.orgId, admin.ctx.userId);
+      return { ok: true, users };
+    },
+    { source: "user_session" },
+  );
+}
+
 const roleSchema = z.object({
   membershipId: z.string().uuid(),
   // V1: solo admin y vendedor son asignables desde la UI.

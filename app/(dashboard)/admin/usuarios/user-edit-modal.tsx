@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import {
+  updateUserEmailAction,
   updateUserProfileAction,
   updateUserRoleAction,
 } from "@/lib/actions/admin-users";
@@ -23,6 +24,7 @@ const HEX = /^#[0-9A-Fa-f]{6}$/;
  */
 export function UserEditModal({ open, user, onClose, onSaved }: Props) {
   const [fullName, setFullName] = useState("");
+  const [email, setEmail] = useState("");
   const [color, setColor] = useState("#6B7280");
   const [role, setRole] = useState<"admin" | "vendedor">("vendedor");
   const [submitting, setSubmitting] = useState(false);
@@ -32,6 +34,7 @@ export function UserEditModal({ open, user, onClose, onSaved }: Props) {
   useEffect(() => {
     if (!open || !user) return;
     setFullName(user.fullName);
+    setEmail(user.email ?? "");
     setColor(HEX.test(user.color) ? user.color : "#6B7280");
     setRole(user.role === "admin" ? "admin" : "vendedor");
     setError(null);
@@ -58,11 +61,32 @@ export function UserEditModal({ open, user, onClose, onSaved }: Props) {
     setSubmitting(true);
     setError(null);
 
+    const emailTrimmed = email.trim();
+    const emailChanged =
+      emailTrimmed.toLowerCase() !== (user.email ?? "").toLowerCase();
     const nameOrColorChanged =
       fullName.trim() !== user.fullName || color !== user.color;
     const roleChanged = !roleLocked && role !== user.role;
 
     let latest: ManagedUserView[] | null = null;
+
+    if (emailChanged) {
+      if (!emailTrimmed) {
+        setSubmitting(false);
+        setError("El correo no puede quedar vacío (es el acceso del usuario).");
+        return;
+      }
+      const res = await updateUserEmailAction({
+        membershipId: user.membershipId,
+        email: emailTrimmed,
+      });
+      if (!res.ok) {
+        setSubmitting(false);
+        setError(res.message);
+        return;
+      }
+      latest = res.users;
+    }
 
     if (roleChanged) {
       const res = await updateUserRoleAction({
@@ -119,11 +143,6 @@ export function UserEditModal({ open, user, onClose, onSaved }: Props) {
         >
           Editar usuario
         </p>
-        {user.email && (
-          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-            {user.email}
-          </p>
-        )}
 
         <form onSubmit={handleSubmit} className="mt-4 space-y-4">
           <label className="block">
@@ -138,6 +157,27 @@ export function UserEditModal({ open, user, onClose, onSaved }: Props) {
               maxLength={120}
               className="w-full rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-700 text-sm px-2 py-1.5 text-gray-900 dark:text-gray-100"
             />
+          </label>
+
+          <label className="block">
+            <span className="block text-xs font-medium text-gray-600 dark:text-gray-300 mb-1">
+              Correo (acceso / login)
+            </span>
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              disabled={submitting}
+              autoComplete="off"
+              spellCheck={false}
+              placeholder="nombre@correo.com"
+              className="w-full rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-700 text-sm px-2 py-1.5 text-gray-900 dark:text-gray-100"
+            />
+            <span className="block text-xs text-gray-400 dark:text-gray-500 mt-1">
+              {user.loginStatus === "active"
+                ? "Si lo cambias, el vendedor deberá iniciar sesión con el correo nuevo (avísale)."
+                : "Escribe el correo real del vendedor y luego envíale el acceso con “Reenviar”."}
+            </span>
           </label>
 
           <div>
