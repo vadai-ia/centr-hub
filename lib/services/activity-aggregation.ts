@@ -11,9 +11,11 @@ import type { UUID } from "@/lib/types/database";
  *   - Mi Día: widget "Clientes silenciosos".
  *
  * Se calcula por AGREGACIÓN de señales reales de plataforma:
- *   último cambio de etapa, última tarea (creada/completada), última
- *   nota / actividad, última orden (creada/pagada en Shopify), última
- *   reasignación manual. NUNCA desde el último mensaje de Whaapy
+ *   último cambio de etapa, última tarea COMPLETADA (no la creación — que
+ *   el sistema/regla cree una tarea NO es seguimiento humano; solo
+ *   completarla cuenta), última nota / actividad, última orden
+ *   (creada/pagada en Shopify), última reasignación manual. NUNCA desde el
+ *   último mensaje de Whaapy
  *   (`contacts.last_whaapy_activity_at`) — los mensajes no se sincronizan
  *   y "estancada en la plataforma" es lo operativamente útil (CLAUDE.md +
  *   prompt M1v2). El widget detecta oportunidades sin acción reciente.
@@ -57,7 +59,7 @@ export async function lastPlatformActivityForOpportunities(
       .limit(ROW_CAP),
     supabase
       .from("tasks")
-      .select("opportunity_id, created_at, completed_at")
+      .select("opportunity_id, completed_at")
       .eq("organization_id", organizationId)
       .in("opportunity_id", ids)
       .limit(ROW_CAP),
@@ -75,12 +77,12 @@ export async function lastPlatformActivityForOpportunities(
   for (const r of (stages.data ?? []) as Array<{ opportunity_id: UUID | null; changed_at: string }>) {
     bump(out, r.opportunity_id, r.changed_at);
   }
+  // Solo COMPLETADO cuenta como actividad — la creación de la tarea (sobre
+  // todo las automáticas de reglas) NO resetea el reloj de "silencioso".
   for (const r of (tasks.data ?? []) as Array<{
     opportunity_id: UUID | null;
-    created_at: string;
     completed_at: string | null;
   }>) {
-    bump(out, r.opportunity_id, r.created_at);
     bump(out, r.opportunity_id, r.completed_at);
   }
   for (const r of (acts.data ?? []) as Array<{ opportunity_id: UUID | null; created_at: string }>) {
@@ -121,7 +123,7 @@ export async function lastPlatformActivityForContacts(
   const [tasks, acts, orders] = await Promise.all([
     supabase
       .from("tasks")
-      .select("contact_id, opportunity_id, created_at, completed_at")
+      .select("contact_id, completed_at")
       .eq("organization_id", organizationId)
       .in("contact_id", ids)
       .limit(ROW_CAP),
@@ -142,12 +144,11 @@ export async function lastPlatformActivityForContacts(
   if (acts.error) throw acts.error;
   if (orders.error) throw orders.error;
 
+  // Solo COMPLETADO cuenta — la creación de tarea no resetea "silencioso".
   for (const r of (tasks.data ?? []) as Array<{
     contact_id: UUID | null;
-    created_at: string;
     completed_at: string | null;
   }>) {
-    bump(out, r.contact_id, r.created_at);
     bump(out, r.contact_id, r.completed_at);
   }
   for (const r of (acts.data ?? []) as Array<{ contact_id: UUID | null; created_at: string }>) {

@@ -7,6 +7,7 @@ import {
   hasOpenRuleTask,
   hasRecentlyCompletedRuleTask,
   hasOpenRuleNotification,
+  hasRecentlyClosedRuleNotification,
   countRuleExecutionsSince,
 } from "@/lib/db/automation";
 import {
@@ -397,6 +398,19 @@ async function applyRuleToSubject(
         contactId: subject.contactId ?? null,
       })
     : false;
+  // Cooldown de re-insistencia para avisos: tras atender (completar o
+  // descartar) un aviso de esta regla para este sujeto, no se regenera
+  // hasta que transcurra el período propio de la regla. Evita ruido
+  // repetido en la campanita.
+  const recentlyClosedNotif =
+    hasNotify && cooldownSinceIso
+      ? await hasRecentlyClosedRuleNotification({
+          ruleId: rule.id,
+          opportunityId: subject.opportunityId ?? null,
+          contactId: subject.contactId ?? null,
+          sinceIso: cooldownSinceIso,
+        })
+      : false;
 
   for (const action of actions) {
     if (action.type === "create_task") {
@@ -448,6 +462,10 @@ async function applyRuleToSubject(
         skipped.push("notify_advisor:already_open");
         continue;
       }
+      if (recentlyClosedNotif) {
+        skipped.push("notify_advisor:cooldown");
+        continue;
+      }
       const advisorUserId = subject.advisorMembershipId
         ? await getMembershipUserId(subject.advisorMembershipId)
         : null;
@@ -460,6 +478,10 @@ async function applyRuleToSubject(
     } else if (action.type === "notify_admin") {
       if (openNotif) {
         skipped.push("notify_admin:already_open");
+        continue;
+      }
+      if (recentlyClosedNotif) {
+        skipped.push("notify_admin:cooldown");
         continue;
       }
       for (const adminId of adminUserIds) {

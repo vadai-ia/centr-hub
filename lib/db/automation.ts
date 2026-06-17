@@ -163,6 +163,37 @@ export async function hasOpenRuleNotification(input: {
 }
 
 /**
+ * Cooldown de re-insistencia (notify_*): ¿esta regla CERRÓ un aviso
+ * (completed|dismissed) para este sujeto en/después de `sinceIso`? Análogo
+ * a `hasRecentlyCompletedRuleTask` pero para avisos — evita que la
+ * campanita se llene de ruido repetido tras atender un aviso. Se ancla a
+ * `updated_at` (en un aviso terminal = su momento de cierre; los avisos
+ * cerrados ya no se vuelven a tocar) porque "dismissed" no estampa
+ * `completed_at`. `sinceIso = now - thresholdHours` (período propio de la regla).
+ */
+export async function hasRecentlyClosedRuleNotification(input: {
+  ruleId: UUID;
+  opportunityId?: UUID | null;
+  contactId?: UUID | null;
+  sinceIso: string;
+}): Promise<boolean> {
+  const { supabase, organizationId } = getTenantScopedClient();
+  let query = supabase
+    .from("notifications")
+    .select("id", { count: "exact", head: true })
+    .eq("organization_id", organizationId)
+    .eq("origin", "rule")
+    .eq("origin_reference->>rule_id", input.ruleId)
+    .in("status", ["completed", "dismissed"])
+    .gte("updated_at", input.sinceIso);
+  if (input.opportunityId) query = query.eq("opportunity_id", input.opportunityId);
+  else if (input.contactId) query = query.eq("contact_id", input.contactId);
+  const { count, error } = await query;
+  if (error) throw error;
+  return (count ?? 0) > 0;
+}
+
+/**
  * Circuit breaker: cuántas ejecuciones registró una regla desde `sinceIso`.
  * Si excede el umbral por tick/hora, el motor la desactiva con alerta.
  */
