@@ -103,28 +103,31 @@ export function DashboardScreen({
 
   return (
     <div className="space-y-5">
-      <div className="flex items-baseline justify-between gap-3 flex-wrap">
-        <h1 className="text-xl font-semibold text-gray-900 dark:text-gray-50">Dashboard</h1>
-        <p className="text-sm text-gray-400 dark:text-gray-500">
+      <h1 className="text-xl font-semibold text-gray-900 dark:text-gray-50">Dashboard</h1>
+
+      {/* Metas del mes — avance del mes en curso, NO responde a los filtros. */}
+      {goals && <DashboardGoals view={goals} />}
+
+      {/* Filtros: justo encima de los KPIs de Venta/Post-venta (que sí
+          responden a periodo/asesor), para que su alcance quede claro. */}
+      <div className="space-y-2">
+        <p className="text-right text-sm text-gray-400 dark:text-gray-500">
           {data.period.startLabel} al {data.period.endLabel}
         </p>
+        <DashboardToolbar
+          filters={filters}
+          isAdmin={initial.isAdmin}
+          advisors={advisors}
+          pending={isPending}
+          customError={customError}
+          onPresetChange={onPresetChange}
+          onCustomApply={(customFrom, customTo) =>
+            fetchWith({ ...filters, preset: "custom", customFrom, customTo })
+          }
+          onAdvisorChange={(advisor) => fetchWith({ ...filters, advisor })}
+          onExport={() => setExportOpen(true)}
+        />
       </div>
-
-      <DashboardToolbar
-        filters={filters}
-        isAdmin={initial.isAdmin}
-        advisors={advisors}
-        pending={isPending}
-        customError={customError}
-        onPresetChange={onPresetChange}
-        onCustomApply={(customFrom, customTo) =>
-          fetchWith({ ...filters, preset: "custom", customFrom, customTo })
-        }
-        onAdvisorChange={(advisor) => fetchWith({ ...filters, advisor })}
-        onExport={() => setExportOpen(true)}
-      />
-
-      {goals && <DashboardGoals view={goals} />}
 
       <DashboardVenta m={data.venta} breakdown={data.ventaBreakdown} />
       <DashboardPostventa m={data.postventa} breakdown={data.postventaBreakdown} />
