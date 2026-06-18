@@ -7,7 +7,9 @@ import {
   type DashboardLoadOk,
 } from "@/lib/actions/dashboard";
 import { resolveCustomPeriod } from "@/lib/time/period";
+import type { DashboardGoalsView } from "@/lib/actions/dashboard-goals";
 import { DashboardToolbar } from "./dashboard-toolbar";
+import { DashboardGoals } from "./dashboard-goals";
 import { DashboardVenta } from "./dashboard-venta";
 import { DashboardPostventa } from "./dashboard-postventa";
 import { DashboardExportModal } from "./dashboard-export-modal";
@@ -27,9 +29,11 @@ interface Toast {
  */
 export function DashboardScreen({
   initial,
+  goals,
   orgName,
 }: {
   initial: DashboardLoadOk;
+  goals: DashboardGoalsView | null;
   orgName: string;
 }) {
   const [filters, setFilters] = useState<DashboardFiltersInput>(() => ({
@@ -119,6 +123,8 @@ export function DashboardScreen({
         onAdvisorChange={(advisor) => fetchWith({ ...filters, advisor })}
         onExport={() => setExportOpen(true)}
       />
+
+      {goals && <DashboardGoals view={goals} />}
 
       <DashboardVenta m={data.venta} breakdown={data.ventaBreakdown} />
       <DashboardPostventa m={data.postventa} breakdown={data.postventaBreakdown} />

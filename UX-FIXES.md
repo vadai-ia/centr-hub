@@ -132,3 +132,17 @@ Cada entrada documenta UN ajuste pendiente con la siguiente estructura:
 - **Issue detectado:** la pantalla quedó funcional con un layout de tarjetas-fila simple (badges de rol/estado/login, botones de acción inline) consistente con el resto del admin (etapas/mapeo-tags), responsive y dark-mode OK. Pendiente de F7: armonizar densidad/espaciados de las filas con el sistema de diseño final, revisar el wrap de los botones de acción en breakpoints intermedios, y los color-pickers de los modales (paleta de invitar + input de color del editar) para que sigan el patrón visual definitivo.
 - **Sub-sesión de F7 sugerida:** D (admin) — junto con etapas/motivos/mapeo-tags.
 - **Severidad:** baja — no bloquea operación; es pulido de consistencia visual.
+
+### Metas (M2v2) — paleta semántica del semáforo a re-tokenizar a marca
+
+- **Componente o pantalla:** `components/metas/goal-progress-bar.tsx` + `app/globals.css` (oro metálico), pantalla Dashboard (`dashboard-goals.tsx`), Admin → Metas (`metas-screen.tsx`) y widget Mi Día.
+- **Issue detectado / decisión aplicada:** el semáforo de metas usa colores semánticos hardcodeados en Tailwind (rose/amber/emerald = rojo/amarillo/verde) + un **oro metálico** para sobrecumplimiento (gradiente cilíndrico + barrido de luz diagonal en `globals.css`). Construido con `ui-ux-pro-max` (bullet/performance-vs-target) y ya pulido (incl. fix dark-mode del track). **Pendiente F7:** cuando se definan los tokens de marca Centr (blanco/negro + amarillo `#FFD400`), revisar que el rojo/amarillo/verde del semáforo y el oro no choquen con el amarillo de marca; re-tokenizar si hace falta. La identidad ya existe; F7 la alinea.
+- **Sub-sesión de F7 sugerida:** B (dashboard) + C (componentes) + D (admin); depende de los tokens de B.
+- **Severidad:** baja — polish ya entregado; F7 solo re-tokeniza a marca.
+
+### Histórico de Metas (M2v2) — dropdown de meses no cierra al click afuera
+
+- **Componente o pantalla:** `app/(dashboard)/admin/metas/metas-screen.tsx` — `MonthSelect` (selector multi-mes del histórico, `<details>/<summary>`).
+- **Issue detectado:** el selector multi-mes usa `<details>/<summary>` (sin JS de outside-click), así que queda abierto hasta volver a tocar el summary. Funcional, accesible y simple (sin deps), pero un popover que cierre al perder foco / click afuera sería más pulido. Mismo patrón aplicaría al selector de sujetos del Dashboard si se migra de chips a dropdown.
+- **Sub-sesión de F7 sugerida:** D (admin/configuración).
+- **Severidad:** baja.

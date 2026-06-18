@@ -1,7 +1,9 @@
 import { loadMiDiaAction } from "@/lib/actions/mi-dia";
 import { loadMiDiaAdminExtrasAction } from "@/lib/actions/mi-dia-admin";
+import { loadMyGoalProgress } from "@/lib/actions/dashboard-goals";
 import { getSession } from "@/lib/auth/session";
 import type { MiDiaAdminExtras } from "@/lib/services/mi-dia-admin";
+import type { VendorGoalProgress } from "@/lib/services/goal-progress";
 import { MiDiaScreen } from "./mi-dia-screen";
 
 // M1v2 — Bloques B + C + D. Mi Día: el vendedor concentra su trabajo del
@@ -29,6 +31,14 @@ export default async function MiDiaPage() {
     if (ex.ok) adminExtras = ex.extras;
   }
 
+  // El widget "Meta del mes" es solo para vendedores (un admin no es titular
+  // de metas — ve equipo/vendedores en el Dashboard). No cargamos su avance.
+  let goal: VendorGoalProgress | null = null;
+  if (!isAdmin) {
+    const goalRes = await loadMyGoalProgress();
+    goal = goalRes.ok ? goalRes.data : null;
+  }
+
   return (
     <MiDiaScreen
       initialData={res.data}
@@ -36,6 +46,7 @@ export default async function MiDiaPage() {
       userId={userId}
       isAdmin={isAdmin}
       initialAdminExtras={adminExtras}
+      goal={goal}
     />
   );
 }

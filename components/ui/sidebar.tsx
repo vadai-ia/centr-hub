@@ -3,9 +3,9 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { Role } from "@/lib/types/database";
 
-// Alcance V1 (M7.2, Bloque 1). Mi Día, Reglas, Metas, Umbrales y
-// Branding se posponen a V2: ocultos de la nav. Sus rutas redirigen
-// limpio a /pipeline si se fuerza la URL directa.
+// Mi Día, Reglas y Metas ya están en la nav. M2v2 plegó "Umbrales" dentro de
+// la pestaña Metas (su ruta placeholder se eliminó). Branding sigue pospuesto
+// a V2: oculto de la nav y su ruta redirige limpio a /pipeline.
 const VENDOR_TABS = [
   { href: "/mi-dia", label: "Mi Día" },
   { href: "/pipeline", label: "Pipeline" },
@@ -19,6 +19,7 @@ const ADMIN_PAGES = [
   { href: "/admin/motivos", label: "Motivos de pérdida" },
   { href: "/admin/mapeo-tags", label: "Mapeo de tags" },
   { href: "/admin/reglas", label: "Reglas" },
+  { href: "/admin/metas", label: "Metas" },
   { href: "/admin/usuarios", label: "Usuarios" },
 ] as const;
 

@@ -189,6 +189,8 @@ Toda entrada NUEVA sigue este mismo formato condensado — **solo la lección ac
 - **Inngest v4:** `EventSchemas` desapareció; `createFunction(opts, handler)` (2 args) con `triggers: [{event}]`; `event.data` es `unknown` → castear explícito (productor único). `retries` es union de literales 0..20 — aliasear `type InngestRetries = 0|...|20`.
 - **`vi.mock` se hoistea a module-top** aunque esté dentro de una función → pierde el closure. Declararlo a module-top del archivo de test con la instancia `fake` como `const` arriba; el helper solo exporta la clase reutilizable.
 - **Dependencias del dashboard:** "documentado en la doctrina" ≠ instalado — verificar `package.json` real. Usar **`exceljs`** (mantenido) en lugar de `xlsx`/SheetJS (deprecado + advisories en npm). No correr `npm audit fix --force` (rompe el stack fijado).
+- **Zod v4 (4.4.x):** `invalid_type_error`/`required_error` se eliminaron del constructor (`z.number({...})`) → usar `{ error }` o pasar el mensaje en `.refine()/.min()` (forma string sigue válida). `z.string().uuid()` valida **RFC 4122 estricto** (nibble de versión 1-8 + variante 8/9/a/b): UUIDs de prueba tipo `11111111-1111-1111-1111-111111111111` son RECHAZADOS — los fixtures de test deben usar UUIDs válidos (`…-4xxx-8xxx-…`), si no `safeParse` falla y el test verifica la rama equivocada.
+- **`"use server"` SÍ puede exportar `type`/`interface`** (se borran en compilación; el check solo aplica a exports en runtime). Solo los VALORES no-función rompen el build (un `const` objeto). Patrón vivo: `lib/actions/dashboard.ts` exporta interfaces + actions y compila.
 
 ## Dashboard y KPIs (fechas reales de Shopify, win rate)
 
@@ -231,6 +233,10 @@ Toda entrada NUEVA sigue este mismo formato condensado — **solo la lección ac
 ### Tooltips de KPI clipeados por `overflow-hidden`
 - **Causa raíz:** `overflow-hidden` en la tarjeta (para redondear barra de acento) recorta cualquier popover hijo que desborde.
 - **Regla:** lograr el redondeo con `rounded-xl` sobre background tintado (no requiere `overflow-hidden`) o portalizar el popover. Tooltip local mínimo (`<button>` enfocable + estado local + `role="tooltip"` + `aria-describedby`, texto estático) — CLAUDE.md prohíbe deps sin aprobación, no hace falta Radix.
+
+### Track de barra (semáforo de metas M2v2) invisible en dark sobre tarjetas slate-800
+- **Causa raíz:** el track usaba `dark:bg-slate-800`, idéntico al fondo de la tarjeta contenedora → la porción VACÍA de la barra desaparecía en dark mode (solo se veía el relleno).
+- **Regla:** el fondo de un elemento (track, chip, input) debe contrastar con la SUPERFICIE donde vive, no solo "ser un neutro". Para barras sobre tarjetas slate-800: `bg-slate-200 dark:bg-slate-700`. Probar componentes reutilizables en AMBOS modos sobre su superficie real, no en aislamiento (un swatch sobre fondo blanco oculta el bug).
 
 ## Motor de Reglas y Mi Día (M1v2)
 

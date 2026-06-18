@@ -1,6 +1,9 @@
 "use client";
 import type { ReactNode } from "react";
 import type { MiDiaSilentClient, MiDiaWeekDay } from "@/lib/services/mi-dia";
+import type { VendorGoalProgress } from "@/lib/services/goal-progress";
+import { GoalEmptyState, GoalProgressBar } from "@/components/metas/goal-progress-bar";
+import { formatGoalValueShort, GOAL_METRIC_SHORT } from "@/lib/metas/schema";
 import { IconFlame } from "./mi-dia-icons";
 
 const DAY_INITIAL = ["D", "L", "M", "M", "J", "V", "S"];
@@ -10,11 +13,16 @@ export function MiDiaSidebar({
   silentClients,
   week,
   streak,
+  goal,
+  showGoal,
   onView,
 }: {
   silentClients: MiDiaSilentClient[];
   week: MiDiaWeekDay[];
   streak: number;
+  goal: VendorGoalProgress | null;
+  /** Solo vendedores ven el widget "Meta del mes" (los admin no son titulares). */
+  showGoal: boolean;
   onView: (contactId: string) => void;
 }) {
   return (
@@ -60,11 +68,26 @@ export function MiDiaSidebar({
         <WeekHistogram week={week} />
       </Widget>
 
+      {showGoal && (
       <Widget title="Meta del mes">
-        <div className="flex items-center justify-center rounded-xl border border-dashed border-slate-200 bg-slate-50/60 py-5 text-center text-xs font-medium text-slate-400 dark:border-slate-700 dark:bg-slate-900/40">
-          Disponible pronto
-        </div>
+        {goal && goal.goals.length > 0 ? (
+          <div className="space-y-4">
+            {goal.goals.map((g) => (
+              <GoalProgressBar
+                key={g.goalId}
+                pct={g.pct}
+                thresholds={goal.thresholds}
+                title={GOAL_METRIC_SHORT[g.metric]}
+                valueLabel={`${formatGoalValueShort(g.metric, g.achieved)} / ${formatGoalValueShort(g.metric, g.target)}`}
+                size="sm"
+              />
+            ))}
+          </div>
+        ) : (
+          <GoalEmptyState hint="Sin meta asignada" size="sm" />
+        )}
       </Widget>
+      )}
     </div>
   );
 }

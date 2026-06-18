@@ -58,12 +58,41 @@ import type {
  * diferencia es la contribución del usuario sistema Histórico.
  */
 
-type Scope = UUID | null | "all";
+export type Scope = UUID | null | "all";
 
 function matchScope(advisorId: UUID | null, scope: Scope): boolean {
   if (scope === "all") return true;
   if (scope === null) return advisorId === null;
   return advisorId === scope;
+}
+
+/** Las 3 métricas de meta (M2v2) para un scope. */
+export interface ScopeAchievement {
+  quotes: number; // cotizaciones enviadas (draft opps creadas en el periodo)
+  won: number; // oportunidades ganadas
+  amount: number; // monto vendido (orders pagadas)
+}
+
+/**
+ * Tally de las TRES métricas de meta para un scope, desde las MISMAS fuentes
+ * que el Dashboard. Definición ÚNICA de "qué cuenta como cotización / ganada
+ * / monto": la usan `computeVentaMetrics` (KPIs del Dashboard) y
+ * `computeGoalAchievement` (avance de metas), así no pueden divergir. Si esta
+ * definición cambia, ambos lados se mueven juntos.
+ */
+export function tallyAchievement(
+  paidOrders: VentaRaw["paidOrders"],
+  draftOpps: VentaRaw["draftOpps"],
+  wonOpps: VentaRaw["wonOpps"],
+  scope: Scope,
+): ScopeAchievement {
+  let amount = 0;
+  for (const o of paidOrders) {
+    if (matchScope(o.assigned_advisor_id, scope)) amount += Number(o.total_amount);
+  }
+  const quotes = draftOpps.filter((d) => matchScope(d.assigned_advisor_id, scope)).length;
+  const won = wonOpps.filter((w) => matchScope(w.assigned_advisor_id, scope)).length;
+  return { quotes, won, amount };
 }
 
 function amountOf(row: { actual_amount: string | null; estimated_amount: string | null }): number {
@@ -184,21 +213,23 @@ async function fetchVentaRaw(period: ResolvedPeriod): Promise<VentaRaw> {
 export function computeVentaMetrics(raw: VentaRaw, scope: Scope): VentaMetrics {
   const { boundaries } = raw;
 
-  // KPI1 Revenue + serie por mes.
+  // KPI1 Revenue + KPI2 Cotizaciones — tally compartido con las metas
+  // (tallyAchievement = definición única de monto/cotizaciones/ganadas).
+  const tally = tallyAchievement(raw.paidOrders, raw.draftOpps, raw.wonOpps, scope);
+  const revenue = tally.amount;
+  const quotesSent = tally.quotes;
+
+  // Serie de revenue por mes (bucketización; el total ya vino del tally).
   const monthRevenue = emptyMonths(raw.period);
-  let revenue = 0;
   for (const o of raw.paidOrders) {
     if (!matchScope(o.assigned_advisor_id, scope)) continue;
-    const amt = Number(o.total_amount);
-    revenue += amt;
     if (o.paid_at) {
       const key = monthKeyInTz(o.paid_at);
-      if (monthRevenue.has(key)) monthRevenue.set(key, monthRevenue.get(key)! + amt);
+      if (monthRevenue.has(key)) {
+        monthRevenue.set(key, monthRevenue.get(key)! + Number(o.total_amount));
+      }
     }
   }
-
-  // KPI2 Cotizaciones enviadas.
-  const quotesSent = raw.draftOpps.filter((d) => matchScope(d.assigned_advisor_id, scope)).length;
 
   // Pipeline $ EN EL PERIODO (bruto) — opps vivas CREADAS en el periodo
   // (responde al filtro de fecha).
@@ -246,7 +277,7 @@ export function computeVentaMetrics(raw: VentaRaw, scope: Scope): VentaMetrics {
 
   // KPI6 Ganadas + KPI12 Sales cycle.
   const wonScoped = raw.wonOpps.filter((w) => matchScope(w.assigned_advisor_id, scope));
-  const wonCount = wonScoped.length;
+  const wonCount = tally.won; // == wonScoped.length (misma definición vía tally)
   const cycleDays: number[] = [];
   for (const w of wonScoped) {
     // Sales cycle = de la creación REAL (effective_created_at: Draft
@@ -322,6 +353,30 @@ export function computeVentaMetrics(raw: VentaRaw, scope: Scope): VentaMetrics {
     revenueByMonth: monthsToSeries(monthRevenue),
     wonVsLost: { won: wonCount, lost: lostCount },
   };
+}
+
+// ============================================================
+// Avance de metas (M2v2) — reuso de fuentes, sin recomputar
+// ============================================================
+
+/**
+ * Las 3 métricas de meta por scope para un periodo (el mes en curso),
+ * reusando las MISMAS fuentes del Dashboard (cancelled_at, effective_created_at,
+ * draft-not-null, won_at, paid+paid_at viven en esas queries). LEAN: solo las
+ * 3 consultas necesarias — NO trae pipeline/historial/postventa como
+ * `computeDashboardData`, así Mi Día y el Dashboard pagan poco por las barras.
+ * Devuelve un arreglo alineado con `scopes`.
+ */
+export async function computeGoalAchievement(
+  period: ResolvedPeriod,
+  scopes: Scope[],
+): Promise<ScopeAchievement[]> {
+  const [paidOrders, draftOpps, wonOpps] = await Promise.all([
+    listPaidOrdersInPeriod(period.startUtc, period.endUtc),
+    listDraftOppsCreatedInPeriod(period.startUtc, period.endUtc),
+    listWonOppsInPeriod(period.startUtc, period.endUtc),
+  ]);
+  return scopes.map((s) => tallyAchievement(paidOrders, draftOpps, wonOpps, s));
 }
 
 // ============================================================

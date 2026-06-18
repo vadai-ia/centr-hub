@@ -13,6 +13,7 @@ import { MiDiaUnassigned } from "./mi-dia-unassigned";
 import { MiDiaAdminTeam } from "./mi-dia-admin-team";
 import { loadMiDiaAdminExtrasAction } from "@/lib/actions/mi-dia-admin";
 import type { MiDiaAdminExtras } from "@/lib/services/mi-dia-admin";
+import type { VendorGoalProgress } from "@/lib/services/goal-progress";
 import { IconSun } from "./mi-dia-icons";
 
 interface Props {
@@ -21,6 +22,7 @@ interface Props {
   userId: string;
   isAdmin: boolean;
   initialAdminExtras: MiDiaAdminExtras | null;
+  goal: VendorGoalProgress | null;
 }
 
 export type SnoozeOption = "1h" | "3h" | "tomorrow";
@@ -33,6 +35,7 @@ export function MiDiaScreen({
   userId,
   isAdmin,
   initialAdminExtras,
+  goal,
 }: Props) {
   const router = useRouter();
   const [data, setData] = useState(initialData);
@@ -272,6 +275,8 @@ export function MiDiaScreen({
             silentClients={data.silentClients}
             week={data.week}
             streak={data.streak}
+            goal={goal}
+            showGoal={!isAdmin}
             onView={(contactId) => router.push(`/contactos/${contactId}`)}
           />
         </aside>

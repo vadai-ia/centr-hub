@@ -64,6 +64,49 @@ export function resolvePresetPeriod(preset: PeriodPreset): ResolvedPeriod {
   return toResolved(start, todayEnd);
 }
 
+/**
+ * Periodo = MES EN CURSO en America/Mexico_City (M2v2 metas). Del 1° al
+ * último día del mes; el avance de metas se reinicia el día 1 a las 00:00
+ * MX. Independiente del filtro de periodo del Dashboard — las metas SIEMPRE
+ * miden el mes corriente. Inclusivo en ambos extremos (mismos límites que
+ * los presets, vía toResolved).
+ */
+export function resolveCurrentMonthPeriod(): ResolvedPeriod {
+  const now = nowInTz();
+  return toResolved(now.startOf("month"), now.endOf("month"));
+}
+
+/** Clave del mes en curso (`yyyy-MM`) en MX. Para labels y period_month. */
+export function currentMonthKey(): string {
+  return nowInTz().toFormat("yyyy-MM");
+}
+
+/**
+ * Periodo del MES ANTERIOR en MX — el que acaba de cerrar. Lo usa el cron de
+ * snapshot mensual (corre el día 1): al dispararse, "el mes pasado" es el
+ * periodo a congelar. Maneja el cruce de año (1-ene → diciembre previo).
+ */
+export function resolvePreviousMonthPeriod(): ResolvedPeriod {
+  const prev = nowInTz().minus({ months: 1 });
+  return toResolved(prev.startOf("month"), prev.endOf("month"));
+}
+
+/** Primer día (`yyyy-MM-dd`, MX) del mes anterior — valor de `period_month`. */
+export function previousMonthDateKey(): string {
+  return nowInTz().minus({ months: 1 }).startOf("month").toFormat("yyyy-MM-dd");
+}
+
+/**
+ * Periodo de un mes ARBITRARIO (`yyyy-MM`) en MX — del 1° al último día.
+ * Para snapshots manuales/correctivos de un mes específico. `null` si la
+ * clave no es válida.
+ */
+export function resolveMonthPeriod(monthKey: string): ResolvedPeriod | null {
+  const dt = DateTime.fromFormat(monthKey, "yyyy-MM", { zone: TIMEZONE });
+  if (!dt.isValid) return null;
+  return toResolved(dt.startOf("month"), dt.endOf("month"));
+}
+
 export interface CustomPeriodValid {
   ok: true;
   period: ResolvedPeriod;

@@ -79,3 +79,82 @@ body {
 .centr-scrollbar {
   scrollbar-width: thin;
 }
+
+/* ---------------------------------------------------------------
+ * Oro metálico del semáforo de metas (M2v2 — Bloque 0).
+ *
+ * El sobrecumplimiento (>100%) se pinta como ORO PULIDO, no amarillo
+ * plano: sombreado cilíndrico (luz arriba, sombra abajo) + reflejos a
+ * lo largo + un BRILLO DIAGONAL que barre la superficie simulando luz
+ * sobre metal (como medallas / insignias premium). Debe leerse
+ * inconfundiblemente como "oro/trofeo", distinto del amarillo "en
+ * camino". El barrido respeta `prefers-reduced-motion` (con movimiento
+ * reducido queda el metálico estático, sin animación).
+ * --------------------------------------------------------------- */
+.goal-gold-surface {
+  background-image:
+    /* reflejos suaves a lo largo de la barra */
+    linear-gradient(
+      90deg,
+      rgba(255, 255, 255, 0) 0%,
+      rgba(255, 255, 255, 0.3) 28%,
+      rgba(255, 255, 255, 0) 46%,
+      rgba(255, 255, 255, 0.18) 72%,
+      rgba(255, 255, 255, 0) 100%
+    ),
+    /* cuerpo cilíndrico del metal: brillo arriba → sombra abajo */
+    linear-gradient(
+      180deg,
+      #fffbeb 0%,
+      #fcd34d 16%,
+      #f59e0b 48%,
+      #b45309 84%,
+      #92400e 100%
+    );
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.7),
+    inset 0 -1px 2px rgba(120, 53, 15, 0.55);
+}
+
+/* Resplandor dorado alrededor del track cuando se superó la meta. */
+.goal-gold-glow {
+  box-shadow:
+    0 0 12px -1px rgba(245, 158, 11, 0.65),
+    0 0 4px rgba(245, 158, 11, 0.45);
+}
+
+/* Barrido de luz diagonal (glare) sobre la superficie dorada. */
+.goal-gold-sheen {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 45%;
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0) 0%,
+    rgba(255, 255, 255, 0.85) 50%,
+    rgba(255, 255, 255, 0) 100%
+  );
+  filter: blur(1.5px);
+  transform: translateX(-160%) skewX(-20deg);
+  opacity: 0;
+  pointer-events: none;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .goal-gold-sheen {
+    opacity: 1;
+    animation: goal-gold-sheen 3s ease-in-out infinite;
+  }
+}
+@keyframes goal-gold-sheen {
+  0% {
+    transform: translateX(-160%) skewX(-20deg);
+  }
+  55% {
+    transform: translateX(340%) skewX(-20deg);
+  }
+  100% {
+    transform: translateX(340%) skewX(-20deg);
+  }
+}

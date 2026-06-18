@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/auth/session";
 import { loadDashboardAction } from "@/lib/actions/dashboard";
+import { loadDashboardGoals } from "@/lib/actions/dashboard-goals";
 import { DEFAULT_DASHBOARD_FILTERS } from "@/lib/actions/dashboard-defaults";
 import { DashboardScreen } from "./dashboard-screen";
 import { DashboardErrorScreen } from "./dashboard-error-screen";
@@ -21,7 +22,10 @@ export default async function DashboardPage() {
     redirect("/login");
   }
 
-  const initial = await loadDashboardAction(DEFAULT_DASHBOARD_FILTERS);
+  const [initial, goals] = await Promise.all([
+    loadDashboardAction(DEFAULT_DASHBOARD_FILTERS),
+    loadDashboardGoals(),
+  ]);
   if (!initial.ok) {
     return <DashboardErrorScreen message={initial.message} />;
   }
@@ -31,6 +35,7 @@ export default async function DashboardPage() {
       // Remonta al cambiar de org (mismo patrón que el pipeline M5).
       key={session.data.activeOrg.id}
       initial={initial}
+      goals={goals.ok ? goals.view : null}
       orgName={session.data.activeOrg.name}
     />
   );
