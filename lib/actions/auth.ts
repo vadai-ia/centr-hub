@@ -59,7 +59,18 @@ export async function requestPasswordReset(
   );
 
   if (error) {
-    return { error: "No se pudo enviar el email. Intenta más tarde." };
+    // resetPasswordForEmail NO devuelve error cuando el correo no existe
+    // (Supabase ya protege contra enumeración respondiendo ok). Un error
+    // aquí es operativo real (rate limit del SMTP built-in de Supabase
+    // Free, redirect_to no permitido, SMTP mal configurado) → mostrarlo
+    // para poder diagnosticar, no esconderlo tras un genérico.
+    console.error("[requestPasswordReset] resetPasswordForEmail failed", error);
+    const rate = /rate limit|too many|over_email_send_rate/i.test(error.message);
+    return {
+      error: rate
+        ? "Límite de envío de correos alcanzado (SMTP de Supabase Free). Espera ~1 h o configura SMTP propio."
+        : `No se pudo enviar el email: ${error.message}`,
+    };
   }
 
   return {
