@@ -148,6 +148,26 @@ export async function listPostventaChildOppIdsForReconcile(): Promise<UUID[]> {
 }
 
 /**
+ * Opps de Post-venta ACTIVAS (cancelled_at IS NULL) para el cron del motor
+ * de transiciones (M3v2). El driver `applyPostventaTransition` decide por
+ * cada una si mover (y es no-op para las que ya están en su etapa correcta
+ * o en el sumidero "Caso problemático"). En la PRIMERA corrida cubre el
+ * backfill de las opps históricas que llevan en "Cotización completada"
+ * desde el arranque.
+ */
+export async function listActivePostventaOppIds(): Promise<UUID[]> {
+  const { supabase, organizationId } = getTenantScopedClient();
+  const { data, error } = await supabase
+    .from("opportunities")
+    .select("id")
+    .eq("organization_id", organizationId)
+    .eq("funnel", "post_venta")
+    .is("cancelled_at", null);
+  if (error) throw error;
+  return (data ?? []).map((r) => (r as { id: UUID }).id);
+}
+
+/**
  * Resuelve el id de la hija de Post-venta de una F1 dada (su
  * `parent_opportunity_id`). El trigger F1→F2 crea como máximo una hija
  * por F1 (guard `child_already_exists`), así que ≤1 fila. Incluye
@@ -295,6 +315,9 @@ export interface KanbanOpportunity {
   last_modified_at: string;
   last_modified_source: string;
   cancelled_at: string | null;
+  resolved_at: string | null;
+  resolved_by_user_id: UUID | null;
+  resolution_note: string | null;
   contact: KanbanContactEmbed | null;
 }
 
@@ -315,6 +338,9 @@ const KANBAN_OPPORTUNITY_SELECT = `
   last_modified_at,
   last_modified_source,
   cancelled_at,
+  resolved_at,
+  resolved_by_user_id,
+  resolution_note,
   contact:contacts!inner (
     id,
     full_name,
@@ -366,6 +392,12 @@ export async function listKanbanOpportunities(opts: {
    *  de cierre `>= sinceIso` (o NULL — antigüedad desconocida no se
    *  oculta). Se omite para etapas activas y para "Ver cerradas". */
   closedFilter?: { column: "won_at" | "lost_at"; sinceIso: string } | null;
+  /** Archivo de casos de Post-venta (M3v2). "active" (default) excluye
+   *  los resueltos (resolved_at IS NULL); "resolved" muestra SOLO los
+   *  resueltos+archivados (resolved_at IS NOT NULL) — vista "Casos
+   *  resueltos". Un caso resuelto se queda en "Caso problemático" pero
+   *  se archiva de las vistas activas. */
+  resolvedScope?: "active" | "resolved";
 }): Promise<KanbanOpportunity[]> {
   const { supabase, organizationId } = getTenantScopedClient();
 
@@ -386,6 +418,13 @@ export async function listKanbanOpportunities(opts: {
     .eq("funnel", opts.funnel)
     .eq("stage_id", opts.stageId)
     .is("cancelled_at", null);
+
+  // Archivo de casos resueltos: por default oculta los resueltos.
+  if (opts.resolvedScope === "resolved") {
+    query = query.not("resolved_at", "is", null);
+  } else {
+    query = query.is("resolved_at", null);
+  }
 
   if (opts.assignedAdvisorId !== undefined) {
     if (opts.assignedAdvisorId === null) {
@@ -465,6 +504,9 @@ export async function countKanbanOpportunitiesByStage(opts: {
     wonStageIds: UUID[];
     lostStageIds: UUID[];
   };
+  /** Igual que en listKanbanOpportunities: "active" (default) excluye
+   *  resueltos; "resolved" cuenta solo los resueltos. */
+  resolvedScope?: "active" | "resolved";
 }): Promise<{ counts: Record<UUID, number>; hiddenCounts: Record<UUID, number> }> {
   const { supabase, organizationId } = getTenantScopedClient();
 
@@ -485,6 +527,12 @@ export async function countKanbanOpportunitiesByStage(opts: {
     .eq("organization_id", organizationId)
     .eq("funnel", opts.funnel)
     .is("cancelled_at", null);
+
+  if (opts.resolvedScope === "resolved") {
+    query = query.not("resolved_at", "is", null);
+  } else {
+    query = query.is("resolved_at", null);
+  }
 
   if (opts.assignedAdvisorId !== undefined) {
     if (opts.assignedAdvisorId === null) {

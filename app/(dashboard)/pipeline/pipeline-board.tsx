@@ -147,6 +147,9 @@ export function PipelineBoard({
     advisorId: null,
     query: "",
   });
+  // Vista "Casos resueltos" (solo Post-venta): muestra el archivo de casos
+  // cerrados en vez del pipeline activo. Se resetea al cambiar de funnel.
+  const [resolvedView, setResolvedView] = useState(false);
 
   const [advisors] = useState(initial.advisors);
   const [lossReasons] = useState(initial.lossReasons);
@@ -191,6 +194,14 @@ export function PipelineBoard({
         return;
       }
       const opp = res.opportunity;
+      // Archivo de casos: la vista activa no muestra resueltos y la vista
+      // "Casos resueltos" solo muestra resueltos. Si una opp cruza esa
+      // frontera (ej. se resolvió en otro tab), se saca de la vista actual.
+      const isResolved = opp.resolved_at !== null;
+      if (resolvedView !== isResolved) {
+        setCardsByStage((cur) => removeOppById(cur, oppId));
+        return;
+      }
       // Si la opp dejó de matchear el filtro de advisor del usuario,
       // la quitamos silenciosamente del tablero.
       if (effectiveAdvisorId === null && opp.assigned_advisor_id !== null) {
@@ -228,7 +239,7 @@ export function PipelineBoard({
       }
       setCardsByStage((cur) => upsertOpp(cur, opp, stagesById));
     },
-    [effectiveAdvisorId, stagesById, pushToast],
+    [effectiveAdvisorId, stagesById, pushToast, resolvedView],
   );
 
   // Aplica un PipelineInitialState al estado local — usado por
@@ -255,10 +266,10 @@ export function PipelineBoard({
     const res = await loadInitialPipelineState({
       funnel,
       unassignedFilter: isAdmin && unassignedFilter,
-      filters: filtersToPayload(filters),
+      filters: filtersToPayload(filters, resolvedView),
     });
     if (res.ok) applyState(res.state, false);
-  }, [applyState, funnel, isAdmin, unassignedFilter, filters]);
+  }, [applyState, funnel, isAdmin, unassignedFilter, filters, resolvedView]);
 
   const realtimeStatus: RealtimeStatus = usePipelineRealtime({
     organizationId,
@@ -282,10 +293,13 @@ export function PipelineBoard({
   async function changeFunnel(next: Funnel) {
     if (next === funnel) return;
     setFunnel(next);
+    // "Casos resueltos" es exclusivo de Post-venta: al salir, se apaga.
+    const nextResolvedView = next === "post_venta" ? resolvedView : false;
+    setResolvedView(nextResolvedView);
     const res = await loadInitialPipelineState({
       funnel: next,
       unassignedFilter: isAdmin && unassignedFilter,
-      filters: filtersToPayload(filters),
+      filters: filtersToPayload(filters, nextResolvedView),
     });
     if (res.ok) applyState(res.state, true);
   }
@@ -295,7 +309,7 @@ export function PipelineBoard({
     const res = await loadInitialPipelineState({
       funnel,
       unassignedFilter: isAdmin && next,
-      filters: filtersToPayload(filters),
+      filters: filtersToPayload(filters, resolvedView),
     });
     if (res.ok) applyState(res.state, true);
   }
@@ -305,14 +319,24 @@ export function PipelineBoard({
     const res = await loadInitialPipelineState({
       funnel,
       unassignedFilter: isAdmin && unassignedFilter,
-      filters: filtersToPayload(next),
+      filters: filtersToPayload(next, resolvedView),
+    });
+    if (res.ok) applyState(res.state, true);
+  }
+
+  async function changeResolvedView(next: boolean) {
+    setResolvedView(next);
+    const res = await loadInitialPipelineState({
+      funnel,
+      unassignedFilter: isAdmin && unassignedFilter,
+      filters: filtersToPayload(filters, next),
     });
     if (res.ok) applyState(res.state, true);
   }
 
   // ----- Paginación por columna -----
   async function loadMoreForStage(stage: PipelineStageRow, page: number) {
-    const payload = filtersToPayload(filters);
+    const payload = filtersToPayload(filters, resolvedView);
     const res = await loadKanbanPageAction({
       funnel,
       stageId: stage.id,
@@ -322,6 +346,7 @@ export function PipelineBoard({
       dateTo: payload.dateTo,
       query: payload.query,
       showClosed: showClosedByStage.has(stage.id),
+      resolvedScope: payload.resolvedScope,
     });
     if (!res.ok) {
       pushToast(res.message, "error");
@@ -341,7 +366,7 @@ export function PipelineBoard({
   // primera página de esa etapa con/sin el filtro de ocultar.
   async function toggleClosedForStage(stage: PipelineStageRow) {
     const willShow = !showClosedByStage.has(stage.id);
-    const payload = filtersToPayload(filters);
+    const payload = filtersToPayload(filters, resolvedView);
     const res = await loadKanbanPageAction({
       funnel,
       stageId: stage.id,
@@ -351,6 +376,7 @@ export function PipelineBoard({
       dateTo: payload.dateTo,
       query: payload.query,
       showClosed: willShow,
+      resolvedScope: payload.resolvedScope,
     });
     if (!res.ok) {
       pushToast(res.message, "error");
@@ -379,7 +405,7 @@ export function PipelineBoard({
     const state = await loadInitialPipelineState({
       funnel,
       unassignedFilter: isAdmin && unassignedFilter,
-      filters: filtersToPayload(filters),
+      filters: filtersToPayload(filters, resolvedView),
     });
     if (state.ok) applyState(state.state, false);
     pushToast(`Las cerradas se ocultan tras ${res.days} día(s).`, "success");
@@ -524,6 +550,8 @@ export function PipelineBoard({
         onFunnelChange={changeFunnel}
         onUnassignedToggle={changeUnassignedFilter}
         onHideClosedDaysChange={changeHideClosedDays}
+        resolvedView={resolvedView}
+        onResolvedViewToggle={changeResolvedView}
       />
 
       <PipelineFiltersBar
@@ -589,16 +617,21 @@ export function PipelineBoard({
 }
 
 
-function filtersToPayload(filters: ActiveFilters): {
+function filtersToPayload(
+  filters: ActiveFilters,
+  resolvedView: boolean,
+): {
   dateFrom?: string;
   dateTo?: string;
   advisorId?: UUID;
   query?: string;
+  resolvedScope?: "active" | "resolved";
 } {
   return {
     dateFrom: filters.dateFrom ? `${filters.dateFrom}T00:00:00.000Z` : undefined,
     dateTo: filters.dateTo ? `${filters.dateTo}T23:59:59.999Z` : undefined,
     advisorId: filters.advisorId ?? undefined,
     query: filters.query.trim().length > 0 ? filters.query.trim() : undefined,
+    resolvedScope: resolvedView ? "resolved" : undefined,
   };
 }

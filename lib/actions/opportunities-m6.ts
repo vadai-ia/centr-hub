@@ -22,6 +22,8 @@ import {
   updateTask,
 } from "@/lib/db/operational";
 import { getOrganizationById } from "@/lib/db/organizations";
+import { resolvePostventaEngineStages } from "@/lib/services/postventa-transition";
+import { resolvePostventaCase } from "@/lib/services/postventa-case-resolution";
 import type { Role, TaskRow, UUID } from "@/lib/types/database";
 import type { AdvisorOption } from "@/lib/actions/contacts";
 
@@ -70,6 +72,16 @@ export interface OpportunityDialogBundle {
   canReassign: boolean;
   /** Lead + (vendedor asignado o admin) habilita "Crear en Shopify". */
   canCreateInShopify: boolean;
+  /** Post-venta en "Caso problemático" + no resuelto + (asignado o admin):
+   *  habilita "Marcar caso como resuelto" (M3v2 — cierre de caso). */
+  canResolveCase: boolean;
+  /** Si el caso ya está resuelto, su historia de cierre (para mostrarla en
+   *  el detalle aunque esté archivado — sigue consultable). NULL si abierto. */
+  resolution: {
+    resolvedAt: string;
+    resolvedByName: string | null;
+    note: string | null;
+  } | null;
 }
 
 export type LoadOpportunityDialogResult =
@@ -189,6 +201,33 @@ export async function loadOpportunityDetailForDialog(
     // Enriquecer tasks con nombre del usuario asignado en una sola
     // pasada (anti N+1). Usa el set de vendors ya cargado.
     const vendorById = new Map(vendors.map((v) => [v.user_id, v.profile.full_name] as const));
+
+    // Cierre de caso de Post-venta (M3v2). El botón "Marcar como resuelto"
+    // solo aplica a una opp de Post-venta en "Caso problemático" no resuelta,
+    // operable por el asesor asignado o admin. Se resuelve la etapa problema
+    // por id (no por nombre) solo cuando aplica (evita query en Venta).
+    let canResolveCase = false;
+    let resolution: OpportunityDialogBundle["resolution"] = null;
+    if (
+      detail.opportunity.funnel === "post_venta" &&
+      detail.opportunity.resolved_at === null &&
+      canAct
+    ) {
+      const pvStages = await resolvePostventaEngineStages();
+      canResolveCase =
+        !!pvStages &&
+        detail.opportunity.stage_id === pvStages.problematicStage.id;
+    }
+    if (detail.opportunity.resolved_at) {
+      resolution = {
+        resolvedAt: detail.opportunity.resolved_at,
+        resolvedByName: detail.opportunity.resolved_by_user_id
+          ? vendorById.get(detail.opportunity.resolved_by_user_id) ?? null
+          : null,
+        note: detail.opportunity.resolution_note,
+      };
+    }
+
     const taskItems: OpportunityTaskItem[] = tasks.map((t) => ({
       id: t.id,
       title: t.title,
@@ -220,6 +259,8 @@ export async function loadOpportunityDetailForDialog(
           canAct &&
           detail.contact.shopify_customer_id === null &&
           !!detail.contact.phone,
+        canResolveCase,
+        resolution,
         advisors: vendors.map((v) => ({
           membershipId: v.id,
           userId: v.user_id,
@@ -324,6 +365,80 @@ export async function addNoteToOpportunityAction(
         message: e instanceof Error ? e.message : "No se pudo guardar la nota.",
       };
     }
+  }, { source: "user_session" });
+}
+
+// ============================================================
+// Cierre de "Caso problemático" de Post-venta (M3v2)
+// ============================================================
+
+const resolveCaseSchema = z.object({
+  opportunityId: z.string().uuid(),
+  note: z.string().trim().max(2000).optional().or(z.literal("")),
+});
+
+export type ResolveCaseActionResult =
+  | { ok: true; opportunityId: UUID }
+  | {
+      ok: false;
+      reason:
+        | "no_session"
+        | "forbidden"
+        | "invalid_input"
+        | "not_found"
+        | "not_post_venta"
+        | "not_in_problematic"
+        | "already_resolved"
+        | "internal_error";
+      message: string;
+    };
+
+/**
+ * Marca un "Caso problemático" de Post-venta como resuelto (M3v2). Lo
+ * archiva (resolved_at) sin cambiar su etapa; el motor ya no lo toca.
+ * Permitido al asesor asignado de la opp o a un admin.
+ */
+export async function resolvePostventaCaseAction(
+  raw: unknown,
+): Promise<ResolveCaseActionResult> {
+  const parsed = resolveCaseSchema.safeParse(raw);
+  if (!parsed.success) {
+    return { ok: false, reason: "invalid_input", message: "Datos inválidos." };
+  }
+  const session = await getSession();
+  if (session.status !== "ok") {
+    return { ok: false, reason: "no_session", message: "Sesión expirada." };
+  }
+  const orgId = session.data.activeOrg.id;
+  const role = session.data.activeOrg.role;
+  const userId = session.data.userId;
+  const isAdmin = role === "admin" || role === "superadmin";
+  const note =
+    parsed.data.note && parsed.data.note.length > 0 ? parsed.data.note : null;
+
+  return withTenantContext(orgId, async () => {
+    const membership = await getMembership(userId, orgId);
+    const opp = await getOpportunityById(parsed.data.opportunityId);
+    if (!opp) {
+      return { ok: false, reason: "not_found", message: "La oportunidad ya no existe." };
+    }
+    if (!isAdmin && opp.assigned_advisor_id !== membership?.id) {
+      return {
+        ok: false,
+        reason: "forbidden",
+        message: "No tienes acceso a esta oportunidad.",
+      };
+    }
+
+    const result = await resolvePostventaCase({
+      opportunityId: parsed.data.opportunityId,
+      resolvedByUserId: userId,
+      note,
+    });
+    if (!result.ok) {
+      return { ok: false, reason: result.reason, message: result.message };
+    }
+    return { ok: true, opportunityId: parsed.data.opportunityId };
   }, { source: "user_session" });
 }
 

@@ -134,6 +134,9 @@ const loadPageSchema = z.object({
   /** "Ver cerradas": si true, NO aplica el filtro de auto-ocultar para
    *  esta etapa cerrada → trae también las cerradas viejas. */
   showClosed: z.boolean().optional(),
+  /** Vista "Casos resueltos" (Post-venta): "resolved" trae solo los
+   *  casos archivados; default/"active" excluye los resueltos. */
+  resolvedScope: z.enum(["active", "resolved"]).optional(),
 });
 
 /**
@@ -216,6 +219,7 @@ export async function loadKanbanPageAction(
       limit: PIPELINE_PAGE_SIZE + 1,
       offset: input.page * PIPELINE_PAGE_SIZE,
       closedFilter,
+      resolvedScope: input.resolvedScope,
     });
     const hasMore = items.length > PIPELINE_PAGE_SIZE;
     return {
@@ -302,6 +306,9 @@ export interface PipelineFilters {
   advisorId?: UUID;
   /** Búsqueda libre sobre display_reference y contact name/phone. */
   query?: string;
+  /** Vista "Casos resueltos" (Post-venta): "resolved" muestra solo el
+   *  archivo de casos cerrados; default excluye los resueltos. */
+  resolvedScope?: "active" | "resolved";
 }
 
 /**
@@ -345,6 +352,7 @@ export async function loadInitialPipelineState(opts: {
     const filterDateFrom = opts.filters?.dateFrom;
     const filterDateTo = opts.filters?.dateTo;
     const filterQuery = opts.filters?.query;
+    const resolvedScope = opts.filters?.resolvedScope;
 
     // Pre-resolve contact_ids that match the search query ONCE. Both
     // the count query and the per-stage list queries reuse this set
@@ -378,6 +386,7 @@ export async function loadInitialPipelineState(opts: {
         query: filterQuery,
         matchingContactIds,
         closedHide: { cutoffIso, wonStageIds, lostStageIds },
+        resolvedScope,
       }),
       Promise.all(
         activeStages.map(async (stage) => {
@@ -391,6 +400,7 @@ export async function loadInitialPipelineState(opts: {
             matchingContactIds,
             limit: PIPELINE_PAGE_SIZE + 1,
             closedFilter: closedFilterForStage(stage, cutoffIso),
+            resolvedScope,
           });
           return { stageId: stage.id, items };
         }),

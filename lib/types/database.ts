@@ -181,6 +181,14 @@ export interface OpportunityRow {
   // dashboard. Columna GENERADA stored: NO escribible (excluida de
   // Insert/Update). Migración 0025.
   effective_created_at: ISODateString;
+  // Cierre de "Caso problemático" de Post-venta (0032). resolved_at IS
+  // NULL → caso abierto (visible en el pipeline); IS NOT NULL → resuelto
+  // y archivado (fuera de las vistas activas, localizable en "Casos
+  // resueltos"). La etapa NO cambia al resolver (se preserva). Solo
+  // semántica de Post-venta — opps de Venta nunca se resuelven.
+  resolved_at: ISODateString | null;
+  resolved_by_user_id: UUID | null;
+  resolution_note: string | null;
 }
 
 export interface OpportunityLineItemRow {
@@ -447,7 +455,22 @@ export interface Database {
         // queda REQUERIDA en Insert (como orders en 0024): obliga a cada
         // path de inserción a decidir conscientemente la fecha de Shopify
         // (draft → normalized.createdAt; lead R12/manual → null).
-        Insert: Omit<Insertable<OpportunityRow>, "effective_created_at">;
+        // resolved_* (0032) son nullable con default NULL: opcionales en
+        // Insert para no romper los callers V1 (createOpportunity/trigger);
+        // solo el flujo de cierre de caso (M3v2) las escribe.
+        Insert: Omit<
+          Insertable<OpportunityRow>,
+          | "effective_created_at"
+          | "resolved_at"
+          | "resolved_by_user_id"
+          | "resolution_note"
+        > &
+          Partial<
+            Pick<
+              OpportunityRow,
+              "resolved_at" | "resolved_by_user_id" | "resolution_note"
+            >
+          >;
         Update: Omit<Updatable<OpportunityRow>, "effective_created_at">;
       };
       opportunity_line_items: { Row: OpportunityLineItemRow; Insert: Insertable<OpportunityLineItemRow>; Update: Updatable<OpportunityLineItemRow> };

@@ -9,6 +9,7 @@ import { whaapyOutboundFunctions } from "./whaapy-outbound";
 import { shopifyOutboundFunctions } from "./shopify-outbound";
 import { tagReprocessFunctions } from "./tag-reprocess";
 import { advisorReconciliationFunctions } from "./advisor-reconciliation";
+import { postventaTransitionFunctions } from "./postventa-transition-cron";
 import { ruleEvaluationFunctions } from "./rule-evaluation";
 import { goalSnapshotFunctions } from "./goal-snapshot";
 
@@ -30,6 +31,7 @@ export const allFunctions = [
   ...shopifyOutboundFunctions,
   ...tagReprocessFunctions,
   ...advisorReconciliationFunctions,
+  ...postventaTransitionFunctions,
   ...ruleEvaluationFunctions,
   ...goalSnapshotFunctions,
 ];

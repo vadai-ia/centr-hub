@@ -16,6 +16,7 @@ interface Props {
   onCreateTask?: () => void;
   onReassign?: () => void;
   onCreateInShopify?: () => void;
+  onResolveCase?: () => void;
   onTasksChanged?: () => void;
 }
 
@@ -37,6 +38,7 @@ export function OpportunityDialogContent({
   onCreateTask,
   onReassign,
   onCreateInShopify,
+  onResolveCase,
   onTasksChanged,
 }: Props) {
   const { opportunity, stage, contact, lineItems, lossReason } = bundle.detail;
@@ -83,6 +85,11 @@ export function OpportunityDialogContent({
               {opportunity.cancelled_at && (
                 <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-gray-200 text-gray-600 dark:bg-gray-700 dark:text-gray-300">
                   Cancelada
+                </span>
+              )}
+              {bundle.resolution && (
+                <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300">
+                  Resuelto
                 </span>
               )}
               <SystemBadge kind="shopify" active={contact.shopify_customer_id !== null} />
@@ -158,6 +165,25 @@ export function OpportunityDialogContent({
         <OpportunityLossInfo opportunity={opportunity} lossReason={lossReason} />
       )}
 
+      {bundle.resolution && (
+        <div className="rounded-lg border border-emerald-200 dark:border-emerald-500/30 bg-emerald-50/60 dark:bg-emerald-500/5 p-4">
+          <p className="text-sm font-semibold text-emerald-800 dark:text-emerald-300">
+            Caso resuelto
+          </p>
+          <p className="mt-1 text-xs text-emerald-700 dark:text-emerald-400">
+            {formatRelative(bundle.resolution.resolvedAt)}
+            {bundle.resolution.resolvedByName
+              ? ` · por ${bundle.resolution.resolvedByName}`
+              : ""}
+          </p>
+          {bundle.resolution.note && (
+            <p className="mt-2 text-sm text-gray-700 dark:text-gray-200 whitespace-pre-wrap">
+              {bundle.resolution.note}
+            </p>
+          )}
+        </div>
+      )}
+
       <OpportunityLineItems items={lineItems} currency={opportunity.currency} />
 
       <OpportunityTasks
@@ -196,6 +222,15 @@ export function OpportunityDialogContent({
             className="px-3 py-1.5 text-sm font-medium rounded-md bg-emerald-600 text-white hover:bg-emerald-700 transition-colors"
           >
             Crear contacto en Shopify
+          </button>
+        )}
+        {bundle.canResolveCase && (
+          <button
+            type="button"
+            onClick={onResolveCase}
+            className="px-3 py-1.5 text-sm font-medium rounded-md bg-amber-600 text-white hover:bg-amber-700 transition-colors"
+          >
+            Marcar caso como resuelto
           </button>
         )}
         <span className="flex-1" />

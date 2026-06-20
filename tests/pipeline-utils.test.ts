@@ -33,6 +33,9 @@ function makeOpp(overrides: Partial<KanbanOpportunity> = {}): KanbanOpportunity 
     last_modified_at: "2026-05-01T10:00:00.000Z",
     last_modified_source: "shopify",
     cancelled_at: null,
+    resolved_at: null,
+    resolved_by_user_id: null,
+    resolution_note: null,
     contact: {
       id: "contact-1",
       full_name: "Ana Pérez",

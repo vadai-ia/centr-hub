@@ -13,6 +13,7 @@ import { ReassignAdvisorDialog } from "@/components/contacts/reassign-advisor-di
 import { emptyStructuredAddress } from "@/lib/contacts/address";
 import { AddNoteDialog } from "./add-note-dialog";
 import { CreateTaskDialog } from "./create-task-dialog";
+import { ResolveCaseDialog } from "./resolve-case-dialog";
 import { OpportunityDialogContent } from "./opportunity-dialog-content";
 
 interface Props {
@@ -51,6 +52,7 @@ export function OpportunityDialog({ paramName = "opp" }: Props) {
   const [reassignOpen, setReassignOpen] = useState(false);
   const [noteOpen, setNoteOpen] = useState(false);
   const [taskOpen, setTaskOpen] = useState(false);
+  const [resolveOpen, setResolveOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const requestSeq = useRef(0);
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -175,6 +177,7 @@ export function OpportunityDialog({ paramName = "opp" }: Props) {
             onCreateTask={() => setTaskOpen(true)}
             onReassign={() => setReassignOpen(true)}
             onCreateInShopify={() => setShopifyDialogOpen(true)}
+            onResolveCase={() => setResolveOpen(true)}
             onTasksChanged={() => {
               if (oppId) {
                 void loadOpportunityDetailForDialog({ opportunityId: oppId }).then((res) => {
@@ -241,6 +244,21 @@ export function OpportunityDialog({ paramName = "opp" }: Props) {
               if (res.ok) setBundle(res.bundle);
             });
           }
+          router.refresh();
+        }}
+      />
+
+      <ResolveCaseDialog
+        open={resolveOpen}
+        opportunityId={bundle?.detail.opportunity.id ?? null}
+        onCancel={() => setResolveOpen(false)}
+        onSuccess={() => {
+          setResolveOpen(false);
+          setToast("Caso marcado como resuelto.");
+          setTimeout(() => setToast(null), 3500);
+          // El caso resuelto sale del pipeline activo → cerrar el popup y
+          // refrescar el tablero detrás (la card desaparece de la vista activa).
+          closeDialog();
           router.refresh();
         }}
       />

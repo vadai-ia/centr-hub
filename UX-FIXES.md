@@ -146,3 +146,10 @@ Cada entrada documenta UN ajuste pendiente con la siguiente estructura:
 - **Issue detectado:** el selector multi-mes usa `<details>/<summary>` (sin JS de outside-click), así que queda abierto hasta volver a tocar el summary. Funcional, accesible y simple (sin deps), pero un popover que cierre al perder foco / click afuera sería más pulido. Mismo patrón aplicaría al selector de sujetos del Dashboard si se migra de chips a dropdown.
 - **Sub-sesión de F7 sugerida:** D (admin/configuración).
 - **Severidad:** baja.
+
+### Vista "Casos resueltos" reutiliza el kanban — casos en una sola columna (M3v2)
+
+- **Componente o pantalla:** `app/(dashboard)/pipeline/` — toggle "Casos resueltos" (solo Post-venta) del toolbar.
+- **Issue detectado:** la vista de archivo reusa el tablero kanban; como todos los casos resueltos viven en la etapa "Caso problemático", se ven todos apilados en esa columna con el resto de columnas vacías. Es funcional (badge "Resuelto", no arrastrable, búsqueda y detalle con su historia de resolución funcionan), pero una **vista de lista/tabla dedicada** (con fecha de resolución, quién, nota, orden) sería más legible para consultar el archivo que un kanban casi vacío. F7 puede evaluar una sub-vista de lista para `resolvedScope='resolved'`.
+- **Sub-sesión de F7 sugerida:** C (componentes funcionales).
+- **Severidad:** baja.

@@ -381,6 +381,26 @@ La reasignación manual (detalle de opp, y el flujo de desactivación) pasa por 
 
 Un `vendedor` ve solo lo suyo y eso está forzado en la **capa de datos**, no solo ocultando en UI: las actions de pipeline/contactos/dashboard fuerzan `effectiveAdvisorId = membership.id` para no-admins, y los loaders de detalle (`loadOpportunityDetailForDialog`, `loadContactDetail`) verifican que `assigned_advisor_id` coincide con el membership del vendedor antes de devolver datos (si no, audit `*_access_forbidden` + `not_found`, sin filtrar IDs). El layout `app/(dashboard)/admin/*` redirige a no-admins. **NO** exponer una nueva lectura alcanzable por vendedor sin aplicar el mismo scope por asesor.
 
+## Motor de transiciones automáticas de Post-venta (M3v2)
+
+El motor mueve solo las oportunidades de Post-venta por sus 4 primeras etapas según el estado del pedido en Shopify (`orders.financial_status` / `fulfillment_status`), **leyendo la fila `orders` ya persistida** (hereda LWW). Mapeo confirmado por Centr (no cambiar): pago pendiente→Cotización completada, pago pagado→Pago confirmado, preparación en curso (`partial`)→Envío en curso, preparación completa (`fulfilled`)→Entregado. **Precedencia preparación > pago**; `partially_paid` = pendiente; `cancelled`/`refunded`/`partially_refunded` → **Caso problemático** (one-way). Detalle e invariantes en `ERRORES.md` ("Motor de transiciones de Post-venta").
+
+### Pasos operativos obligatorios (NO son código del repo)
+
+1. **Aplicar la migración 0032** (`postventa_case_resolution`) a la BD — agrega `resolved_at`/`resolved_by_user_id`/`resolution_note` a `opportunities` (cierre de "Caso problemático").
+
+2. **Dry-run ANTES del primer backfill real.** La primera corrida del cron mueve TODAS las opps históricas a la vez sobre datos de producción. Revisar primero, sin mover nada:
+   ```
+   npm run maintenance:preview-postventa-transitions -- --org-slug centr
+   ```
+   El preview es read-only y comparte la función de decisión (`decidePostventaStageMove`) con el run real → lo que lista es bit-a-bit lo que ejecutaría. Validar que cada opp en "Cotización completada" caiga en la etapa correcta de su pedido.
+
+3. **Kill switch — habilitar SOLO tras revisar el dry-run.** Los dos puntos de entrada automáticos (cron `postventa-transition-engine-hourly` + hook inline en `orders.ts`) están gateados por `POSTVENTA_ENGINE_ENABLED` (default OFF). Sin `POSTVENTA_ENGINE_ENABLED=true` en Vercel env, el motor no mueve nada — el deploy es seguro. Tras el sign-off del dry-run, setear `POSTVENTA_ENGINE_ENABLED=true` en Vercel y el motor se activa en el siguiente tick. El preview dry-run y el cierre manual de casos NO se gatean (funcionan con el flag en OFF). Durante el backfill de M11 el motor además se suprime por `organizations.backfill_in_progress`.
+
+### Cierre de casos ("Caso problemático" → archivado)
+
+Un caso cancelado/reembolsado aterriza en "Caso problemático" (sumidero del motor). Una persona lo resuelve desde el detalle de la opp (botón "Marcar caso como resuelto", visible solo ahí, para asesor asignado o admin): setea `resolved_at` **sin cambiar la etapa** (flag ortogonal, patrón "cancelado ≠ perdido"). El caso se archiva de las vistas activas pero sigue consultable en la vista "Casos resueltos" (toggle del toolbar, solo Post-venta) y por búsqueda de orden/contacto. Sin reopen en MVP — el flag permite des-setear en V2 si Centr lo pide.
+
 ## Cambios al stack
 
 Cualquier modificación al stack documentado en `package.json` (agregar dependencia, subir versión mayor, cambiar provider externo) requiere aprobación explícita del operador antes de comitearse. Razón: el stack está fijado por experiencias previas (Kibah, FindMed, Hemenesy) y cualquier desviación inesperada introduce riesgo operacional.

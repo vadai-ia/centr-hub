@@ -24,12 +24,17 @@ import {
 } from "@/lib/db/orders";
 import {
   findOpportunityByDraftOrderId,
+  findPostventaChildOpportunityId,
   findVentaOpportunityIdByShopifyOrderId,
 } from "@/lib/db/opportunities";
 import {
   reattributePostventaChildForOrder,
   reattributeVentaOpportunityForOrder,
 } from "@/lib/services/f1-to-f2-trigger";
+import {
+  applyPostventaTransition,
+  isPostventaEngineEnabled,
+} from "@/lib/services/postventa-transition";
 import { recordAuditEvent } from "@/lib/db/operational";
 import type { Json, OrderRow, UUID } from "@/lib/types/database";
 
@@ -247,6 +252,40 @@ async function resolveVentaOpportunityIdForOrder(
   return findVentaOpportunityIdByShopifyOrderId(normalized.shopifyOrderId);
 }
 
+/**
+ * Hook inline del motor de transiciones de Post-venta (M3v2). Resuelve la
+ * hija de Post-venta a partir del pedido (orden → opp de Venta padre →
+ * hija) y la mueve a la etapa que corresponde al estado del pedido.
+ *
+ * Resolución del padre: la opp de Venta espeja `shopify_order_id` (lo
+ * puebla el trigger F1→F2 al ganar). `order.opportunity_id` ya suele
+ * apuntar al padre; fallback por `shopify_order_id`. Sin padre o sin hija
+ * (aún no completó el draft) → no-op silencioso.
+ *
+ * No-fatal por diseño: cualquier fallo se loguea y se traga — la ingesta
+ * del pedido NO debe romperse por el motor, y el cron horario reintenta.
+ */
+async function applyPostventaTransitionForOrder(order: OrderRow): Promise<void> {
+  // Kill switch: el motor automático no mueve nada hasta que el operador
+  // lo habilite tras revisar el dry-run (M3v2).
+  if (!isPostventaEngineEnabled()) return;
+  try {
+    const ventaOppId =
+      order.opportunity_id ??
+      (await findVentaOpportunityIdByShopifyOrderId(order.shopify_order_id));
+    if (!ventaOppId) return;
+    const childId = await findPostventaChildOpportunityId(ventaOppId);
+    if (!childId) return;
+    await applyPostventaTransition(childId);
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error(
+      `postventa-transition inline: order ${order.shopify_order_id} falló:`,
+      (err as Error).message,
+    );
+  }
+}
+
 // ============================================================
 // Topics (6)
 // ============================================================
@@ -331,6 +370,15 @@ function makeOrderWorker(args: {
             source: args.topic,
           });
         }
+
+        // Motor de transiciones de Post-venta (M3v2): mueve la hija de
+        // Post-venta a la etapa que corresponde al estado del pedido
+        // (pago/preparación → etapas 1-4; cancelado/reembolsado → Caso
+        // problemático). Transición INMEDIATA al recibir el webhook; el
+        // cron horario es la red de seguridad. No-fatal: un fallo aquí no
+        // debe romper la ingesta del pedido. El driver respeta
+        // backfill_in_progress por su cuenta.
+        await applyPostventaTransitionForOrder(order);
 
         return { orderId: order.id };
       });

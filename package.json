@@ -29,7 +29,8 @@
     "maintenance:diagnose-advisor-population": "tsx --tsconfig scripts/tsconfig.json scripts/maintenance/diagnose-advisor-population.ts",
     "maintenance:diagnose-users-and-advisors": "tsx --tsconfig scripts/tsconfig.json scripts/maintenance/diagnose-users-and-advisors.ts",
     "maintenance:seed-test-vendor": "tsx --tsconfig scripts/tsconfig.json scripts/maintenance/seed-test-vendor.ts",
-    "maintenance:snapshot-goal-results": "tsx --tsconfig scripts/tsconfig.json scripts/maintenance/snapshot-goal-results.ts"
+    "maintenance:snapshot-goal-results": "tsx --tsconfig scripts/tsconfig.json scripts/maintenance/snapshot-goal-results.ts",
+    "maintenance:preview-postventa-transitions": "tsx --tsconfig scripts/tsconfig.json scripts/maintenance/preview-postventa-transitions.ts"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.1.0",

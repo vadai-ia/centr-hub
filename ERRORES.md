@@ -260,6 +260,22 @@ Toda entrada NUEVA sigue este mismo formato condensado — **solo la lección ac
 - **Causa raíz:** `lastPlatformActivity*` hacía `bump` con `tasks.created_at` Y `completed_at` → que una regla/sistema creara una tarea reseteaba el reloj de "silencioso" sin acción humana.
 - **Regla:** solo `completed_at` cuenta (ahí hubo acción humana). "Última actividad real" excluye los eventos que el SISTEMA genera en nombre del usuario. Verificado que la creación no se cuela por otra vía (registra `audit_log`, no fila en `activities`).
 
+## Motor de transiciones de Post-venta (M3v2)
+
+### El motor lee la fila `orders` persistida, no el payload del webhook
+- **Causa raíz:** evaluar el estado contra el payload reintroduciría lógica de timestamps/LWW y sería vulnerable a webhooks tardíos/desordenados.
+- **Regla:** `evaluatePostventaTarget` (núcleo puro, `lib/services/postventa-engine.ts`) lee la fila `orders` ya reconciliada por LWW (`upsertOrderShell`) → hereda esa protección sin lógica de timestamps propia. Precedencia **preparación > pago**: `fulfillment_status` fulfilled→Entregado, partial→Envío en curso; sin actividad de preparación (unfulfilled/null) → pago: paid→Pago confirmado, pending **y partially_paid**→Cotización completada. `cancelled`/`refunded`/`partially_refunded` → "Caso problemático" (one-way). Estado inesperado → no mover (`none`), registrar.
+
+### "Caso problemático" es un SUMIDERO del motor (avance solo desde la zona 1-4)
+- **Regla:** el driver `applyPostventaTransition` AVANZA solo si la opp está en una de las 4 etapas pago/preparación (la "zona", anclada por nombre con fallback posicional, patrón `dashboard-stages.ts`); el PROBLEM-EXIT (→ Caso problemático) dispara desde cualquier etapa activa excepto la propia Caso problemático. Como Caso problemático **nunca** es origen de avance ni de problem-exit, una opp resuelta+archivada que vive ahí queda intocada SIN chequear `resolved_at` en el driver. Idempotente (solo mueve si la etapa difiere); usa `moveOpportunityStage` con `context='automation'`/`actorUserId=null` (trazable) y **NO toca `assigned_advisor_id`** (R2/R5 intactos). Carrera con movimiento manual → `stale_version` → reintenta el próximo tick. Hook inline en `orders.ts` (no-fatal) + cron horario `postventa-transition-engine-hourly` (red + backfill histórico en la 1ª corrida).
+
+### Un cron de mutación masiva NO debe correr solo al desplegar — kill switch + dry-run
+- **Causa raíz:** un cron horario registrado movería todas las opps históricas en su primer tick tras el deploy, antes de poder revisar el resultado sobre datos de producción.
+- **Regla:** gatear los DOS puntos de entrada automáticos (cron + hook inline) con `POSTVENTA_ENGINE_ENABLED` (default OFF, `isPostventaEngineEnabled()`). Habilitar SOLO tras revisar el preview read-only `npm run maintenance:preview-postventa-transitions` — que comparte la función de decisión `decidePostventaStageMove` con el run real, así "lo que mostraría" es bit-a-bit lo que ejecutaría (anti-deriva). El preview y el cierre manual de casos NO se gatean. El motor también se suprime por `organizations.backfill_in_progress` (modo pasivo M11), guardado dentro del driver (única fuente para hook + cron). **Toda mutación masiva automática nace detrás de un kill switch + dry-run que comparte la decisión con el run real.**
+
+### Cierre de "Caso problemático": flag ortogonal `resolved_at`, etapa preservada (migración 0032)
+- **Regla:** resolver un caso NO mueve la etapa (se queda en Caso problemático para auditoría) — `resolved_at`/`resolved_by_user_id`/`resolution_note` lo **archivan** de las vistas activas (mismo patrón que "cancelado ≠ perdido", 0014). `listKanbanOpportunities`/`countKanbanOpportunitiesByStage` excluyen `resolved_at IS NOT NULL` por default (opt-in `resolvedScope:'resolved'` para la vista "Casos resueltos"). El motor no toca resueltos (viven en el sumidero). Búsqueda por orden/contacto sigue encontrándolos (sin reopen — el flag permite des-setear en V2). Servicio `resolvePostventaCase` (guards: post_venta + en Caso problemático + no resuelto), audit `postventa_case_resolved`, **no toca asesor**. Al sumar `resolved_*` al Row, relajar el Insert de opportunities (`Omit … & Partial<Pick…>`) para no romper callers, y actualizar el SELECT + interfaz `KanbanOpportunity` + fixtures de test (tsc los lista).
+
 ## tag_mappings y atribución
 
 ### tag_mappings huérfano (tag con 0 entidades)

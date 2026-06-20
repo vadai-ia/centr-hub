@@ -40,7 +40,9 @@ export function KanbanCard({
 }: Props) {
   const draggable = useDraggable({
     id: opp.id,
-    disabled: isDraggingDisabled,
+    // Un caso resuelto está archivado: no se arrastra (el motor tampoco lo
+    // toca). Solo se consulta en la vista "Casos resueltos".
+    disabled: isDraggingDisabled || opp.resolved_at !== null,
     data: {
       opportunityId: opp.id,
       fromStageId: opp.stage_id,
@@ -95,6 +97,7 @@ export function KanbanCard({
           {name}
         </p>
         <div className="flex items-center gap-1 flex-shrink-0">
+          {opp.resolved_at && <ResolvedBadge />}
           {pendingTasksCount !== undefined && pendingTasksCount > 0 && (
             <TasksBadge count={pendingTasksCount} />
           )}
@@ -153,6 +156,17 @@ export function KanbanCard({
         </div>
       )}
     </div>
+  );
+}
+
+function ResolvedBadge() {
+  return (
+    <span
+      className="text-[9px] uppercase tracking-wide px-1 py-px rounded font-medium flex-shrink-0 bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300"
+      title="Caso resuelto y archivado"
+    >
+      Resuelto
+    </span>
   );
 }
 

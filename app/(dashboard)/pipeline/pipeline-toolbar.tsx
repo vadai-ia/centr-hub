@@ -18,6 +18,9 @@ interface Props {
   onUnassignedToggle: (enabled: boolean) => void;
   /** Persiste el umbral (solo admin). */
   onHideClosedDaysChange: (days: number) => void | Promise<void>;
+  /** Vista "Casos resueltos" (solo Post-venta). */
+  resolvedView: boolean;
+  onResolvedViewToggle: (enabled: boolean) => void;
 }
 
 /**
@@ -39,6 +42,8 @@ export function PipelineToolbar({
   onFunnelChange,
   onUnassignedToggle,
   onHideClosedDaysChange,
+  resolvedView,
+  onResolvedViewToggle,
 }: Props) {
   const [isPending, startTransition] = useTransition();
   const isAdmin = role === "admin" || role === "superadmin";
@@ -112,6 +117,21 @@ export function PipelineToolbar({
             className="rounded border-gray-300 dark:border-gray-600"
           />
           Solo sin asignar
+        </label>
+      )}
+
+      {funnel === "post_venta" && (
+        <label
+          className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 select-none cursor-pointer"
+          title="Muestra los casos de “Caso problemático” ya resueltos (archivados). Siguen siendo consultables y buscables."
+        >
+          <input
+            type="checkbox"
+            checked={resolvedView}
+            onChange={(e) => onResolvedViewToggle(e.target.checked)}
+            className="rounded border-gray-300 dark:border-gray-600"
+          />
+          Casos resueltos
         </label>
       )}
 
