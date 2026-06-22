@@ -695,6 +695,7 @@ export interface ReopenSearchRow {
   funnel: Funnel;
   stage_id: UUID;
   stage_name: string | null;
+  contact_id: UUID;
   display_reference: string | null;
   shopify_order_id: string | null;
   last_modified_at: string;
@@ -711,6 +712,7 @@ const REOPEN_SEARCH_SELECT = `
   id,
   funnel,
   stage_id,
+  contact_id,
   display_reference,
   shopify_order_id,
   last_modified_at,
@@ -772,6 +774,7 @@ export async function searchOpportunitiesAnyState(opts: {
     funnel: r.funnel,
     stage_id: r.stage_id,
     stage_name: r.stage?.name ?? null,
+    contact_id: r.contact_id,
     display_reference: r.display_reference,
     shopify_order_id: r.shopify_order_id,
     last_modified_at: r.last_modified_at,

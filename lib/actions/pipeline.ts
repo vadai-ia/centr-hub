@@ -11,9 +11,9 @@ import {
   searchContactIdsForQuery,
   searchOpportunitiesAnyState,
   type KanbanOpportunity,
-  type ReopenSearchRow,
 } from "@/lib/db/opportunities";
 import { reopenOpportunityIntoProblemCase } from "@/lib/services/opportunity-reopen";
+import { collapseReopenResults } from "@/lib/services/reopen-search";
 import { listPendingTaskCountsByOpportunity, recordAuditEvent } from "@/lib/db/operational";
 import { listLossReasons, listPipelineStages } from "@/lib/db/pipeline";
 import { getMembership, listActiveRealVendors } from "@/lib/db/users";
@@ -39,7 +39,6 @@ import type {
   MoveStageActionResult,
   PipelineInitialState,
   ReopenOpportunityActionResult,
-  ReopenSearchResultItem,
   SearchOpportunitiesForReopenResult,
 } from "@/lib/types/pipeline";
 
@@ -288,14 +287,6 @@ const searchReopenSchema = z.object({
   query: z.string().min(1).max(200),
 });
 
-function deriveReopenStatusLabel(row: ReopenSearchRow): string {
-  if (row.cancelled_at) return "Cancelada";
-  if (row.resolved_at) return "Resuelto";
-  if (row.won_at) return row.funnel === "venta" ? "Ganada" : "Caso cerrado";
-  if (row.lost_at) return "Perdida";
-  return "Activa";
-}
-
 /**
  * Búsqueda transversal para el botón "+" de reapertura: encuentra opps
  * en CUALQUIER etapa/funnel, incluidas cerradas/canceladas/resueltas.
@@ -329,20 +320,9 @@ export async function searchOpportunitiesForReopenAction(
     const rows = await searchOpportunitiesAnyState({
       query: parsed.data.query,
       assignedAdvisorId,
-      limit: 25,
+      limit: 50,
     });
-    const results: ReopenSearchResultItem[] = rows.map((r) => ({
-      id: r.id,
-      funnel: r.funnel,
-      stageName: r.stage_name,
-      contactName:
-        r.contact?.full_name?.trim() ||
-        r.contact?.phone?.trim() ||
-        "Sin nombre",
-      reference: r.display_reference ?? r.shopify_order_id ?? null,
-      statusLabel: deriveReopenStatusLabel(r),
-      lastModifiedAt: r.last_modified_at,
-    }));
+    const results = collapseReopenResults(rows);
     return { ok: true, results } as const;
   }, { source: "user_session" });
 }

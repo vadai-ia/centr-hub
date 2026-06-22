@@ -19,7 +19,9 @@ import { withTenantContext } from "@/lib/tenant/context";
 import {
   countKanbanOpportunitiesByStage,
   searchOpportunitiesAnyState,
+  type ReopenSearchRow,
 } from "@/lib/db/opportunities";
+import { collapseReopenResults } from "@/lib/services/reopen-search";
 
 const ORG = "org-1";
 const WON = "won-stage";
@@ -139,5 +141,91 @@ describe("searchOpportunitiesAnyState — transversal + scope por asesor (M4v2)"
     );
     const ids = rows.map((r) => r.id).sort();
     expect(ids).toEqual(["o-active", "o-lost", "o-won"].sort());
+  });
+});
+
+describe("collapseReopenResults — una entrada por caso real (M4v2)", () => {
+  const row = (over: Partial<ReopenSearchRow>): ReopenSearchRow => ({
+    id: "x",
+    funnel: "venta",
+    stage_id: "s",
+    stage_name: "Etapa",
+    contact_id: "c-1",
+    display_reference: null,
+    shopify_order_id: null,
+    last_modified_at: "2026-06-01T00:00:00Z",
+    won_at: null,
+    lost_at: null,
+    cancelled_at: null,
+    resolved_at: null,
+    reopened_at: null,
+    assigned_advisor_id: null,
+    contact: { full_name: "Test R12b No Duplica V2", phone: null },
+    ...over,
+  });
+
+  it("colapsa Venta Ganada + su hija Post-venta (mismo contacto+pedido) → 1 entrada Post-venta", () => {
+    const out = collapseReopenResults([
+      row({
+        id: "venta-ganada",
+        funnel: "venta",
+        stage_name: "Ganada",
+        won_at: "2026-04-01T00:00:00Z",
+        display_reference: "#D1016",
+        last_modified_at: "2026-06-03T00:00:00Z",
+      }),
+      row({
+        id: "pv-child",
+        funnel: "post_venta",
+        stage_name: "Cotización completada",
+        display_reference: "#D1016",
+        last_modified_at: "2026-06-02T00:00:00Z",
+      }),
+    ]);
+    expect(out).toHaveLength(1);
+    // Representante = la entidad Post-venta (destino real de la reapertura).
+    expect(out[0].id).toBe("pv-child");
+    expect(out[0].funnel).toBe("post_venta");
+  });
+
+  it("NO colapsa un deal distinto sin pedido del mismo contacto", () => {
+    const out = collapseReopenResults([
+      row({
+        id: "venta-ganada",
+        funnel: "venta",
+        stage_name: "Ganada",
+        won_at: "2026-04-01T00:00:00Z",
+        display_reference: "#D1016",
+        last_modified_at: "2026-06-03T00:00:00Z",
+      }),
+      row({
+        id: "pv-child",
+        funnel: "post_venta",
+        stage_name: "Cotización completada",
+        display_reference: "#D1016",
+        last_modified_at: "2026-06-02T00:00:00Z",
+      }),
+      row({
+        id: "venta-activa",
+        funnel: "venta",
+        stage_name: "Contacto calificado",
+        display_reference: null,
+        shopify_order_id: null,
+        last_modified_at: "2026-06-04T00:00:00Z",
+      }),
+    ]);
+    // 3 opps → 2 casos: el pedido #D1016 (rep. Post-venta) + el deal activo.
+    expect(out).toHaveLength(2);
+    expect(out.map((r) => r.id).sort()).toEqual(["pv-child", "venta-activa"].sort());
+    // Orden por lastModifiedAt desc → el deal activo (más reciente) primero.
+    expect(out[0].id).toBe("venta-activa");
+  });
+
+  it("dos pedidos distintos del mismo contacto → 2 entradas", () => {
+    const out = collapseReopenResults([
+      row({ id: "a", display_reference: "#D1", funnel: "post_venta" }),
+      row({ id: "b", display_reference: "#D2", funnel: "post_venta" }),
+    ]);
+    expect(out).toHaveLength(2);
   });
 });
