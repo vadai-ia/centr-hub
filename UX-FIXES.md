@@ -15,6 +15,13 @@ Cada entrada documenta UN ajuste pendiente con la siguiente estructura:
 
 ## Entradas
 
+### M4v2 — Cierre/reapertura de casos Post-venta: botones y diálogo nuevos a re-tokenizar a marca
+
+- **Componente o pantalla:** `app/(dashboard)/pipeline/kanban-card.tsx` (botón "Caso resuelto" emerald + badge "Reabierto" naranja), `app/(dashboard)/pipeline/kanban-column.tsx` (botón "+" en header de Caso problemático), `app/(dashboard)/pipeline/reopen-case-dialog.tsx` (diálogo de búsqueda + `StatusChip` con paleta por estado).
+- **Issue detectado:** la UI nueva de M4v2 quedó funcional y consistente con la paleta semántica vigente (emerald=resuelto, naranja=reabierto, teal=Caso cerrado, rose=perdida, etc.) con dark mode + mobile, pero los colores están hardcodeados en clases Tailwind. Cuando F7 defina los tokens de marca (ver "Paleta de marca"), estos acentos se re-tokenizan. Además: el botón "Caso resuelto" del card es texto plano full-width — F7 puede evaluar icono + tooltip para ahorrar altura en cards densas; y el "+" del header es discreto (revisar affordance/descubribilidad).
+- **Sub-sesión de F7 sugerida:** C (componentes funcionales); depende de tokens de B.
+- **Severidad:** baja (polish ya entregado; F7 re-tokeniza y afina affordances).
+
 ### M1v2 correctivo — Mi Día y Reglas ya tienen identidad visual (indigo→violeta + ámbar); propagar la paleta de marca final
 
 - **Componente o pantalla:** `app/(dashboard)/mi-dia/*` (header de indicadores, cards, campanita, racha en sidebar, empty state) y `app/(dashboard)/admin/reglas/*` (rule rows, toggle, header). Nuevo `components/ui/switch.tsx` (toggle reutilizable).

@@ -142,6 +142,21 @@ export const DEFAULT_HIDE_CLOSED_AFTER_DAYS = 7 as const;
 export const HIDE_CLOSED_DAYS_MIN = 0 as const;
 export const HIDE_CLOSED_DAYS_MAX = 365 as const;
 
+/**
+ * `CLOSED_LIST_RETENTION_DAYS` (M4v2) — segunda barrera de visualización
+ * por ENCIMA del auto-ocultar. Una oportunidad cerrada (Ganada/Perdida/
+ * Caso cerrado) deja de listarse en "Ver cerradas" cuando cumple este
+ * número de días ARCHIVADA (contado desde su `won_at`/`lost_at`); los
+ * casos resueltos de Post-venta usan el mismo umbral sobre `resolved_at`.
+ * Ventana móvil POR oportunidad (no corte de mes calendario), en TZ CDMX.
+ * Es SOLO visualización — NO borra de la BD; histórico/reportes/métricas
+ * quedan intactos. Fijo (no configurable) por decisión de M4v2.
+ *
+ * Modelo de dos umbrales: 0–N días → en el activo; N–30 días → solo en
+ * "Ver cerradas"; >30 días → fuera de ambas vistas, vivo en la BD.
+ */
+export const CLOSED_LIST_RETENTION_DAYS = 30 as const;
+
 /** Cookie de preferencia del funnel activo del usuario en M5. */
 export const PIPELINE_FUNNEL_COOKIE = "centr_pipeline_funnel" as const;
 /** Cookie de preferencia del filtro admin "Sin asignar" en M5. */

@@ -18,6 +18,11 @@ interface Props {
   isDraggingDisabled?: boolean;
   /** Tareas pendientes asociadas a la opp (lote polish M6). */
   pendingTasksCount?: number;
+  /** True si la card vive en la columna "Caso problemático" (M4v2): si
+   *  además no está resuelta, muestra el botón "Caso resuelto". */
+  canResolveCase?: boolean;
+  /** Dispara el cierre de caso desde el card (M4v2). */
+  onResolveCase?: (opportunityId: UUID) => void;
   onSelect?: (opportunityId: UUID) => void;
 }
 
@@ -36,6 +41,8 @@ export function KanbanCard({
   showAdvisor,
   isDraggingDisabled,
   pendingTasksCount,
+  canResolveCase,
+  onResolveCase,
   onSelect,
 }: Props) {
   const draggable = useDraggable({
@@ -73,6 +80,13 @@ export function KanbanCard({
       }
     : undefined;
 
+  // "Caso resuelto" (M4v2): solo en cards de "Caso problemático" aún
+  // abiertas. El servidor re-valida permisos (admin o asesor asignado);
+  // como el vendedor solo ve sus propias opps, cualquier card que vea es
+  // resoluble por él.
+  const showResolve =
+    !!canResolveCase && opp.resolved_at === null && !!onResolveCase;
+
   return (
     <div
       ref={draggable.setNodeRef}
@@ -98,6 +112,7 @@ export function KanbanCard({
         </p>
         <div className="flex items-center gap-1 flex-shrink-0">
           {opp.resolved_at && <ResolvedBadge />}
+          {!opp.resolved_at && opp.reopened_at && <ReopenedBadge />}
           {pendingTasksCount !== undefined && pendingTasksCount > 0 && (
             <TasksBadge count={pendingTasksCount} />
           )}
@@ -155,6 +170,22 @@ export function KanbanCard({
           </span>
         </div>
       )}
+
+      {showResolve && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onResolveCase!(opp.id);
+          }}
+          // El drag-source captura pointer events; detener la propagación
+          // del pointer evita iniciar un drag al presionar el botón.
+          onPointerDown={(e) => e.stopPropagation()}
+          className="w-full mt-2 py-1 text-[11px] font-medium rounded border border-emerald-200 dark:border-emerald-500/30 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-50 dark:hover:bg-emerald-500/10 transition-colors"
+        >
+          Caso resuelto
+        </button>
+      )}
     </div>
   );
 }
@@ -166,6 +197,17 @@ function ResolvedBadge() {
       title="Caso resuelto y archivado"
     >
       Resuelto
+    </span>
+  );
+}
+
+function ReopenedBadge() {
+  return (
+    <span
+      className="text-[9px] uppercase tracking-wide px-1 py-px rounded font-medium flex-shrink-0 bg-orange-100 text-orange-700 dark:bg-orange-500/15 dark:text-orange-300"
+      title="Oportunidad reabierta en Caso problemático"
+    >
+      Reabierto
     </span>
   );
 }

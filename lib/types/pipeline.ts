@@ -19,6 +19,28 @@ export type FetchOppActionResult =
   | { ok: true; opportunity: KanbanOpportunity | null }
   | { ok: false; reason: string; message: string };
 
+/** Un resultado de la búsqueda de reapertura (M4v2): shape ya listo
+ *  para pintar en el diálogo, con etiqueta de estado derivada. */
+export interface ReopenSearchResultItem {
+  id: UUID;
+  funnel: Funnel;
+  stageName: string | null;
+  contactName: string;
+  /** display_reference o, si no hay, la orden de Shopify. */
+  reference: string | null;
+  /** "Activa" | "Ganada" | "Caso cerrado" | "Perdida" | "Cancelada" | "Resuelto". */
+  statusLabel: string;
+  lastModifiedAt: string;
+}
+
+export type SearchOpportunitiesForReopenResult =
+  | { ok: true; results: ReopenSearchResultItem[] }
+  | { ok: false; reason: string; message: string };
+
+export type ReopenOpportunityActionResult =
+  | { ok: true; opportunityId: UUID; mode: "mutated" | "created_child" }
+  | { ok: false; reason: string; message: string };
+
 export interface PipelineInitialState {
   funnel: Funnel;
   stages: PipelineStageRow[];
@@ -37,6 +59,11 @@ export interface PipelineInitialState {
   hideClosedAfterDays: number;
   /** Conteo de tareas pendientes por opportunity_id (lote polish M6). */
   pendingTasksByOpp: Record<UUID, number>;
+  /** Id de la etapa "Caso problemático" del Post-venta (M4v2) — resuelto
+   *  por la ancla canónica `resolvePostventaStages`. Permite que el card
+   *  muestre el botón "Caso resuelto" sin acoplarse al nombre de la etapa.
+   *  `null` en Funnel Venta (no aplica). */
+  problematicStageId: UUID | null;
   effectiveAdvisorId: UUID | null | undefined;
   advisors: AdvisorOption[];
   lossReasons: LossReasonOption[];

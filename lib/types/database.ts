@@ -189,6 +189,11 @@ export interface OpportunityRow {
   resolved_at: ISODateString | null;
   resolved_by_user_id: UUID | null;
   resolution_note: string | null;
+  // Reapertura a "Caso problemático" (0035, M4v2). NULL → la opp llegó a
+  // su etapa por el flujo normal; IS NOT NULL → fue reabierta manualmente
+  // desde el botón "+". Flag de procedencia (badge "Reabierto"), ortogonal
+  // al estado de archivado. La reapertura limpia cancelled/won/lost/resolved.
+  reopened_at: ISODateString | null;
 }
 
 export interface OpportunityLineItemRow {
@@ -464,11 +469,15 @@ export interface Database {
           | "resolved_at"
           | "resolved_by_user_id"
           | "resolution_note"
+          | "reopened_at"
         > &
           Partial<
             Pick<
               OpportunityRow,
-              "resolved_at" | "resolved_by_user_id" | "resolution_note"
+              | "resolved_at"
+              | "resolved_by_user_id"
+              | "resolution_note"
+              | "reopened_at"
             >
           >;
         Update: Omit<Updatable<OpportunityRow>, "effective_created_at">;

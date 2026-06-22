@@ -6,10 +6,14 @@ import { withTenantContext } from "@/lib/tenant/context";
 import {
   countKanbanOpportunitiesByStage,
   getKanbanOpportunityById,
+  getOpportunityById,
   listKanbanOpportunities,
   searchContactIdsForQuery,
+  searchOpportunitiesAnyState,
   type KanbanOpportunity,
+  type ReopenSearchRow,
 } from "@/lib/db/opportunities";
+import { reopenOpportunityIntoProblemCase } from "@/lib/services/opportunity-reopen";
 import { listPendingTaskCountsByOpportunity, recordAuditEvent } from "@/lib/db/operational";
 import { listLossReasons, listPipelineStages } from "@/lib/db/pipeline";
 import { getMembership, listActiveRealVendors } from "@/lib/db/users";
@@ -21,10 +25,12 @@ import {
 import {
   closedFilterForStage,
   computeClosedCutoffIso,
+  computeClosedListRetentionCutoffIso,
   partitionClosedStages,
   readHideClosedDays,
   sanitizeHideClosedDays,
 } from "@/lib/services/pipeline-visibility";
+import { resolvePostventaStages } from "@/lib/services/dashboard-stages";
 import { FUNNELS, PIPELINE_FUNNEL_COOKIE, PIPELINE_PAGE_SIZE, PIPELINE_UNASSIGNED_COOKIE } from "@/lib/constants";
 import type { Funnel, Json, UUID } from "@/lib/types/database";
 import type {
@@ -32,6 +38,9 @@ import type {
   LoadPageActionResult,
   MoveStageActionResult,
   PipelineInitialState,
+  ReopenOpportunityActionResult,
+  ReopenSearchResultItem,
+  SearchOpportunitiesForReopenResult,
 } from "@/lib/types/pipeline";
 
 /**
@@ -192,21 +201,26 @@ export async function loadKanbanPageAction(
         ? await searchContactIdsForQuery(input.query)
         : null;
 
-    // Auto-ocultar cerradas: salvo en modo "Ver cerradas", una etapa
-    // cerrada limita la página a las opps dentro de la ventana.
+    // Ventana de cerradas por etapa cerrada (M4v2 dos umbrales):
+    //   - Vista normal: corte de auto-ocultar (N días, config de la org).
+    //   - "Ver cerradas": corte de retención (30 días) — ya NO trae todo
+    //     el histórico, solo lo archivado en los últimos 30 días.
+    const retentionCutoffIso = computeClosedListRetentionCutoffIso();
     let closedFilter: { column: "won_at" | "lost_at"; sinceIso: string } | null =
       null;
-    if (!input.showClosed) {
-      const [org, stages] = await Promise.all([
-        getOrganizationById(orgId),
-        listPipelineStages(input.funnel),
-      ]);
-      const stage = stages.find((s) => s.id === input.stageId);
-      if (stage) {
-        const days = readHideClosedDays(org?.config ?? null);
-        closedFilter = closedFilterForStage(stage, computeClosedCutoffIso(days));
-      }
+    const [org, stages] = await Promise.all([
+      getOrganizationById(orgId),
+      listPipelineStages(input.funnel),
+    ]);
+    const stage = stages.find((s) => s.id === input.stageId);
+    if (stage) {
+      const cutoff = input.showClosed
+        ? retentionCutoffIso
+        : computeClosedCutoffIso(readHideClosedDays(org?.config ?? null));
+      closedFilter = closedFilterForStage(stage, cutoff);
     }
+    const resolvedSinceIso =
+      input.resolvedScope === "resolved" ? retentionCutoffIso : null;
 
     const items = await listKanbanOpportunities({
       funnel: input.funnel,
@@ -220,6 +234,7 @@ export async function loadKanbanPageAction(
       offset: input.page * PIPELINE_PAGE_SIZE,
       closedFilter,
       resolvedScope: input.resolvedScope,
+      resolvedSinceIso,
     });
     const hasMore = items.length > PIPELINE_PAGE_SIZE;
     return {
@@ -262,6 +277,124 @@ export async function fetchKanbanOpportunityAction(
   return withTenantContext(orgId, async () => {
     const opp = await getKanbanOpportunityById(parsed.data.opportunityId);
     return { ok: true, opportunity: opp };
+  }, { source: "user_session" });
+}
+
+// ============================================================
+// Reapertura de oportunidades a "Caso problemático" (M4v2, Bloque D)
+// ============================================================
+
+const searchReopenSchema = z.object({
+  query: z.string().min(1).max(200),
+});
+
+function deriveReopenStatusLabel(row: ReopenSearchRow): string {
+  if (row.cancelled_at) return "Cancelada";
+  if (row.resolved_at) return "Resuelto";
+  if (row.won_at) return row.funnel === "venta" ? "Ganada" : "Caso cerrado";
+  if (row.lost_at) return "Perdida";
+  return "Activa";
+}
+
+/**
+ * Búsqueda transversal para el botón "+" de reapertura: encuentra opps
+ * en CUALQUIER etapa/funnel, incluidas cerradas/canceladas/resueltas.
+ * Scope por asesor para vendedores (defensa a nivel data).
+ */
+export async function searchOpportunitiesForReopenAction(
+  raw: unknown,
+): Promise<SearchOpportunitiesForReopenResult> {
+  const parsed = searchReopenSchema.safeParse(raw);
+  if (!parsed.success) {
+    return { ok: false, reason: "invalid_input", message: "Búsqueda inválida." };
+  }
+  const session = await getSession();
+  if (session.status !== "ok") {
+    return { ok: false, reason: "no_session", message: "Sesión expirada." };
+  }
+  const orgId = session.data.activeOrg.id;
+  const role = session.data.activeOrg.role;
+  const isAdmin = role === "admin" || role === "superadmin";
+
+  return withTenantContext(orgId, async () => {
+    let assignedAdvisorId: UUID | undefined;
+    if (!isAdmin) {
+      const membership = await getMembership(session.data.userId, orgId);
+      if (!membership) {
+        return { ok: false, reason: "no_membership", message: "Sin acceso." } as const;
+      }
+      assignedAdvisorId = membership.id;
+    }
+
+    const rows = await searchOpportunitiesAnyState({
+      query: parsed.data.query,
+      assignedAdvisorId,
+      limit: 25,
+    });
+    const results: ReopenSearchResultItem[] = rows.map((r) => ({
+      id: r.id,
+      funnel: r.funnel,
+      stageName: r.stage_name,
+      contactName:
+        r.contact?.full_name?.trim() ||
+        r.contact?.phone?.trim() ||
+        "Sin nombre",
+      reference: r.display_reference ?? r.shopify_order_id ?? null,
+      statusLabel: deriveReopenStatusLabel(r),
+      lastModifiedAt: r.last_modified_at,
+    }));
+    return { ok: true, results } as const;
+  }, { source: "user_session" });
+}
+
+const reopenSchema = z.object({
+  opportunityId: z.string().uuid(),
+});
+
+/**
+ * Reabre una oportunidad hacia "Caso problemático" (flujo híbrido en
+ * `reopenOpportunityIntoProblemCase`). Permiso: admin, o el vendedor
+ * dueño de la opp (defensa — la búsqueda ya lo scopea, pero el id llega
+ * del cliente y se re-valida aquí).
+ */
+export async function reopenOpportunityAction(
+  raw: unknown,
+): Promise<ReopenOpportunityActionResult> {
+  const parsed = reopenSchema.safeParse(raw);
+  if (!parsed.success) {
+    return { ok: false, reason: "invalid_input", message: "Parámetros inválidos." };
+  }
+  const session = await getSession();
+  if (session.status !== "ok") {
+    return { ok: false, reason: "no_session", message: "Sesión expirada." };
+  }
+  const orgId = session.data.activeOrg.id;
+  const role = session.data.activeOrg.role;
+  const isAdmin = role === "admin" || role === "superadmin";
+
+  return withTenantContext(orgId, async () => {
+    const opp = await getOpportunityById(parsed.data.opportunityId);
+    if (!opp) {
+      return { ok: false, reason: "not_found", message: "La oportunidad ya no existe." } as const;
+    }
+    let actorUserId: UUID | null = session.data.userId;
+    if (!isAdmin) {
+      const membership = await getMembership(session.data.userId, orgId);
+      if (!membership || opp.assigned_advisor_id !== membership.id) {
+        // No filtra IDs: mismo mensaje que "no existe".
+        return { ok: false, reason: "forbidden", message: "No tienes acceso a esta oportunidad." } as const;
+      }
+      actorUserId = session.data.userId;
+    }
+
+    const res = await reopenOpportunityIntoProblemCase({
+      opportunityId: parsed.data.opportunityId,
+      actorUserId,
+    });
+    if (!res.ok) {
+      return { ok: false, reason: res.reason, message: res.message } as const;
+    }
+    return { ok: true, opportunityId: res.opportunityId, mode: res.mode } as const;
   }, { source: "user_session" });
 }
 
@@ -375,6 +508,10 @@ export async function loadInitialPipelineState(opts: {
     // filtran por su fecha de cierre; las activas no se tocan.
     const hideClosedAfterDays = readHideClosedDays(org?.config ?? null);
     const cutoffIso = computeClosedCutoffIso(hideClosedAfterDays);
+    // Retención de la lista de cerradas/resueltas (M4v2): 30 días en CDMX.
+    const retentionCutoffIso = computeClosedListRetentionCutoffIso();
+    const resolvedSinceIso =
+      resolvedScope === "resolved" ? retentionCutoffIso : null;
     const { wonStageIds, lostStageIds } = partitionClosedStages(activeStages);
 
     const [countResult, pageResults] = await Promise.all([
@@ -385,8 +522,9 @@ export async function loadInitialPipelineState(opts: {
         dateTo: filterDateTo,
         query: filterQuery,
         matchingContactIds,
-        closedHide: { cutoffIso, wonStageIds, lostStageIds },
+        closedHide: { cutoffIso, retentionCutoffIso, wonStageIds, lostStageIds },
         resolvedScope,
+        resolvedSinceIso,
       }),
       Promise.all(
         activeStages.map(async (stage) => {
@@ -401,6 +539,7 @@ export async function loadInitialPipelineState(opts: {
             limit: PIPELINE_PAGE_SIZE + 1,
             closedFilter: closedFilterForStage(stage, cutoffIso),
             resolvedScope,
+            resolvedSinceIso,
           });
           return { stageId: stage.id, items };
         }),
@@ -424,6 +563,13 @@ export async function loadInitialPipelineState(opts: {
     const pendingTasksByOpp: Record<UUID, number> = {};
     pendingMap.forEach((count, oppId) => { pendingTasksByOpp[oppId] = count; });
 
+    // Ancla canónica de "Caso problemático" (solo Post-venta) — habilita el
+    // botón "Caso resuelto" en el card sin acoplarse al nombre (M4v2).
+    const problematicStageId =
+      opts.funnel === "post_venta"
+        ? (await resolvePostventaStages()).problematicStage?.id ?? null
+        : null;
+
     return {
       ok: true,
       state: {
@@ -435,6 +581,7 @@ export async function loadInitialPipelineState(opts: {
         hiddenClosedByStage,
         hideClosedAfterDays,
         pendingTasksByOpp,
+        problematicStageId,
         effectiveAdvisorId,
         advisors: vendors.map((v) => ({
           membershipId: v.id,

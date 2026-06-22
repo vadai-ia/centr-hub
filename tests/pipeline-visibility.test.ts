@@ -2,11 +2,15 @@ import { describe, expect, it } from "vitest";
 import {
   closedFilterForStage,
   computeClosedCutoffIso,
+  computeClosedListRetentionCutoffIso,
   partitionClosedStages,
   readHideClosedDays,
   sanitizeHideClosedDays,
 } from "@/lib/services/pipeline-visibility";
-import { DEFAULT_HIDE_CLOSED_AFTER_DAYS } from "@/lib/constants";
+import {
+  CLOSED_LIST_RETENTION_DAYS,
+  DEFAULT_HIDE_CLOSED_AFTER_DAYS,
+} from "@/lib/constants";
 
 describe("readHideClosedDays", () => {
   it("lee el umbral de config.pipeline.hide_closed_after_days", () => {
@@ -89,5 +93,24 @@ describe("computeClosedCutoffIso", () => {
     expect(Math.abs(new Date(cutoff0).getTime() - now)).toBeLessThan(60_000);
     // 7 días atrás está antes que 0 días atrás.
     expect(new Date(cutoff7).getTime()).toBeLessThan(new Date(cutoff0).getTime());
+  });
+});
+
+describe("computeClosedListRetentionCutoffIso (M4v2 — 30 días)", () => {
+  it("equivale al corte de CLOSED_LIST_RETENTION_DAYS (30) en CDMX", () => {
+    expect(CLOSED_LIST_RETENTION_DAYS).toBe(30);
+    // Misma base de cómputo que computeClosedCutoffIso(30) (corte CDMX);
+    // se permite ~1s de deriva entre las dos llamadas.
+    const retention = new Date(computeClosedListRetentionCutoffIso()).getTime();
+    const direct = new Date(computeClosedCutoffIso(30)).getTime();
+    expect(Math.abs(retention - direct)).toBeLessThan(1_000);
+  });
+
+  it("la retención (30d) es un piso ANTERIOR al auto-ocultar (7d)", () => {
+    // Modelo de dos umbrales: lo revelable en "Ver cerradas" vive entre el
+    // corte de retención (más viejo) y el de auto-ocultar (más reciente).
+    const retention = new Date(computeClosedListRetentionCutoffIso()).getTime();
+    const hide = new Date(computeClosedCutoffIso(DEFAULT_HIDE_CLOSED_AFTER_DAYS)).getTime();
+    expect(retention).toBeLessThan(hide);
   });
 });

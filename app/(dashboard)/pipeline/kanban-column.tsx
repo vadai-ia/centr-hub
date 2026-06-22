@@ -34,6 +34,13 @@ interface Props {
   onToggleClosed?: (stage: PipelineStageRow) => void | Promise<void>;
   /** Conteo de tareas pendientes por opportunity_id (lote polish M6). */
   pendingTasksByOpp?: Record<UUID, number>;
+  /** True si esta columna es "Caso problemático" (M4v2): sus cards no
+   *  resueltos muestran el botón "Caso resuelto". */
+  isProblematicStage?: boolean;
+  /** Abre el cierre de caso desde el card (M4v2). */
+  onResolveCase?: (opportunityId: UUID) => void;
+  /** Abre el diálogo de reapertura (botón "+", solo Caso problemático). */
+  onOpenReopen?: () => void;
   onLoadMore: (
     stage: PipelineStageRow,
     page: number,
@@ -65,6 +72,9 @@ export function KanbanColumn({
   showingClosed = false,
   onToggleClosed,
   pendingTasksByOpp,
+  isProblematicStage = false,
+  onResolveCase,
+  onOpenReopen,
   onLoadMore,
   onSelectOpportunity,
 }: Props) {
@@ -165,15 +175,31 @@ export function KanbanColumn({
             {stage.name}
           </h3>
         </div>
-        <span
-          className="text-[11px] font-semibold tabular-nums flex-shrink-0 px-1.5 py-0.5 rounded-full"
-          style={{
-            color: stage.color,
-            backgroundColor: `${stage.color}22`,
-          }}
-        >
-          {headerCount}
-        </span>
+        <div className="flex items-center gap-1 flex-shrink-0">
+          {isProblematicStage && onOpenReopen && (
+            <button
+              type="button"
+              onClick={onOpenReopen}
+              aria-label="Reabrir una oportunidad en Caso problemático"
+              title="Reabrir una oportunidad (buscar)"
+              className="inline-flex items-center justify-center w-5 h-5 rounded-full text-gray-500 dark:text-gray-400 hover:bg-white dark:hover:bg-gray-700 hover:text-gray-700 dark:hover:text-gray-200 transition-colors"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <line x1="12" y1="5" x2="12" y2="19" />
+                <line x1="5" y1="12" x2="19" y2="12" />
+              </svg>
+            </button>
+          )}
+          <span
+            className="text-[11px] font-semibold tabular-nums px-1.5 py-0.5 rounded-full"
+            style={{
+              color: stage.color,
+              backgroundColor: `${stage.color}22`,
+            }}
+          >
+            {headerCount}
+          </span>
+        </div>
       </div>
 
       <div
@@ -211,6 +237,8 @@ export function KanbanColumn({
                     advisors={advisors}
                     showAdvisor={showAdvisor}
                     pendingTasksCount={pendingTasksByOpp?.[opp.id]}
+                    canResolveCase={isProblematicStage}
+                    onResolveCase={onResolveCase}
                     onSelect={onSelectOpportunity}
                   />
                 </div>
@@ -226,6 +254,8 @@ export function KanbanColumn({
                 advisors={advisors}
                 showAdvisor={showAdvisor}
                 pendingTasksCount={pendingTasksByOpp?.[opp.id]}
+                canResolveCase={isProblematicStage}
+                onResolveCase={onResolveCase}
                 onSelect={onSelectOpportunity}
               />
             ))}

@@ -20,6 +20,8 @@ import {
   setHideClosedDaysAction,
 } from "@/lib/actions/pipeline";
 import { OpportunityDialog } from "@/components/opportunity/opportunity-dialog";
+import { ResolveCaseDialog } from "@/components/opportunity/resolve-case-dialog";
+import { ReopenCaseDialog } from "./reopen-case-dialog";
 import type { KanbanOpportunity } from "@/lib/db/opportunities";
 import type {
   PipelineInitialState,
@@ -150,6 +152,16 @@ export function PipelineBoard({
   // Vista "Casos resueltos" (solo Post-venta): muestra el archivo de casos
   // cerrados en vez del pipeline activo. Se resetea al cambiar de funnel.
   const [resolvedView, setResolvedView] = useState(false);
+  // Id de la etapa "Caso problemático" (solo Post-venta) — habilita el
+  // botón "Caso resuelto" en sus cards (M4v2). null en Venta.
+  const [problematicStageId, setProblematicStageId] = useState<UUID | null>(
+    initial.problematicStageId,
+  );
+  // Caso a resolver desde el card (M4v2): abre ResolveCaseDialog a nivel
+  // board reusando el mismo flujo que el popup de detalle.
+  const [resolveCaseOppId, setResolveCaseOppId] = useState<UUID | null>(null);
+  // Diálogo de reapertura (M4v2, botón "+" de Caso problemático).
+  const [reopenOpen, setReopenOpen] = useState(false);
 
   const [advisors] = useState(initial.advisors);
   const [lossReasons] = useState(initial.lossReasons);
@@ -256,6 +268,7 @@ export function PipelineBoard({
       setHideClosedAfterDays(state.hideClosedAfterDays);
       setShowClosedByStage(new Set());
       setPendingTasksByOpp(state.pendingTasksByOpp);
+      setProblematicStageId(state.problematicStageId);
       setPageByStage(() => initialPageByStage(state.stages));
       if (updateAdvisor) setEffectiveAdvisorId(state.effectiveAdvisorId);
     },
@@ -518,6 +531,30 @@ export function PipelineBoard({
     await commitMove(opp, fromStage, toStage, reasonId, note);
   }
 
+  // ----- Caso resuelto desde el card (M4v2) -----
+  // Reusa ResolveCaseDialog (mismo flujo que el popup de detalle). Al
+  // resolver, el caso se archiva: refrescamos la opp → como la vista activa
+  // no muestra resueltos, refreshOpportunity la saca del tablero.
+  async function handleResolveCaseSuccess() {
+    const oppId = resolveCaseOppId;
+    setResolveCaseOppId(null);
+    if (oppId) {
+      await refreshOpportunity(oppId);
+      pushToast("Caso marcado como resuelto y archivado.", "success");
+    }
+  }
+
+  // ----- Reapertura a "Caso problemático" (M4v2) -----
+  // La opp reabierta (mutada o hija nueva) aterriza activa en Caso
+  // problemático del Post-venta. Recargamos el estado del funnel actual
+  // (la reapertura ocurre desde la vista activa de Post-venta) para que
+  // aparezca con su badge "Reabierto".
+  async function handleReopenSuccess() {
+    setReopenOpen(false);
+    await handlePollingTick();
+    pushToast("Oportunidad reabierta en Caso problemático.", "success");
+  }
+
   const activeDragCard = useMemo(() => {
     if (!activeDragId) return null;
     for (const list of Object.values(cardsByStage)) {
@@ -584,6 +621,11 @@ export function PipelineBoard({
                 showingClosed={showClosedByStage.has(stage.id)}
                 onToggleClosed={toggleClosedForStage}
                 pendingTasksByOpp={pendingTasksByOpp}
+                isProblematicStage={
+                  problematicStageId !== null && stage.id === problematicStageId
+                }
+                onResolveCase={setResolveCaseOppId}
+                onOpenReopen={resolvedView ? undefined : () => setReopenOpen(true)}
                 onLoadMore={loadMoreForStage}
                 onSelectOpportunity={handleSelectOpportunity}
               />
@@ -610,6 +652,19 @@ export function PipelineBoard({
       />
 
       <OpportunityDialog />
+
+      <ResolveCaseDialog
+        open={resolveCaseOppId !== null}
+        opportunityId={resolveCaseOppId}
+        onCancel={() => setResolveCaseOppId(null)}
+        onSuccess={handleResolveCaseSuccess}
+      />
+
+      <ReopenCaseDialog
+        open={reopenOpen}
+        onCancel={() => setReopenOpen(false)}
+        onSuccess={handleReopenSuccess}
+      />
 
       <PipelineToastStack toasts={toasts} onDismiss={dismissToast} />
     </div>

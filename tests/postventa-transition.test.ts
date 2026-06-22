@@ -57,7 +57,7 @@ function seedStages() {
     def(S.envio, "Envío en curso", 3),
     def(S.entregado, "Entregado", 4),
     def(S.seguimiento, "Seguimiento post-entrega", 5),
-    def(S.activo, "Cliente activo", 6),
+    def(S.activo, "Caso cerrado", 6),
     def(S.problematico, "Caso problemático", 7),
   ]);
 }

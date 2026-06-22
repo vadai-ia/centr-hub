@@ -22,7 +22,7 @@ import type { PipelineStageRow, UUID } from "@/lib/types/database";
  * Reglas de convivencia (aprobadas M3v2):
  *  - AVANCE (a etapas 1-4 de pago/preparación): solo si la opp está HOY en
  *    la zona automática (una de esas 4 etapas). Si un vendedor la movió a
- *    Seguimiento / Cliente activo (pos 5-6), el motor NO la arrastra de
+ *    Seguimiento / Caso cerrado (pos 5-6), el motor NO la arrastra de
  *    vuelta — handoff al ciclo manual.
  *  - PROBLEM-EXIT (→ Caso problemático por cancelado/reembolsado): se
  *    dispara desde CUALQUIER etapa activa que no sea ya Caso problemático.
@@ -229,7 +229,7 @@ export function decidePostventaStageMove(
     toStage = stages.problematicStage;
   } else {
     // AVANCE: solo desde la zona automática (1-4). Si la opp ya está fuera
-    // de la zona (movida manual a Seguimiento/Cliente activo), no arrastrar.
+    // de la zona (movida manual a Seguimiento/Caso cerrado), no arrastrar.
     if (!stages.zoneStageIds.has(opp.stage_id)) {
       return { kind: "noop", reason: "advance_out_of_zone" };
     }

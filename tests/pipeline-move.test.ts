@@ -102,6 +102,20 @@ function seedStages() {
       is_lost: false,
       requires_loss_reason: false,
     },
+    {
+      // M4v2: terminal de cierre normal de Post-venta (is_won → archiva
+      // por el MISMO mecanismo que Ganada).
+      id: "stage-pv-caso-cerrado",
+      organization_id: ORG,
+      funnel: "post_venta",
+      name: "Caso cerrado",
+      position: 6,
+      is_active: true,
+      is_initial: false,
+      is_won: true,
+      is_lost: false,
+      requires_loss_reason: false,
+    },
   ]);
 }
 
@@ -297,6 +311,27 @@ describe("moveOpportunityStage", () => {
     expect(res.ok).toBe(true);
     const opp = fake.getTable("opportunities")[0];
     expect(opp.stage_id).toBe("stage-ganada");
+    expect(opp.won_at).toBeTruthy();
+  });
+
+  it("Post-venta → 'Caso cerrado' (is_won) marca won_at: archiva como Ganada", async () => {
+    seedOpp("opp-pv", "stage-pv-pago", {
+      funnel: "post_venta",
+      parent_opportunity_id: "parent-1",
+    });
+    const res = await withTenant(() =>
+      moveOpportunityStage({
+        opportunityId: "opp-pv",
+        toStageId: "stage-pv-caso-cerrado",
+        expectedLastModifiedAt: "2026-05-01T10:00:00.000Z",
+        actorUserId: USER,
+        context: "manual",
+      }),
+    );
+    expect(res.ok).toBe(true);
+    const opp = fake.getTable("opportunities")[0];
+    expect(opp.stage_id).toBe("stage-pv-caso-cerrado");
+    // won_at poblado → entra al mismo auto-ocultar/"Ver cerradas" que Ganada.
     expect(opp.won_at).toBeTruthy();
   });
 

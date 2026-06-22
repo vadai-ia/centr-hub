@@ -318,6 +318,7 @@ export interface KanbanOpportunity {
   resolved_at: string | null;
   resolved_by_user_id: UUID | null;
   resolution_note: string | null;
+  reopened_at: string | null;
   contact: KanbanContactEmbed | null;
 }
 
@@ -341,6 +342,7 @@ const KANBAN_OPPORTUNITY_SELECT = `
   resolved_at,
   resolved_by_user_id,
   resolution_note,
+  reopened_at,
   contact:contacts!inner (
     id,
     full_name,
@@ -398,6 +400,11 @@ export async function listKanbanOpportunities(opts: {
    *  resueltos". Un caso resuelto se queda en "Caso problemático" pero
    *  se archiva de las vistas activas. */
   resolvedScope?: "active" | "resolved";
+  /** Retención de la lista de resueltos (M4v2): cuando `resolvedScope`
+   *  es "resolved", solo muestra los resueltos con `resolved_at >=
+   *  resolvedSinceIso` (deja de listar los archivados hace >30 días). Sin
+   *  efecto en "active". */
+  resolvedSinceIso?: string | null;
 }): Promise<KanbanOpportunity[]> {
   const { supabase, organizationId } = getTenantScopedClient();
 
@@ -422,6 +429,11 @@ export async function listKanbanOpportunities(opts: {
   // Archivo de casos resueltos: por default oculta los resueltos.
   if (opts.resolvedScope === "resolved") {
     query = query.not("resolved_at", "is", null);
+    // Retención 30d (M4v2): los resueltos hace más de N días salen de la
+    // vista "Casos resueltos" (siguen en la BD).
+    if (opts.resolvedSinceIso) {
+      query = query.gte("resolved_at", opts.resolvedSinceIso);
+    }
   } else {
     query = query.is("resolved_at", null);
   }
@@ -503,10 +515,20 @@ export async function countKanbanOpportunitiesByStage(opts: {
     cutoffIso: string;
     wonStageIds: UUID[];
     lostStageIds: UUID[];
+    /** Retención de la lista de cerradas (M4v2): piso del bucket OCULTA.
+     *  Una cerrada con fecha de cierre `< retentionCutoffIso` (archivada
+     *  hace >30 días) NO se cuenta ni como visible ni como oculta — sale
+     *  de "Ver cerradas". Si se omite, no hay piso (comportamiento previo:
+     *  todas las cerradas-antes-de-cutoff cuentan como ocultas). */
+    retentionCutoffIso?: string;
   };
   /** Igual que en listKanbanOpportunities: "active" (default) excluye
    *  resueltos; "resolved" cuenta solo los resueltos. */
   resolvedScope?: "active" | "resolved";
+  /** Retención 30d de la vista "Casos resueltos" (M4v2): cuando
+   *  `resolvedScope` es "resolved", cuenta solo `resolved_at >=
+   *  resolvedSinceIso`. Mantiene el conteo alineado con la lista. */
+  resolvedSinceIso?: string | null;
 }): Promise<{ counts: Record<UUID, number>; hiddenCounts: Record<UUID, number> }> {
   const { supabase, organizationId } = getTenantScopedClient();
 
@@ -530,6 +552,9 @@ export async function countKanbanOpportunitiesByStage(opts: {
 
   if (opts.resolvedScope === "resolved") {
     query = query.not("resolved_at", "is", null);
+    if (opts.resolvedSinceIso) {
+      query = query.gte("resolved_at", opts.resolvedSinceIso);
+    }
   } else {
     query = query.is("resolved_at", null);
   }
@@ -573,24 +598,42 @@ export async function countKanbanOpportunitiesByStage(opts: {
   const wonSet = hide ? new Set(hide.wonStageIds) : null;
   const lostSet = hide ? new Set(hide.lostStageIds) : null;
 
+  const retention = hide?.retentionCutoffIso;
   for (const row of (data ?? []) as unknown as Array<{
     stage_id: UUID;
     won_at?: string | null;
     lost_at?: string | null;
   }>) {
     const stageId = row.stage_id;
-    // ¿Está oculta? Solo aplica a etapas cerradas con fecha de cierre
-    // ESTRICTAMENTE anterior al corte. NULL = antigüedad desconocida →
-    // visible (espeja el filtro de `listKanbanOpportunities`).
-    let isHidden = false;
+    // Bucketing de etapas cerradas (M4v2, dos umbrales):
+    //   NULL o cierre >= cutoff (auto-ocultar)  → VISIBLE en el activo.
+    //   [retención, cutoff)                      → OCULTA (revelable en
+    //                                              "Ver cerradas").
+    //   cierre < retención (>30 días archivada)  → EXPIRADA: ni visible
+    //                                              ni oculta (sale de la
+    //                                              lista; sigue en la BD).
+    // NULL = antigüedad desconocida → visible (espeja listKanbanOpportunities).
+    let bucket: "visible" | "hidden" | "expired" = "visible";
     if (hide) {
-      if (wonSet!.has(stageId)) {
-        isHidden = !!row.won_at && row.won_at < hide.cutoffIso;
-      } else if (lostSet!.has(stageId)) {
-        isHidden = !!row.lost_at && row.lost_at < hide.cutoffIso;
+      const closedAt = wonSet!.has(stageId)
+        ? row.won_at
+        : lostSet!.has(stageId)
+          ? row.lost_at
+          : undefined;
+      // closedAt === undefined → etapa activa (no cerrada): siempre visible.
+      // closedAt === null → cerrada sin fecha → visible.
+      if (closedAt) {
+        if (closedAt >= hide.cutoffIso) {
+          bucket = "visible";
+        } else if (!retention || closedAt >= retention) {
+          bucket = "hidden";
+        } else {
+          bucket = "expired";
+        }
       }
     }
-    if (isHidden) {
+    if (bucket === "expired") continue;
+    if (bucket === "hidden") {
       hiddenCounts[stageId] = (hiddenCounts[stageId] ?? 0) + 1;
     } else {
       counts[stageId] = (counts[stageId] ?? 0) + 1;
@@ -631,6 +674,115 @@ export async function searchContactIdsForQuery(rawQuery: string): Promise<UUID[]
     .limit(5000);
   if (error) throw error;
   return (data ?? []).map((r) => (r as { id: UUID }).id);
+}
+
+/**
+ * Búsqueda transversal de oportunidades para la REAPERTURA (M4v2):
+ * a diferencia de `listKanbanOpportunities`, NO filtra por etapa,
+ * funnel ni estado — encuentra opps en CUALQUIER etapa/funnel,
+ * incluidas cerradas (won/lost), canceladas y resueltas/archivadas.
+ * Es la única lectura del sistema que ignora los flags de archivado.
+ *
+ * Scope: si `assignedAdvisorId` se pasa (vendedor), restringe a sus
+ * propias opps (CLAUDE.md "Vista de vendedor — scoping a nivel data").
+ * Admin pasa `undefined` → ve todas.
+ *
+ * Match: `display_reference` (ilike) o contacto (nombre/teléfono/email,
+ * pre-resuelto a contact_ids como el resto del pipeline).
+ */
+export interface ReopenSearchRow {
+  id: UUID;
+  funnel: Funnel;
+  stage_id: UUID;
+  stage_name: string | null;
+  display_reference: string | null;
+  shopify_order_id: string | null;
+  last_modified_at: string;
+  won_at: string | null;
+  lost_at: string | null;
+  cancelled_at: string | null;
+  resolved_at: string | null;
+  reopened_at: string | null;
+  assigned_advisor_id: UUID | null;
+  contact: { full_name: string | null; phone: string | null } | null;
+}
+
+const REOPEN_SEARCH_SELECT = `
+  id,
+  funnel,
+  stage_id,
+  display_reference,
+  shopify_order_id,
+  last_modified_at,
+  won_at,
+  lost_at,
+  cancelled_at,
+  resolved_at,
+  reopened_at,
+  assigned_advisor_id,
+  stage:pipeline_stages!inner ( name ),
+  contact:contacts!inner ( full_name, phone )
+` as const;
+
+export async function searchOpportunitiesAnyState(opts: {
+  query: string;
+  assignedAdvisorId?: UUID | null;
+  limit: number;
+}): Promise<ReopenSearchRow[]> {
+  const sanitized = opts.query
+    .trim()
+    .replace(/[,.()*%\\]/g, " ")
+    .slice(0, 80);
+  const contactIds = await searchContactIdsForQuery(opts.query);
+  if (sanitized.length === 0 && contactIds.length === 0) return [];
+
+  const { supabase, organizationId } = getTenantScopedClient();
+  let query = supabase
+    .from("opportunities")
+    .select(REOPEN_SEARCH_SELECT)
+    .eq("organization_id", organizationId);
+
+  // Scope por asesor (vendedor): solo sus propias opps.
+  if (opts.assignedAdvisorId !== undefined && opts.assignedAdvisorId !== null) {
+    query = query.eq("assigned_advisor_id", opts.assignedAdvisorId);
+  }
+
+  const idsList = contactIds.slice(0, 5000);
+  if (idsList.length === 0) {
+    query = query.ilike("display_reference", `%${sanitized}%`);
+  } else {
+    query = query.or(
+      `display_reference.ilike.%${sanitized}%,contact_id.in.(${idsList.join(",")})`,
+    );
+  }
+
+  query = query
+    .order("last_modified_at", { ascending: false })
+    .order("id", { ascending: true })
+    .limit(opts.limit);
+
+  const { data, error } = await query;
+  if (error) throw error;
+
+  type Raw = Omit<ReopenSearchRow, "stage_name" | "stage"> & {
+    stage: { name: string | null } | null;
+  };
+  return ((data ?? []) as unknown as Raw[]).map((r) => ({
+    id: r.id,
+    funnel: r.funnel,
+    stage_id: r.stage_id,
+    stage_name: r.stage?.name ?? null,
+    display_reference: r.display_reference,
+    shopify_order_id: r.shopify_order_id,
+    last_modified_at: r.last_modified_at,
+    won_at: r.won_at,
+    lost_at: r.lost_at,
+    cancelled_at: r.cancelled_at,
+    resolved_at: r.resolved_at,
+    reopened_at: r.reopened_at,
+    assigned_advisor_id: r.assigned_advisor_id,
+    contact: r.contact,
+  }));
 }
 
 /**

@@ -36,7 +36,7 @@ function seedStages() {
     def("pv-3", "Envío en curso", 3),
     def(ENTREGADO, "Entregado", 4),
     def("pv-5", "Seguimiento post-entrega", 5),
-    def("pv-6", "Cliente activo", 6),
+    def("pv-6", "Caso cerrado", 6),
     def(PROBLEMATICO, "Caso problemático", 7),
   ]);
 }
@@ -53,6 +53,7 @@ function seedOpp(overrides: Record<string, unknown> = {}) {
       resolved_at: null,
       resolved_by_user_id: null,
       resolution_note: null,
+      reopened_at: null,
       last_modified_at: "2026-06-01T00:00:00Z",
       ...overrides,
     },

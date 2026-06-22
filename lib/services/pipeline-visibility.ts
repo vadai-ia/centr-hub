@@ -1,6 +1,7 @@
 import "server-only";
 import { DateTime } from "luxon";
 import {
+  CLOSED_LIST_RETENTION_DAYS,
   DEFAULT_HIDE_CLOSED_AFTER_DAYS,
   HIDE_CLOSED_DAYS_MAX,
   HIDE_CLOSED_DAYS_MIN,
@@ -67,6 +68,17 @@ export function sanitizeHideClosedDays(value: number): number {
 export function computeClosedCutoffIso(days: number): string {
   const cutoff = DateTime.now().setZone(TIMEZONE).minus({ days });
   return cutoff.toUTC().toISO() ?? new Date().toISOString();
+}
+
+/**
+ * Instante de corte de RETENCIÓN de la lista de cerradas (M4v2): una opp
+ * archivada hace MÁS de `CLOSED_LIST_RETENTION_DAYS` (30) deja de
+ * mostrarse en "Ver cerradas" / "Casos resueltos". Ventana móvil por
+ * opp, anclada en America/Mexico_City. Solo visualización (la opp sigue
+ * en la BD). Es el piso del bucket "revelable": [retención, auto-ocultar).
+ */
+export function computeClosedListRetentionCutoffIso(): string {
+  return computeClosedCutoffIso(CLOSED_LIST_RETENTION_DAYS);
 }
 
 /**

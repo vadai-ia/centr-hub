@@ -36,6 +36,7 @@ function makeOpp(overrides: Partial<KanbanOpportunity> = {}): KanbanOpportunity 
     resolved_at: null,
     resolved_by_user_id: null,
     resolution_note: null,
+    reopened_at: null,
     contact: {
       id: "contact-1",
       full_name: "Ana Pérez",
