@@ -2,6 +2,10 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { getSession } from "@/lib/auth/session";
+import {
+  EMAIL_RATE_LIMIT_MESSAGE,
+  isEmailRateLimit,
+} from "@/lib/auth/email-send-errors";
 import { withTenantContext } from "@/lib/tenant/context";
 import {
   countActiveOpportunitiesByAdvisor,
@@ -370,9 +374,11 @@ export async function inviteVendorAction(
         const already = /already|registered|exists/i.test(invited.message);
         return {
           ok: false,
-          message: already
-            ? "Ese email ya tiene una cuenta. Si es un asesor existente, usa “Vincular login”."
-            : `No se pudo enviar la invitación: ${invited.message}`,
+          message: isEmailRateLimit(invited.message)
+            ? EMAIL_RATE_LIMIT_MESSAGE
+            : already
+              ? "Ese email ya tiene una cuenta. Si es un asesor existente, usa “Vincular login”."
+              : `No se pudo enviar la invitación: ${invited.message}`,
         };
       }
 
@@ -477,9 +483,10 @@ export async function linkExistingAdvisorAction(
       if (!sent.ok) {
         return {
           ok: false,
-          message:
-            `El email se vinculó pero no se pudo enviar el link: ${sent.message}. ` +
-            "Usa “Reenviar invitación”.",
+          message: isEmailRateLimit(sent.message)
+            ? `El email se vinculó, pero el link no se pudo enviar: ${EMAIL_RATE_LIMIT_MESSAGE} Usa “Reenviar invitación” cuando se libere el límite.`
+            : `El email se vinculó pero no se pudo enviar el link: ${sent.message}. ` +
+              "Usa “Reenviar invitación”.",
         };
       }
 
@@ -524,7 +531,9 @@ export async function resendInviteAction(
       if (!sent.ok) {
         return {
           ok: false,
-          message: `No se pudo reenviar: ${sent.message}`,
+          message: isEmailRateLimit(sent.message)
+            ? EMAIL_RATE_LIMIT_MESSAGE
+            : `No se pudo reenviar: ${sent.message}`,
         };
       }
       const users = await buildManagedUsers(admin.ctx.orgId, admin.ctx.userId);

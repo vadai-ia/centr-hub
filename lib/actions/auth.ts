@@ -5,6 +5,10 @@ import { z } from "zod";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 import { getSession, ACTIVE_ORG_COOKIE } from "@/lib/auth/session";
+import {
+  EMAIL_RATE_LIMIT_MESSAGE,
+  isEmailRateLimit,
+} from "@/lib/auth/email-send-errors";
 
 export type AuthActionState = { error?: string; success?: string };
 
@@ -65,10 +69,9 @@ export async function requestPasswordReset(
     // Free, redirect_to no permitido, SMTP mal configurado) → mostrarlo
     // para poder diagnosticar, no esconderlo tras un genérico.
     console.error("[requestPasswordReset] resetPasswordForEmail failed", error);
-    const rate = /rate limit|too many|over_email_send_rate/i.test(error.message);
     return {
-      error: rate
-        ? "Límite de envío de correos alcanzado (SMTP de Supabase Free). Espera ~1 h o configura SMTP propio."
+      error: isEmailRateLimit(error.message)
+        ? EMAIL_RATE_LIMIT_MESSAGE
         : `No se pudo enviar el email: ${error.message}`,
     };
   }
