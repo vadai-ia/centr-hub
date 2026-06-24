@@ -9,7 +9,7 @@
  * reenviar / vincular login) lo consumen para mostrar texto idéntico.
  */
 export const EMAIL_RATE_LIMIT_MESSAGE =
-  "Límite de envío de correos alcanzado (SMTP de Supabase Free). Espera ~1 h o configura SMTP propio.";
+  "Límite de envío de correos alcanzado. Espera ~1 hora e intenta de nuevo.";
 
 /** ¿El error de envío de correo es el rate limit del SMTP de Supabase? */
 export function isEmailRateLimit(message: string | null | undefined): boolean {

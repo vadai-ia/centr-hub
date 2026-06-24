@@ -484,7 +484,7 @@ export async function linkExistingAdvisorAction(
         return {
           ok: false,
           message: isEmailRateLimit(sent.message)
-            ? `El email se vinculó, pero el link no se pudo enviar: ${EMAIL_RATE_LIMIT_MESSAGE} Usa “Reenviar invitación” cuando se libere el límite.`
+            ? "El email se vinculó, pero el link no se pudo enviar: límite de envío de correos alcanzado. Espera ~1 hora y usa “Reenviar invitación”."
             : `El email se vinculó pero no se pudo enviar el link: ${sent.message}. ` +
               "Usa “Reenviar invitación”.",
         };
