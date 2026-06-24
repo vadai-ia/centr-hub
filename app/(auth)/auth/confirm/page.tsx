@@ -5,16 +5,54 @@ import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 
 type PageState = "loading" | "set-password" | "redirecting" | "error";
 
+type FlowType = "recovery" | "invite";
+
+/**
+ * Credencial con la que se establece la sesión al guardar la contraseña.
+ * - `otp`: link directo a la app con `token_hash` (plantilla nueva, a prueba
+ *   de escáneres). El token se consume SOLO en el submit vía `verifyOtp` —
+ *   un GET pasivo de escáner nunca dispara el form, así que no lo quema.
+ * - `session`: tokens en el hash (`#access_token`), flujo implícito legacy
+ *   para correos en vuelo emitidos con la plantilla anterior.
+ */
+type AuthCredential =
+  | { kind: "otp"; tokenHash: string; type: FlowType }
+  | { kind: "session"; access: string; refresh: string };
+
 export default function AuthConfirmPage() {
   const [pageState, setPageState] = useState<PageState>("loading");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [tokens, setTokens] = useState<{ access: string; refresh: string } | null>(null);
+  const [credential, setCredential] = useState<AuthCredential | null>(null);
+  const [flow, setFlow] = useState<FlowType>("invite");
   const [password, setPassword] = useState("");
   const [confirmPw, setConfirmPw] = useState("");
   const [isPending, setIsPending] = useState(false);
   const router = useRouter();
 
   useEffect(() => {
+    // 1) Flujo nuevo a prueba de escáneres: la plantilla apunta directo a
+    //    /auth/confirm?token_hash=...&type=recovery|invite (query string).
+    //    NO verificamos aquí — diferimos a `verifyOtp` en el submit para que
+    //    un pre-fetch de escáner (GET sin enviar el form) no consuma el token.
+    const query = new URLSearchParams(window.location.search);
+    const queryTokenHash = query.get("token_hash");
+    const queryType = query.get("type");
+
+    if (
+      queryTokenHash &&
+      (queryType === "recovery" || queryType === "invite")
+    ) {
+      setCredential({
+        kind: "otp",
+        tokenHash: queryTokenHash,
+        type: queryType,
+      });
+      setFlow(queryType);
+      setPageState("set-password");
+      return;
+    }
+
+    // 2) Flujo implícito legacy: tokens en el hash fragment.
     const rawHash = window.location.hash.substring(1); // strip leading '#'
 
     if (!rawHash) {
@@ -44,7 +82,8 @@ export default function AuthConfirmPage() {
     }
 
     if (type === "invite" || type === "recovery") {
-      setTokens({ access: accessToken, refresh: refreshToken });
+      setCredential({ kind: "session", access: accessToken, refresh: refreshToken });
+      setFlow(type);
       setPageState("set-password");
       return;
     }
@@ -73,7 +112,7 @@ export default function AuthConfirmPage() {
 
   async function handleSetPassword(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (!tokens) return;
+    if (!credential) return;
 
     setErrorMsg(null);
 
@@ -89,14 +128,25 @@ export default function AuthConfirmPage() {
     setIsPending(true);
     const supabase = getSupabaseBrowserClient();
 
-    const { error: sessionError } = await supabase.auth.setSession({
-      access_token: tokens.access,
-      refresh_token: tokens.refresh,
-    });
+    // Aquí — y solo aquí, en respuesta a una acción explícita del usuario —
+    // se consume el token de un solo uso. Un escáner que pre-fetcheó el link
+    // nunca llega a esta línea.
+    const { error: sessionError } =
+      credential.kind === "otp"
+        ? await supabase.auth.verifyOtp({
+            token_hash: credential.tokenHash,
+            type: credential.type,
+          })
+        : await supabase.auth.setSession({
+            access_token: credential.access,
+            refresh_token: credential.refresh,
+          });
 
     if (sessionError) {
       setErrorMsg(
-        "Este link ya expiró. Pide al administrador que te reenvíe la invitación.",
+        flow === "recovery"
+          ? "Este link ya expiró o ya se usó. Solicita uno nuevo desde la pantalla de inicio de sesión."
+          : "Este link ya expiró. Pide al administrador que te reenvíe la invitación.",
       );
       setIsPending(false);
       setPageState("error");
@@ -145,6 +195,8 @@ export default function AuthConfirmPage() {
     );
   }
 
+  const isRecovery = flow === "recovery";
+
   return (
     <div className="w-full max-w-sm space-y-6">
       <div className="text-center space-y-1">
@@ -152,7 +204,9 @@ export default function AuthConfirmPage() {
           Centr Hub
         </h1>
         <p className="text-sm text-gray-500 dark:text-gray-400">
-          Define tu contraseña para activar tu cuenta.
+          {isRecovery
+            ? "Define tu nueva contraseña."
+            : "Define tu contraseña para activar tu cuenta."}
         </p>
       </div>
 
@@ -200,7 +254,13 @@ export default function AuthConfirmPage() {
           disabled={isPending}
           className="w-full rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
         >
-          {isPending ? "Activando cuenta..." : "Activar cuenta"}
+          {isPending
+            ? isRecovery
+              ? "Guardando..."
+              : "Activando cuenta..."
+            : isRecovery
+              ? "Guardar contraseña"
+              : "Activar cuenta"}
         </button>
       </form>
     </div>
