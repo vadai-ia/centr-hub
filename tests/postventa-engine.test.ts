@@ -8,90 +8,107 @@ function order(partial: Partial<OrderStatusSnapshot>): OrderStatusSnapshot {
   return {
     financial_status: "pending",
     fulfillment_status: null,
+    delivery_status: null,
     cancelled_at: null,
     ...partial,
   };
 }
 
-describe("evaluatePostventaTarget — mapeo confirmado por Centr", () => {
-  it("pago pendiente, sin preparación → Cotización completada (pos 1)", () => {
+describe("evaluatePostventaTarget — mapeo confirmado por Centr (cambio 0036)", () => {
+  it("pago pendiente, sin entrega → Cotización completada (pos 1)", () => {
     const t = evaluatePostventaTarget(order({ financial_status: "pending" }));
     expect(t).toMatchObject({ kind: "advance", position: 1 });
   });
 
-  it("pago pagado, sin preparación → Pago confirmado (pos 2)", () => {
+  it("pago pagado, sin entrega → Pago confirmado (pos 2)", () => {
     const t = evaluatePostventaTarget(order({ financial_status: "paid" }));
     expect(t).toMatchObject({ kind: "advance", position: 2 });
   });
 
-  it("preparación en curso (partial) → Envío en curso (pos 3)", () => {
+  it("entrega en curso ('Seguimiento añadido') → Envío en curso (pos 3)", () => {
     const t = evaluatePostventaTarget(
-      order({ financial_status: "paid", fulfillment_status: "partial" }),
+      order({ financial_status: "paid", delivery_status: "in_progress" }),
     );
     expect(t).toMatchObject({ kind: "advance", position: 3 });
   });
 
-  it("preparación completa (fulfilled) → Entregado (pos 4)", () => {
+  it("entrega entregada → Entregado (pos 4)", () => {
     const t = evaluatePostventaTarget(
-      order({ financial_status: "paid", fulfillment_status: "fulfilled" }),
+      order({ financial_status: "paid", delivery_status: "delivered" }),
     );
     expect(t).toMatchObject({ kind: "advance", position: 4 });
   });
 });
 
-describe("precedencia preparación > pago", () => {
-  it("fulfilled gana aunque el pago siga pendiente (caso raro)", () => {
-    // Preparación avanza sin pago confirmado: la preparación domina.
+describe("precedencia entrega > pago (cambio 0036)", () => {
+  it("entregado gana aunque el pago siga pendiente (caso raro)", () => {
     const t = evaluatePostventaTarget(
-      order({ financial_status: "pending", fulfillment_status: "fulfilled" }),
+      order({ financial_status: "pending", delivery_status: "delivered" }),
     );
     expect(t).toMatchObject({ kind: "advance", position: 4 });
   });
 
-  it("partial gana sobre pago pagado → Envío en curso, no Pago confirmado", () => {
+  it("en curso gana sobre pago pagado → Envío en curso, no Pago confirmado", () => {
     const t = evaluatePostventaTarget(
-      order({ financial_status: "paid", fulfillment_status: "partial" }),
+      order({ financial_status: "paid", delivery_status: "in_progress" }),
     );
     expect(t).toMatchObject({ kind: "advance", position: 3 });
   });
 
-  it("unfulfilled NO cuenta como preparación → cae a pago", () => {
+  it("sin señal de entrega (null) → cae a pago", () => {
     const t = evaluatePostventaTarget(
-      order({ financial_status: "paid", fulfillment_status: "unfulfilled" }),
+      order({ financial_status: "paid", delivery_status: null }),
+    );
+    expect(t).toMatchObject({ kind: "advance", position: 2 });
+  });
+});
+
+describe("fulfillment_status YA NO participa (cambio 0036)", () => {
+  it("fulfilled SIN entrega → NO va a Entregado; cae a pago", () => {
+    const t = evaluatePostventaTarget(
+      order({
+        financial_status: "paid",
+        fulfillment_status: "fulfilled",
+        delivery_status: null,
+      }),
     );
     expect(t).toMatchObject({ kind: "advance", position: 2 });
   });
 
-  it("fulfillment null → cae a pago", () => {
+  it("partial SIN entrega → NO va a Envío en curso; cae a pago", () => {
     const t = evaluatePostventaTarget(
-      order({ financial_status: "pending", fulfillment_status: null }),
+      order({
+        financial_status: "paid",
+        fulfillment_status: "partial",
+        delivery_status: null,
+      }),
     );
-    expect(t).toMatchObject({ kind: "advance", position: 1 });
+    expect(t).toMatchObject({ kind: "advance", position: 2 });
   });
 });
 
-describe("pago parcial (decisión M3v2: partially_paid = pendiente)", () => {
-  it("partially_paid sin preparación → Cotización completada (pos 1)", () => {
+describe("pago parcial (partially_paid = pendiente)", () => {
+  it("partially_paid sin entrega → Cotización completada (pos 1)", () => {
     const t = evaluatePostventaTarget(
       order({ financial_status: "partially_paid" }),
     );
     expect(t).toMatchObject({ kind: "advance", position: 1 });
   });
 
-  it("partially_paid pero ya fulfilled → Entregado (preparación precede)", () => {
+  it("partially_paid pero ya entregado → Entregado (entrega precede)", () => {
     const t = evaluatePostventaTarget(
-      order({ financial_status: "partially_paid", fulfillment_status: "fulfilled" }),
+      order({ financial_status: "partially_paid", delivery_status: "delivered" }),
     );
     expect(t).toMatchObject({ kind: "advance", position: 4 });
   });
 });
 
 describe("cancelado / reembolsado → Caso problemático (one-way)", () => {
-  it("cancelled_at set → problem (aunque esté pagado y fulfilled)", () => {
+  it("cancelled_at set → problem (aunque esté pagado y entregado)", () => {
     const t = evaluatePostventaTarget(
       order({
         financial_status: "paid",
-        fulfillment_status: "fulfilled",
+        delivery_status: "delivered",
         cancelled_at: "2026-06-19T10:00:00Z",
       }),
     );
@@ -103,32 +120,32 @@ describe("cancelado / reembolsado → Caso problemático (one-way)", () => {
     expect(t.kind).toBe("problem");
   });
 
-  it("financial partially_refunded → problem", () => {
+  it("financial partially_refunded → problem (precede a entrega)", () => {
     const t = evaluatePostventaTarget(
-      order({ financial_status: "partially_refunded", fulfillment_status: "fulfilled" }),
+      order({ financial_status: "partially_refunded", delivery_status: "delivered" }),
     );
     expect(t.kind).toBe("problem");
   });
 });
 
 describe("estados inesperados / robustez", () => {
-  it("financial_status desconocido sin preparación → none (no mover)", () => {
+  it("financial_status desconocido sin entrega → none (no mover)", () => {
     const t = evaluatePostventaTarget(
-      order({ financial_status: "authorized", fulfillment_status: null }),
+      order({ financial_status: "authorized", delivery_status: null }),
     );
     expect(t.kind).toBe("none");
   });
 
   it("es case-insensitive y tolera espacios", () => {
     const t = evaluatePostventaTarget(
-      order({ financial_status: "  PAID  ", fulfillment_status: " FULFILLED " }),
+      order({ financial_status: "  PAID  ", delivery_status: " DELIVERED " }),
     );
     expect(t).toMatchObject({ kind: "advance", position: 4 });
   });
 
-  it("financial_status desconocido pero fulfilled → preparación precede igual", () => {
+  it("financial_status desconocido pero entregado → entrega precede igual", () => {
     const t = evaluatePostventaTarget(
-      order({ financial_status: "authorized", fulfillment_status: "fulfilled" }),
+      order({ financial_status: "authorized", delivery_status: "delivered" }),
     );
     expect(t).toMatchObject({ kind: "advance", position: 4 });
   });

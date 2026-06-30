@@ -2,11 +2,15 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { FakeSupabase } from "./helpers/fake-supabase";
 
 /**
- * Driver del motor de transiciones de Post-venta (M3v2, Bloque B).
+ * Driver del motor de transiciones de Post-venta (M3v2 + cambio 0036).
  *
  * Verifica la convivencia de reglas sobre datos en memoria:
  *  - AVANCE solo desde la zona automática (etapas 1-4).
- *  - PROBLEM-EXIT desde cualquier etapa activa (incluida una manual 5-6).
+ *  - Envío en curso / Entregado por estado de ENTREGA (delivery_status),
+ *    no por preparación (cambio 0036).
+ *  - Anti-retroceso: dentro de la zona solo avanza, nunca baja de posición.
+ *  - PROBLEM-EXIT desde cualquier etapa activa (incluida una manual 5-6),
+ *    exento de la guarda anti-retroceso.
  *  - "Caso problemático" como sumidero (no avanza ni re-evalúa).
  *  - Idempotencia (no mueve si ya está en destino).
  *  - Atribución intacta tras el movimiento.
@@ -88,7 +92,15 @@ function seedOpp(overrides: Record<string, unknown> = {}) {
   ]);
 }
 
-function seedOrder(financial: string, fulfillment: string | null, cancelledAt: string | null = null) {
+/**
+ * `delivery` = delivery_status normalizado ('delivered' | 'in_progress' |
+ * null). `fulfillment_status` se deja null: el motor ya NO lo usa (0036).
+ */
+function seedOrder(
+  financial: string,
+  delivery: string | null,
+  cancelledAt: string | null = null,
+) {
   fake.setTable("orders", [
     {
       id: "order-1",
@@ -98,7 +110,8 @@ function seedOrder(financial: string, fulfillment: string | null, cancelledAt: s
       opportunity_id: PARENT,
       shopify_order_id: "SO-100",
       financial_status: financial,
-      fulfillment_status: fulfillment,
+      fulfillment_status: null,
+      delivery_status: delivery,
       cancelled_at: cancelledAt,
       last_modified_at: "2026-06-10T00:00:00Z",
     },
@@ -120,8 +133,8 @@ beforeEach(() => {
 
 const run = <T>(fn: () => Promise<T>) => withTenantContext(ORG, fn, { source: "worker" });
 
-describe("AVANCE dentro de la zona automática", () => {
-  it("Cotización completada + pago pagado → Pago confirmado", async () => {
+describe("AVANCE dentro de la zona automática (envío/entrega por delivery_status)", () => {
+  it("Cotización completada + pago pagado (sin entrega) → Pago confirmado", async () => {
     seedOpp({ stage_id: S.cotizacion });
     seedOrder("paid", null);
     const r = await run(() => applyPostventaTransition("opp-1"));
@@ -129,19 +142,26 @@ describe("AVANCE dentro de la zona automática", () => {
     expect(currentStage()).toBe(S.pago);
   });
 
-  it("precedencia: fulfilled gana → Entregado (aunque pago pendiente)", async () => {
+  it("precedencia: entrega entregada gana → Entregado (aunque pago pendiente)", async () => {
     seedOpp({ stage_id: S.cotizacion });
-    seedOrder("pending", "fulfilled");
+    seedOrder("pending", "delivered");
     const r = await run(() => applyPostventaTransition("opp-1"));
     expect(r.status).toBe("moved");
     expect(currentStage()).toBe(S.entregado);
   });
 
-  it("partial → Envío en curso", async () => {
+  it("entrega en curso ('Seguimiento añadido') → Envío en curso", async () => {
     seedOpp({ stage_id: S.pago });
-    seedOrder("paid", "partial");
+    seedOrder("paid", "in_progress");
     await run(() => applyPostventaTransition("opp-1"));
     expect(currentStage()).toBe(S.envio);
+  });
+
+  it("entregado salta directo desde Pago confirmado → Entregado", async () => {
+    seedOpp({ stage_id: S.pago });
+    seedOrder("paid", "delivered");
+    await run(() => applyPostventaTransition("opp-1"));
+    expect(currentStage()).toBe(S.entregado);
   });
 
   it("atribución intacta tras el movimiento", async () => {
@@ -149,6 +169,34 @@ describe("AVANCE dentro de la zona automática", () => {
     seedOrder("paid", null);
     await run(() => applyPostventaTransition("opp-1"));
     expect(currentAdvisor()).toBe("advisor-9");
+  });
+});
+
+describe("anti-retroceso (cambio 0036): dentro de la zona solo avanza", () => {
+  it("Entregado + pedido sin señal de entrega (pagado) → noop, NO retrocede a Pago", async () => {
+    seedOpp({ stage_id: S.entregado });
+    seedOrder("paid", null);
+    const r = await run(() => applyPostventaTransition("opp-1"));
+    expect(r.status).toBe("noop");
+    expect(r.reason).toBe("advance_no_backward");
+    expect(currentStage()).toBe(S.entregado);
+  });
+
+  it("Entregado + entrega en curso → noop, NO retrocede a Envío en curso", async () => {
+    seedOpp({ stage_id: S.entregado });
+    seedOrder("paid", "in_progress");
+    const r = await run(() => applyPostventaTransition("opp-1"));
+    expect(r.status).toBe("noop");
+    expect(r.reason).toBe("advance_no_backward");
+    expect(currentStage()).toBe(S.entregado);
+  });
+
+  it("Envío en curso + entrega entregada → avanza a Entregado (forward permitido)", async () => {
+    seedOpp({ stage_id: S.envio });
+    seedOrder("paid", "delivered");
+    const r = await run(() => applyPostventaTransition("opp-1"));
+    expect(r.status).toBe("moved");
+    expect(currentStage()).toBe(S.entregado);
   });
 });
 
@@ -163,10 +211,10 @@ describe("AVANCE fuera de zona → no arrastra (handoff manual)", () => {
   });
 });
 
-describe("PROBLEM-EXIT → Caso problemático (one-way)", () => {
-  it("reembolso desde la zona → Caso problemático", async () => {
+describe("PROBLEM-EXIT → Caso problemático (one-way, exento de anti-retroceso)", () => {
+  it("reembolso desde la zona (Entregado) → Caso problemático", async () => {
     seedOpp({ stage_id: S.entregado });
-    seedOrder("refunded", "fulfilled");
+    seedOrder("refunded", "delivered");
     const r = await run(() => applyPostventaTransition("opp-1"));
     expect(r.status).toBe("moved");
     expect(currentStage()).toBe(S.problematico);
@@ -174,7 +222,7 @@ describe("PROBLEM-EXIT → Caso problemático (one-way)", () => {
 
   it("cancelado desde etapa manual (pos 6) → Caso problemático", async () => {
     seedOpp({ stage_id: S.activo });
-    seedOrder("paid", "fulfilled", "2026-06-15T00:00:00Z");
+    seedOrder("paid", "delivered", "2026-06-15T00:00:00Z");
     const r = await run(() => applyPostventaTransition("opp-1"));
     expect(r.status).toBe("moved");
     expect(currentStage()).toBe(S.problematico);
@@ -198,9 +246,9 @@ describe("sumidero: Caso problemático no se toca", () => {
     expect(currentStage()).toBe(S.problematico);
   });
 
-  it("opp en Caso problemático con pedido pagado → no avanza", async () => {
+  it("opp en Caso problemático con pedido entregado → no avanza", async () => {
     seedOpp({ stage_id: S.problematico });
-    seedOrder("paid", "fulfilled");
+    seedOrder("paid", "delivered");
     const r = await run(() => applyPostventaTransition("opp-1"));
     expect(r.status).toBe("noop");
     expect(currentStage()).toBe(S.problematico);

@@ -1,7 +1,7 @@
 import "server-only";
 import { getInngestClient } from "@/lib/inngest/client";
 import { withTenantContext } from "@/lib/tenant/context";
-import { listAllOrganizationIds } from "@/lib/db/organizations";
+import { getOrganizationById, listAllOrganizationIds } from "@/lib/db/organizations";
 import { listActivePostventaOppIds } from "@/lib/db/opportunities";
 import {
   applyPostventaTransition,
@@ -9,6 +9,7 @@ import {
   isOrgBackfillInProgress,
   isPostventaEngineEnabled,
 } from "@/lib/services/postventa-transition";
+import { refreshDeliveryStatusForOpp } from "@/lib/services/delivery-refresh";
 import { recordAuditEvent } from "@/lib/db/operational";
 
 /**
@@ -71,10 +72,32 @@ export const postventaTransitionCron = inngest.createFunction(
               return { evaluated: 0, moved: 0, problem: 0, suppressed: false };
             }
 
+            // shopDomain para el pull de entrega (read_orders). Sin dominio
+            // configurado, el motor opera solo con delivery_status capturado
+            // por el hook inline de orders/* (sin refresco por carrier scan).
+            const org = await getOrganizationById(orgId);
+            const shopDomain = org?.shopify_store_domain ?? null;
+
             const oppIds = await listActivePostventaOppIds();
             let moved = 0;
             let problem = 0;
             for (const oppId of oppIds) {
+              // Refresco SOLO-LECTURA del estado de entrega desde Shopify
+              // (cambio 0036) ANTES de decidir: capta el delivered scan del
+              // carrier que no re-dispara orders/*. No-fatal por opp — un
+              // fallo de pull no aborta el resto.
+              if (shopDomain) {
+                try {
+                  await refreshDeliveryStatusForOpp(oppId, shopDomain, orgId);
+                } catch (refreshErr) {
+                  // eslint-disable-next-line no-console
+                  console.error(
+                    `postventa-transition-cron: refresh entrega opp ${oppId} falló:`,
+                    (refreshErr as Error).message,
+                  );
+                }
+              }
+
               const result = await applyPostventaTransition(oppId, {
                 engineStages,
                 backfillInProgress: false,

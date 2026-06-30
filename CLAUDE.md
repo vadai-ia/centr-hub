@@ -383,19 +383,28 @@ Un `vendedor` ve solo lo suyo y eso está forzado en la **capa de datos**, no so
 
 ## Motor de transiciones automáticas de Post-venta (M3v2)
 
-El motor mueve solo las oportunidades de Post-venta por sus 4 primeras etapas según el estado del pedido en Shopify (`orders.financial_status` / `fulfillment_status`), **leyendo la fila `orders` ya persistida** (hereda LWW). Mapeo confirmado por Centr (no cambiar): pago pendiente→Cotización completada, pago pagado→Pago confirmado, preparación en curso (`partial`)→Envío en curso, preparación completa (`fulfilled`)→Entregado. **Precedencia preparación > pago**; `partially_paid` = pendiente; `cancelled`/`refunded`/`partially_refunded` → **Caso problemático** (one-way). Detalle e invariantes en `ERRORES.md` ("Motor de transiciones de Post-venta").
+El motor mueve solo las oportunidades de Post-venta por sus 4 primeras etapas según el estado del pedido en Shopify, **leyendo la fila `orders` ya persistida** (hereda LWW). Mapeo confirmado por Centr (no cambiar): pago pendiente→Cotización completada, pago pagado→Pago confirmado, **entrega en curso ("Seguimiento añadido" / en tránsito)→Envío en curso, entrega entregada→Entregado**. **Precedencia entrega > pago**; `partially_paid` = pendiente; `cancelled`/`refunded`/`partially_refunded` → **Caso problemático** (one-way).
+
+**Cambio 0036 — Envío/Entregado por estado de ENTREGA, no preparación:** las etapas 3 y 4 ya NO se rigen por `orders.fulfillment_status` (preparación: ¿se despacharon los ítems?), sino por `orders.delivery_status` (estado de ENTREGA real al cliente, derivado de los fulfillments: `delivered` / `in_progress` / null). Captura **solo-lectura con el scope `read_orders` que ya tenemos** — el cron horario hace **pull** GraphQL del estado de entrega (`fetchOrderDeliveryStatus`) y lo persiste; NO se suscribe el webhook `fulfillments/*` (eso exigiría `read_fulfillments` + re-instalación de la app, innecesario). `fulfillment_status` ya no participa en la decisión. **Anti-retroceso:** dentro de la zona el motor solo AVANZA (nunca baja de posición); el problem-exit queda exento. Detalle e invariantes en `ERRORES.md` ("Motor de transiciones de Post-venta" + "Envío/Entregado por estado de ENTREGA").
 
 ### Pasos operativos obligatorios (NO son código del repo)
 
-1. **Aplicar la migración 0032** (`postventa_case_resolution`) a la BD — agrega `resolved_at`/`resolved_by_user_id`/`resolution_note` a `opportunities` (cierre de "Caso problemático").
+1. **Aplicar la migración 0032** (`postventa_case_resolution`) a la BD — agrega `resolved_at`/`resolved_by_user_id`/`resolution_note` a `opportunities` (cierre de "Caso problemático"). **Aplicar también la migración 0036** (`orders_delivery_status`) — agrega `orders.delivery_status` (cambio del criterio de envío/entrega).
 
-2. **Dry-run ANTES del primer backfill real.** La primera corrida del cron mueve TODAS las opps históricas a la vez sobre datos de producción. Revisar primero, sin mover nada:
+2. **Poblar `delivery_status` histórico (cambio 0036) ANTES del dry-run del motor.** Las opps históricas no tienen el estado de entrega poblado; sin esto el dry-run del motor las vería sin señal de entrega. Read-only con `--dry-run` primero:
+   ```
+   npm run maintenance:backfill-order-delivery-status -- --org-slug centr --dry-run
+   npm run maintenance:backfill-order-delivery-status -- --org-slug centr
+   ```
+   Hace pull del estado de entrega vía `read_orders` y persiste `orders.delivery_status` (NO mueve etapas). Idempotente.
+
+3. **Dry-run del motor ANTES del primer backfill real.** La primera corrida del cron mueve TODAS las opps históricas a la vez sobre datos de producción. Revisar primero, sin mover nada:
    ```
    npm run maintenance:preview-postventa-transitions -- --org-slug centr
    ```
-   El preview es read-only y comparte la función de decisión (`decidePostventaStageMove`) con el run real → lo que lista es bit-a-bit lo que ejecutaría. Validar que cada opp en "Cotización completada" caiga en la etapa correcta de su pedido.
+   El preview es read-only y comparte la función de decisión (`decidePostventaStageMove`) con el run real → lo que lista es bit-a-bit lo que ejecutaría. La línea de estado muestra `del=` (delivery_status, el criterio nuevo) y `ful=` (preparación, solo contexto). Validar que cada opp caiga en la etapa correcta según su entrega.
 
-3. **Kill switch — habilitar SOLO tras revisar el dry-run.** Los dos puntos de entrada automáticos (cron `postventa-transition-engine-hourly` + hook inline en `orders.ts`) están gateados por `POSTVENTA_ENGINE_ENABLED` (default OFF). Sin `POSTVENTA_ENGINE_ENABLED=true` en Vercel env, el motor no mueve nada — el deploy es seguro. Tras el sign-off del dry-run, setear `POSTVENTA_ENGINE_ENABLED=true` en Vercel y el motor se activa en el siguiente tick. El preview dry-run y el cierre manual de casos NO se gatean (funcionan con el flag en OFF). Durante el backfill de M11 el motor además se suprime por `organizations.backfill_in_progress`.
+4. **Kill switch — habilitar SOLO tras revisar el dry-run.** Los dos puntos de entrada automáticos (cron `postventa-transition-engine-hourly` + hook inline en `orders.ts`) están gateados por `POSTVENTA_ENGINE_ENABLED` (default OFF). Sin `POSTVENTA_ENGINE_ENABLED=true` en Vercel env, el motor no mueve nada — el deploy es seguro. Tras el sign-off del dry-run, setear `POSTVENTA_ENGINE_ENABLED=true` en Vercel y el motor se activa en el siguiente tick. El preview dry-run y el cierre manual de casos NO se gatean (funcionan con el flag en OFF). Durante el backfill de M11 el motor además se suprime por `organizations.backfill_in_progress`.
 
 ### Cierre de casos ("Caso problemático" → archivado)
 

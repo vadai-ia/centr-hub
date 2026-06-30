@@ -211,7 +211,12 @@ export type PostventaDecision =
  */
 export function decidePostventaStageMove(
   opp: { stage_id: UUID },
-  order: { financial_status: string; fulfillment_status: string | null; cancelled_at: string | null },
+  order: {
+    financial_status: string;
+    fulfillment_status: string | null;
+    delivery_status: string | null;
+    cancelled_at: string | null;
+  },
   stages: PostventaEngineStages,
 ): PostventaDecision {
   // Sumidero: si ya está en Caso problemático, el motor no la toca.
@@ -226,12 +231,25 @@ export function decidePostventaStageMove(
     // Estado inesperado de Shopify: no mover, dejar para diagnóstico.
     return { kind: "noop", reason: `no_target:${target.reason}` };
   } else if (target.kind === "problem") {
+    // Problem-exit: one-way al sumidero. EXENTO de la guarda anti-retroceso
+    // (un reembolso debe mandar a Caso problemático desde cualquier etapa).
     toStage = stages.problematicStage;
   } else {
     // AVANCE: solo desde la zona automática (1-4). Si la opp ya está fuera
     // de la zona (movida manual a Seguimiento/Caso cerrado), no arrastrar.
     if (!stages.zoneStageIds.has(opp.stage_id)) {
       return { kind: "noop", reason: "advance_out_of_zone" };
+    }
+    // Anti-retroceso (cambio 0036): dentro de la zona el motor SOLO avanza,
+    // nunca baja de posición. Al cambiar el criterio de envío/entrega de
+    // preparación a entrega, una opp que el criterio viejo dejó en Entregado
+    // no debe rebotar a Envío en curso ni a Pago si la señal de entrega aún
+    // no llegó. Solo se mueve si la posición destino es mayor que la actual.
+    // Estricto `<`: posición igual cae al check `already_in_target` de
+    // abajo (idempotencia); solo bloqueamos un retroceso real (target menor).
+    const currentPosition = positionOfZoneStage(opp.stage_id, stages);
+    if (currentPosition !== null && target.position < currentPosition) {
+      return { kind: "noop", reason: "advance_no_backward" };
     }
     toStage = stages.zoneByPosition[target.position];
   }
@@ -241,6 +259,18 @@ export function decidePostventaStageMove(
   }
 
   return { kind: "move", fromStageId: opp.stage_id, toStage, reason: target.reason };
+}
+
+/** Posición (1-4) de la etapa de zona cuyo id coincide, o null si no es de zona. */
+function positionOfZoneStage(
+  stageId: UUID,
+  stages: PostventaEngineStages,
+): PostventaZonePosition | null {
+  const positions: PostventaZonePosition[] = [1, 2, 3, 4];
+  for (const pos of positions) {
+    if (stages.zoneByPosition[pos].id === stageId) return pos;
+  }
+  return null;
 }
 
 /**

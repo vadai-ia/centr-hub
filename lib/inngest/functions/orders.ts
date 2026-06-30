@@ -166,6 +166,10 @@ async function upsertOrderShell(
       // Fecha real de creación del pedido en Shopify (no la de BD).
       // El dashboard cuenta pedidos por este campo (migración 0024).
       shopify_created_at: normalized.createdAt,
+      // Estado de entrega derivado de los fulfillments embebidos del
+      // payload (migración 0036). NULL si el pedido aún no tiene
+      // fulfillment con seguimiento. El cron horario lo refresca vía pull.
+      delivery_status: normalized.deliveryStatus,
     });
     await replaceOrderLineItems(
       created.id,
@@ -194,6 +198,11 @@ async function upsertOrderShell(
     shopify_tags: normalized.tags,
     paid_at: normalized.paidAt ?? existing.paid_at,
     cancelled_at: normalized.cancelledAt ?? existing.cancelled_at,
+    // Estado de entrega (0036): refresca desde los fulfillments embebidos
+    // del payload, pero NO lo borra si este update no trae fulfillments
+    // (ej. un cambio de nota dispara orders/updated sin fulfillments). El
+    // cron horario es la fuente de refresco autoritativa vía pull.
+    delivery_status: normalized.deliveryStatus ?? existing.delivery_status,
     last_modified_at: effectiveUpdatedAt,
     last_modified_source: "shopify",
     // Fecha real de creación en Shopify: inmutable allá. Coalesce

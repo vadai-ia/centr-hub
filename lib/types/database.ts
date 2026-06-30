@@ -265,6 +265,14 @@ export interface OrderRow {
   // el correctivo las popule. El dashboard cuenta pedidos por esta
   // columna, no por `created_at` (migración 0024).
   shopify_created_at: ISODateString | null;
+  // Estado de ENTREGA normalizado del pedido (derivado de los fulfillments
+  // de Shopify): 'delivered' = entregado al cliente; 'in_progress' =
+  // seguimiento añadido / en tránsito, aún no entregado; NULL = sin señal de
+  // entrega. Distinto de `fulfillment_status` (preparación). El motor de
+  // Post-venta mueve Envío en curso / Entregado por esta columna
+  // (migración 0036). NULL en filas pre-fix hasta el correctivo
+  // backfill-order-delivery-status o el cron.
+  delivery_status: string | null;
 }
 
 export interface OrderLineItemRow {

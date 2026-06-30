@@ -1,5 +1,9 @@
 import "server-only";
 import { z } from "zod";
+import {
+  normalizeDeliveryStatus,
+  type DeliveryFulfillmentSnapshot,
+} from "@/lib/shopify/delivery-status";
 
 /**
  * Mappers Shopify (Sección 3.6).
@@ -428,6 +432,21 @@ export const shopifyOrderWebhookSchema = z
     currency: z.string().nullable().optional(),
     financial_status: z.string().nullable().optional(),
     fulfillment_status: z.string().nullable().optional(),
+    // Fulfillments embebidos del pedido. Traen el estado de ENTREGA por
+    // envío (shipment_status) + seguimiento, distinto del fulfillment_status
+    // del pedido (preparación). Lo usamos para derivar delivery_status (0036).
+    fulfillments: z
+      .array(
+        z
+          .object({
+            status: z.string().nullable().optional(),
+            shipment_status: z.string().nullable().optional(),
+            tracking_number: z.string().nullable().optional(),
+            tracking_numbers: z.array(z.string()).nullable().optional(),
+          })
+          .passthrough(),
+      )
+      .nullish(),
     cancel_reason: z.string().nullable().optional(),
     cancelled_at: z.string().nullable().optional(),
     processed_at: z.string().nullable().optional(),
@@ -465,6 +484,14 @@ export interface NormalizedOrder {
   currency: string;
   financialStatus: string;
   fulfillmentStatus: string | null;
+  /**
+   * Estado de ENTREGA normalizado del pedido derivado de los fulfillments
+   * embebidos del payload (cambio 0036): 'delivered' / 'in_progress' / null.
+   * Distinto de `fulfillmentStatus` (preparación). El webhook lo trae
+   * "gratis"; el cron horario lo refresca vía pull GraphQL cuando el
+   * carrier actualiza sin re-disparar orders/*.
+   */
+  deliveryStatus: "delivered" | "in_progress" | null;
   cancellationReason: string | null;
   source: string | null;
   paidAt: string | null;
@@ -480,6 +507,9 @@ export function mapOrderWebhookToNormalized(raw: unknown): NormalizedOrder {
   const shipping =
     data.total_shipping_price_set?.shop_money?.amount ?? null;
   const embeddedCustomer = mapEmbeddedCustomer(data.customer ?? null);
+  const deliveryStatus = normalizeDeliveryStatus(
+    (data.fulfillments ?? []).map(mapEmbeddedFulfillment),
+  );
   return {
     shopifyOrderId: id,
     shopifyName: data.name ?? null,
@@ -496,6 +526,7 @@ export function mapOrderWebhookToNormalized(raw: unknown): NormalizedOrder {
     currency: data.currency ?? "MXN",
     financialStatus: data.financial_status ?? "pending",
     fulfillmentStatus: data.fulfillment_status ?? null,
+    deliveryStatus,
     cancellationReason: data.cancel_reason ?? null,
     source: data.source_name ?? null,
     paidAt: data.processed_at ?? null,
@@ -632,11 +663,56 @@ export function mapOrderGraphqlToNormalized(node: unknown): NormalizedOrder {
     currency: ((n.currencyCode as string) ?? "MXN") as string,
     financialStatus: ((n.displayFinancialStatus as string | null) ?? "pending").toLowerCase(),
     fulfillmentStatus: ((n.displayFulfillmentStatus as string | null) ?? null)?.toLowerCase() ?? null,
+    deliveryStatus: normalizeDeliveryStatus(
+      extractGraphqlFulfillmentNodes(n.fulfillments).map(mapGraphqlFulfillment),
+    ),
     cancellationReason: ((n.cancelReason as string | null) ?? null)?.toLowerCase() ?? null,
     source: (n.sourceName as string | null) ?? null,
     paidAt: (n.processedAt as string | null) ?? null,
     cancelledAt: (n.cancelledAt as string | null) ?? null,
     updatedAt: (n.updatedAt as string | null) ?? null,
     createdAt: (n.createdAt as string | null) ?? null,
+  };
+}
+
+// ============================================================
+// Fulfillment → snapshot de entrega (cambio 0036)
+// ============================================================
+
+type EmbeddedFulfillment = NonNullable<ShopifyOrderWebhook["fulfillments"]>[number];
+
+/** REST/webhook fulfillment embebido → snapshot de entrega. */
+function mapEmbeddedFulfillment(raw: EmbeddedFulfillment): DeliveryFulfillmentSnapshot {
+  const status = (raw.status ?? "").trim().toLowerCase();
+  const trackingNumbers = Array.isArray(raw.tracking_numbers)
+    ? raw.tracking_numbers
+    : [];
+  return {
+    cancelled: status === "cancelled" || status === "error" || status === "failure",
+    shipmentStatus: raw.shipment_status ?? null,
+    hasTracking: Boolean(raw.tracking_number) || trackingNumbers.length > 0,
+  };
+}
+
+/** Normaliza `fulfillments` de GraphQL (connection `{nodes}` o array). */
+function extractGraphqlFulfillmentNodes(value: unknown): Record<string, unknown>[] {
+  if (!value) return [];
+  if (Array.isArray(value)) return value as Record<string, unknown>[];
+  const nodes = (value as { nodes?: unknown[] }).nodes;
+  return Array.isArray(nodes) ? (nodes as Record<string, unknown>[]) : [];
+}
+
+/** GraphQL fulfillment node → snapshot de entrega. */
+function mapGraphqlFulfillment(node: Record<string, unknown>): DeliveryFulfillmentSnapshot {
+  const status = ((node.status as string | null) ?? "").trim().toLowerCase();
+  const trackingInfo = node.trackingInfo;
+  const hasTracking = Array.isArray(trackingInfo)
+    ? trackingInfo.some((t) => Boolean((t as { number?: string | null })?.number))
+    : Boolean((trackingInfo as { number?: string | null } | null)?.number);
+  return {
+    cancelled: status === "cancelled" || status === "error" || status === "failure",
+    displayStatus: (node.displayStatus as string | null) ?? null,
+    deliveredAt: (node.deliveredAt as string | null) ?? null,
+    hasTracking,
   };
 }

@@ -186,6 +186,7 @@ async function backfillOrders(opts: {
         paid_at: normalized.paidAt,
         cancelled_at: normalized.cancelledAt,
         shopify_created_at: normalized.createdAt,
+        delivery_status: normalized.deliveryStatus,
       });
       await replaceOrderLineItems(
         created.id,

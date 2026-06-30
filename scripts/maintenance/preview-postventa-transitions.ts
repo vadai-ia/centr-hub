@@ -117,7 +117,10 @@ async function main() {
         }
 
         const decision = decidePostventaStageMove(opp, order, stages);
-        const status = `fin=${order.financial_status} ful=${order.fulfillment_status ?? "∅"}${order.cancelled_at ? " CANCELLED" : ""}`;
+        // del = delivery_status (criterio de Envío/Entregado tras el cambio
+        // 0036). ful = fulfillment_status (preparación) se muestra solo como
+        // contexto — el motor ya NO lo usa para decidir.
+        const status = `fin=${order.financial_status} del=${order.delivery_status ?? "∅"} ful=${order.fulfillment_status ?? "∅"}${order.cancelled_at ? " CANCELLED" : ""}`;
 
         if (decision.kind === "move") {
           bump(`move:${decision.reason}`);
