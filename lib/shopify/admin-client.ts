@@ -193,6 +193,51 @@ export async function shopifyRest<T = unknown>(
   return (await res.json()) as T;
 }
 
+/**
+ * Extrae la URL `rel="next"` del header `Link` de paginación cursor-based
+ * de Shopify REST. Devuelve null si no hay siguiente página.
+ * Formato: `<https://…?page_info=xxx>; rel="next", <…>; rel="previous"`.
+ */
+function parseNextLink(linkHeader: string | null): string | null {
+  if (!linkHeader) return null;
+  const match = linkHeader.match(/<([^>]+)>;\s*rel="next"/);
+  return match ? match[1] : null;
+}
+
+/**
+ * Recorre TODAS las páginas de una colección REST siguiendo el header
+ * `Link` (`rel="next"`) y concatena el array bajo `collectionKey`.
+ * Read-only por naturaleza (GET). Usado por el backfill M11 — el tier
+ * free de Vercel no aplica acá porque corre como script/Inngest, no como
+ * función serverless. `maxItems` corta defensivamente.
+ */
+export async function shopifyRestCollection<T = unknown>(
+  opts: ShopifyAdminClientOptions,
+  firstPath: string,
+  collectionKey: string,
+  pageOpts: { maxItems?: number } = {},
+): Promise<T[]> {
+  const out: T[] = [];
+  let url: string | null = firstPath;
+  while (url) {
+    const res = await shopifyFetch(opts, url, { method: "GET" });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new ShopifyApiError(
+        `shopify_rest_collection_failed: GET ${collectionKey} status=${res.status}`,
+        res.status,
+        safeJson(text),
+      );
+    }
+    const json = (await res.json()) as Record<string, unknown>;
+    const items = (json?.[collectionKey] ?? []) as T[];
+    out.push(...items);
+    if (pageOpts.maxItems && out.length >= pageOpts.maxItems) break;
+    url = parseNextLink(res.headers.get("link"));
+  }
+  return out;
+}
+
 export interface GraphqlResponse<T> {
   data?: T;
   errors?: Array<{ message: string; extensions?: unknown }>;

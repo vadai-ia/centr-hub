@@ -159,6 +159,9 @@ Es esencialmente `audit-loose-only.ts` productizado y acotado al lado Shopify.
 - Shopify Bulk Operations / GraphQL bulk export / chunks Inngest — el volumen
   (1,103) no lo justifica; REST paginado single-thread basta. (Esto **re-scopea**
   la visión original de M11 en la doctrina, que asumía "varios años / miles".)
+- **Reconstrucción de pipeline histórico** — avanzar los ~495 drafts completados
+  a "Ganada" con su hija de Post-venta para analítica de win-rate histórico. Es
+  un milestone aparte; este backfill solo trae los ~552 cotizaciones en curso.
 
 ---
 
@@ -177,6 +180,13 @@ Es esencialmente `audit-loose-only.ts` productizado y acotado al lado Shopify.
    se pierda. El backfill lo neutraliza sólo en su path.
 4. **Reporte de reconciliación → LOCKED: script CSV/stdout (MVP).** ~7–30 filas
    no justifican pantalla UI; un CSV que el admin revisa basta.
+5. **Opps de Draft Order → LOCKED (tras dry-run 2026-07-06): solo open/invoice_sent.**
+   El dry-run reveló 1,047 drafts = **550 open + 2 invoice_sent + 495 completed**.
+   Los **495 completados se OMITEN** — son ventas cerradas que ya viven como
+   `orders` (su revenue está ahí); traerlos como "Cotización" inundaría el
+   pipeline con ~495 ventas pasadas en la primera etapa (F1→F2 suprimido → no
+   avanzarían a Ganada). Se crean solo los ~552 en curso. La reconstrucción de
+   win-rate histórico (completadas → Ganada) es un milestone aparte (§7).
 
 ---
 
@@ -197,22 +207,25 @@ este diseño antes de escribir código.
 **Gate de aprobación (APROBADO 2026-07-06 por el operador):**
 - [x] **APROBAR el diseño completo — autoriza empezar el build (T1–T5).**
 
-**Build (tareas, en orden — solo tras el gate de aprobación):**
-- [ ] T1 — Script `backfill-shopify-full` con `--dry-run` / `--commit`,
-      single-thread, `backfill_in_progress` guard, paginación GraphQL de los 1,103.
-- [ ] T2 — Matching de backfill: dedup por `shopify_customer_id`; tier-phone
-      restringido a leads; placeholder blocklist → phoneless + `missing_phone`.
-- [ ] T3 — Import de órdenes + line items + opps de Draft Order (dedup por
-      `shopify_order_id` / `shopify_draft_order_id`), reusando mappers/helpers.
-- [ ] T4 — Reporte de reconciliación (script read-only) con los 4 buckets de §6.
-- [ ] T5 — Tests sintéticos: (a) dedup idempotente re-run; (b) dos customers
-      con teléfono compartido → dos filas, sin merge; (c) placeholder → phoneless;
-      (d) customer entrante ↔ lead pre-existente → lead se vuelve cliente.
+**Build (tareas — COMPLETADAS 2026-07-06):**
+- [x] T1 — `scripts/shopify/backfill-shopify-full.ts` con `--dry-run` (default) /
+      `--commit`, single-thread, `backfill_in_progress` guard, REST paginado
+      (`shopifyRestCollection`, Link header). Solo `slug==='centr'`.
+- [x] T2 — Matching: dedup por `shopify_customer_id`; tier-phone/email restringido
+      a leads (`findLeadsByPhone`/`findLeadsByEmail` → `is shopify_customer_id null`);
+      placeholder (≥3 shared) → phoneless + `missing_phone`. Lógica pura en
+      `lib/services/backfill-contact-decision.ts`.
+- [x] T3 — Órdenes + line items + opps de Draft Order **solo open/invoice_sent**
+      (dedup por `shopify_order_id` / `shopify_draft_order_id`). Completados omitidos.
+- [x] T4 — Reporte de reconciliación CSV (`backfill-recon-report.csv`) con los buckets de §6.
+- [x] T5 — `tests/backfill-contact-decision.test.ts` (10 tests, 10/10 pass):
+      dedup idempotente, teléfono compartido → sin merge, placeholder → phoneless,
+      customer ↔ lead pre-existente → link, >1 lead → conflict, + guards de fuente.
 
 **Success criteria (validar antes del commit final):**
-- [ ] Dry-run revisado y firmado por el operador.
-- [ ] Run real: 1,103 contactos importados (o el delta), 0 merges de clientes
-      distintos, 12 placeholder phoneless, 0 llamadas outbound a Whaapy.
+- [ ] Dry-run (open-only) revisado y firmado por el operador. ← **gate actual**
+- [ ] Run real: contactos importados (o el delta), 0 merges de clientes distintos,
+      12 placeholder phoneless, ~552 cotizaciones (open-only), 0 outbound a Whaapy.
 - [ ] Re-correr el backfill = no-op (idempotencia probada).
 - [ ] Reporte de reconciliación generado y entregado al admin.
-- [ ] Entrada nueva en `ERRORES.md` (merge-collapse live) si §8.3 = diferir.
+- [x] Entrada en `ERRORES.md` (merge-collapse live) — hecha.

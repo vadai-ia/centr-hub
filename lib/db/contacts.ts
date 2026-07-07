@@ -56,6 +56,41 @@ export async function findContactByWhaapyContactId(
   return data ?? null;
 }
 
+/**
+ * Contactos que son LEADS (sin `shopify_customer_id`) con el teléfono
+ * dado (E.164 normalizado). Usado por el backfill M11 para restringir el
+ * tier-phone a leads y NUNCA fusionar dos customers de Shopify que
+ * comparten teléfono (ver ERRORES.md "Teléfono compartido entre dos
+ * customers de Shopify los fusiona…"). Cap defensivo bajo — un teléfono
+ * legítimo no debería tener muchos leads.
+ */
+export async function findLeadsByPhone(phoneE164: string): Promise<ContactRow[]> {
+  const { supabase, organizationId } = getTenantScopedClient();
+  const { data, error } = await supabase
+    .from("contacts")
+    .select("*")
+    .eq("organization_id", organizationId)
+    .eq("phone", phoneE164)
+    .is("shopify_customer_id", null)
+    .limit(10);
+  if (error) throw error;
+  return (data as ContactRow[]) ?? [];
+}
+
+/** Leads (sin `shopify_customer_id`) con el email normalizado dado. */
+export async function findLeadsByEmail(emailNormalized: string): Promise<ContactRow[]> {
+  const { supabase, organizationId } = getTenantScopedClient();
+  const { data, error } = await supabase
+    .from("contacts")
+    .select("*")
+    .eq("organization_id", organizationId)
+    .eq("email", emailNormalized)
+    .is("shopify_customer_id", null)
+    .limit(10);
+  if (error) throw error;
+  return (data as ContactRow[]) ?? [];
+}
+
 export async function findContactByPhoneOrEmail(
   identifiers: { phone?: string | null; email?: string | null },
 ): Promise<ContactRow | null> {

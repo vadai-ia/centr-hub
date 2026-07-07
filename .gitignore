@@ -35,3 +35,6 @@ Thumbs.db
 # Supabase CLI local state
 supabase/.temp/
 supabase/.branches/
+
+# Reporte generado por el backfill M11 (artefacto, no se versiona)
+backfill-recon-report.csv
