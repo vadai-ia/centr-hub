@@ -100,7 +100,7 @@ async function main() {
   const mask = (e?: string | null) => (e && e.length > 6 ? e.slice(0, 3) + "*".repeat(e.length - 6) + e.slice(-3) : (e ?? "null"));
 
   for (;;) {
-    const qs = `/contacts/v1?limit=100${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`;
+    const qs: string = `/contacts/v1?limit=100${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`;
     const resp = await whaapyRest<{ contacts: Array<{ phone_number: string | null }>; pagination: { has_more: boolean; next_cursor: string | null } }>(
       whaapyCtx, "GET", qs,
     );
@@ -147,7 +147,7 @@ async function main() {
   console.log(`  foreignCoincidence (US/other ×MX by luck) ${foreignCoincidence}  <-- FALSE POSITIVES to avoid`);
   console.log(`  otherNoRecover ......................... ${otherNoRecover}`);
   console.log("\n  Whaapy-side country of loose-only matches:");
-  for (const [cc, n] of [...countryTally.entries()].sort((a, b) => b[1] - a[1])) {
+  for (const [cc, n] of Array.from(countryTally.entries()).sort((a, b) => b[1] - a[1])) {
     console.log(`     ${cc}: ${n}`);
   }
   if (realSamples.length) {

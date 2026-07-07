@@ -182,7 +182,7 @@ async function auditShopifySource(opts: { organizationId: UUID; shopDomain: stri
   }
 
   // Teléfonos compartidos (mismo E.164 en >1 customer).
-  const shared = [...normFreq.entries()].filter(([, c]) => c > 1).sort((a, b) => b[1] - a[1]);
+  const shared = Array.from(normFreq.entries()).filter(([, c]) => c > 1).sort((a, b) => b[1] - a[1]);
   const customersInShared = shared.reduce((acc, [, c]) => acc + c, 0);
 
   console.log(`\n  Total customers scanned .................. ${scanned}`);
@@ -257,7 +257,7 @@ async function auditContactsTable(organizationId: UUID) {
     from += page;
   }
 
-  const shared = [...phoneFreq.entries()].filter(([, c]) => c > 1).sort((a, b) => b[1] - a[1]);
+  const shared = Array.from(phoneFreq.entries()).filter(([, c]) => c > 1).sort((a, b) => b[1] - a[1]);
   const contactsInShared = shared.reduce((acc, [, c]) => acc + c, 0);
 
   console.log(`\n  Total contacts ......................... ${total}`);

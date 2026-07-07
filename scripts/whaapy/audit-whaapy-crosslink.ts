@@ -144,7 +144,7 @@ async function main() {
   const failSamples: string[] = [];
 
   for (;;) {
-    const qs = `/contacts/v1?limit=100${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`;
+    const qs: string = `/contacts/v1?limit=100${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`;
     const resp = await whaapyRest<{
       contacts: WhaapyContact[];
       pagination: { total: number; has_more: boolean; next_cursor: string | null };
@@ -180,7 +180,7 @@ async function main() {
     cursor = resp.pagination.next_cursor;
   }
 
-  const whaapyDupPhones = [...whaapyStrict.values()].filter((c) => c > 1).length;
+  const whaapyDupPhones = Array.from(whaapyStrict.values()).filter((c) => c > 1).length;
 
   console.log("\n============================================================");
   console.log("WHAAPY SOURCE — cross-link audit");
@@ -201,7 +201,7 @@ async function main() {
   console.log(`\n  Whaapy contacts with NO Shopify match .. ~${pureLeads}  (import as pure leads — not dups)`);
 
   // -------- Reveal top Shopify placeholder (unmasked) --------
-  const sharedShop = [...shop.strict.entries()].filter(([, arr]) => arr.length > 1).sort((a, b) => b[1].length - a[1].length);
+  const sharedShop = Array.from(shop.strict.entries()).filter(([, arr]) => arr.length > 1).sort((a, b) => b[1].length - a[1].length);
   console.log("\n============================================================");
   console.log("SHOPIFY PLACEHOLDER REVEAL (top shared number, UNMASKED)");
   console.log("============================================================");

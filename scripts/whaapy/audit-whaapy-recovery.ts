@@ -100,7 +100,7 @@ async function main() {
   const foreignSamples: string[] = [];
 
   for (;;) {
-    const qs = `/contacts/v1?limit=100${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`;
+    const qs: string = `/contacts/v1?limit=100${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`;
     const resp = await whaapyRest<{ contacts: Array<{ phone_number: string | null }>; pagination: { has_more: boolean; next_cursor: string | null } }>(
       whaapyCtx, "GET", qs,
     );
