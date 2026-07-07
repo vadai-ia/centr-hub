@@ -187,6 +187,14 @@ Es esencialmente `audit-loose-only.ts` productizado y acotado al lado Shopify.
    pipeline con ~495 ventas pasadas en la primera etapa (F1→F2 suprimido → no
    avanzarían a Ganada). Se crean solo los ~552 en curso. La reconstrucción de
    win-rate histórico (completadas → Ganada) es un milestone aparte (§7).
+6. **Corte de fecha en ÓRDENES → LOCKED (operador 2026-07-07): solo desde
+   2026-06-01 CDMX.** Centr usa la plataforma de aquí en adelante y solo le
+   importan métricas desde junio 2026; el archivo viejo (mayoría de los 578
+   archivados) es peso muerto. Se omiten las órdenes con `created_at` anterior a
+   2026-06-01T00:00 America/Mexico_City. **Aplica SOLO a órdenes** — contactos se
+   traen TODOS (sin corte) y las opps mantienen open-only sin corte. Esto
+   re-scopea el "backfill de TODO el histórico" de la doctrina para órdenes: es
+   decisión operativa consciente, no drift.
 
 ---
 

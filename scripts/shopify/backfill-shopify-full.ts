@@ -26,6 +26,7 @@
 import { config as loadDotenv } from "dotenv";
 import { resolve } from "node:path";
 import { writeFileSync } from "node:fs";
+import { DateTime } from "luxon";
 import { withTenantContext } from "@/lib/tenant/context";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 import { getOrganizationBySlug, updateOrganization } from "@/lib/db/organizations";
@@ -91,6 +92,18 @@ function parseArgs() {
 }
 
 const PLACEHOLDER_MIN_SHARE = 3; // teléfono compartido por ≥3 customers = placeholder
+
+/**
+ * Corte de fecha SOLO para órdenes (decisión operador 2026-07-07): Centr usa la
+ * plataforma de aquí en adelante y solo le importan métricas desde junio 2026.
+ * El archivo viejo de pedidos es peso muerto. Se comparan las órdenes por su
+ * `created_at` de Shopify contra 2026-06-01T00:00 en CDMX (zona sin DST).
+ * NO aplica a contactos (se traen todos) ni a las opps (open-only sin corte).
+ */
+const ORDERS_CUTOFF = DateTime.fromObject(
+  { year: 2026, month: 6, day: 1 },
+  { zone: "America/Mexico_City" },
+);
 
 interface ReconRow {
   type:
@@ -201,7 +214,7 @@ async function main() {
   const c = {
     contactsCreated: 0, contactsLinked: 0, contactsUpdated: 0, contactsConflict: 0,
     placeholderPhoneless: 0, phoneless: 0, noStrongId: 0,
-    ordersCreated: 0, ordersUpdated: 0, ordersStale: 0, ordersNoCustomer: 0, ordersOrphan: 0,
+    ordersCreated: 0, ordersUpdated: 0, ordersStale: 0, ordersNoCustomer: 0, ordersOrphan: 0, ordersBeforeCutoff: 0,
     oppsCreated: 0, oppsExisting: 0, oppsNoCustomer: 0, oppsCompletedSkipped: 0,
   };
 
@@ -307,6 +320,9 @@ async function main() {
         // ---- PHASE 2: orders ----
         for (const raw of ordersRaw) {
           const o = mapOrderWebhookToNormalized(raw);
+          // Corte de fecha (solo órdenes): omitir todo lo anterior a jun-2026 CDMX.
+          const created = o.createdAt ? DateTime.fromISO(o.createdAt) : null;
+          if (!created || !created.isValid || created < ORDERS_CUTOFF) { c.ordersBeforeCutoff++; continue; }
           if (!o.shopifyCustomerId) { c.ordersNoCustomer++; continue; }
           const attributable = pulledCustomerIds.has(o.shopifyCustomerId)
             || !!(await findContactByShopifyCustomerId(o.shopifyCustomerId));
@@ -421,7 +437,8 @@ async function main() {
   console.log("\n================= RESUMEN =================");
   console.log(`  Contactos:  crear=${c.contactsCreated} enlazar=${c.contactsLinked} actualizar=${c.contactsUpdated} conflicto=${c.contactsConflict}`);
   console.log(`              placeholder→phoneless=${c.placeholderPhoneless} otros phoneless=${c.phoneless} sin identificador=${c.noStrongId}`);
-  console.log(`  Órdenes:    crear=${c.ordersCreated} actualizar=${c.ordersUpdated} stale=${c.ordersStale} sin-customer=${c.ordersNoCustomer} huérfanas=${c.ordersOrphan}`);
+  console.log(`  Órdenes:    corte=2026-06-01 CDMX → omitidas-por-fecha=${c.ordersBeforeCutoff}  (kept=${(c.ordersCreated + c.ordersUpdated + c.ordersStale + c.ordersNoCustomer + c.ordersOrphan)})`);
+  console.log(`              crear=${c.ordersCreated} actualizar=${c.ordersUpdated} stale=${c.ordersStale} sin-customer=${c.ordersNoCustomer} huérfanas=${c.ordersOrphan}`);
   console.log(`  Opps DO:    crear=${c.oppsCreated} existentes=${c.oppsExisting} completadas-omitidas=${c.oppsCompletedSkipped} sin-customer=${c.oppsNoCustomer}`);
 
   const reportPath = resolve(process.cwd(), `backfill-recon-report.csv`);
