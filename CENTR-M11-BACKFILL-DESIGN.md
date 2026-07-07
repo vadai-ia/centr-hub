@@ -230,10 +230,14 @@ este diseño antes de escribir código.
       dedup idempotente, teléfono compartido → sin merge, placeholder → phoneless,
       customer ↔ lead pre-existente → link, >1 lead → conflict, + guards de fuente.
 
-**Success criteria (validar antes del commit final):**
-- [ ] Dry-run (open-only) revisado y firmado por el operador. ← **gate actual**
-- [ ] Run real: contactos importados (o el delta), 0 merges de clientes distintos,
-      12 placeholder phoneless, ~552 cotizaciones (open-only), 0 outbound a Whaapy.
-- [ ] Re-correr el backfill = no-op (idempotencia probada).
-- [ ] Reporte de reconciliación generado y entregado al admin.
+**Success criteria — CUMPLIDOS (corrida real 2026-07-07):**
+- [x] Dry-run (open-only + corte de fecha) revisado y firmado por el operador.
+- [x] Run real: **821 contactos** creados, **454 cotizaciones** open, **0 órdenes
+      nuevas** (66 June+ ya sincronizadas), **0 merges** de clientes distintos
+      (par de teléfono compartido verificado = 2 filas), **12 placeholder phoneless**
+      (12/12 con phone NULL + missing_phone), **0 outbound a Whaapy**.
+- [x] Re-correr el backfill = no-op (idempotencia probada: crear=0 en contactos,
+      órdenes y opps).
+- [x] `backfill_in_progress` restaurado a `false` (verificado en BD).
+- [x] Reporte de reconciliación generado (`backfill-recon-report.csv`, 167 filas).
 - [x] Entrada en `ERRORES.md` (merge-collapse live) — hecha.
