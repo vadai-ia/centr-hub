@@ -33,6 +33,8 @@ export function ContactsBoard({ initial }: Props) {
   const [rows, setRows] = useState<ContactListRow[]>(initial.rows);
   const [hasMore, setHasMore] = useState(initial.hasMore);
   const [page, setPage] = useState(initial.page);
+  const [totalCount, setTotalCount] = useState(initial.totalCount);
+  const [filteredCount, setFilteredCount] = useState(initial.filteredCount);
   const [derivedAdvisors, setDerivedAdvisors] = useState<Record<UUID, DerivedAdvisor>>(
     initial.derivedAdvisors,
   );
@@ -76,6 +78,8 @@ export function ContactsBoard({ initial }: Props) {
         setRows(res.rows);
         setHasMore(res.hasMore);
         setPage(0);
+        setTotalCount(res.totalCount);
+        setFilteredCount(res.filteredCount);
         setDerivedAdvisors(res.derivedAdvisors);
       } catch (e) {
         if (seq !== requestSeqRef.current) return;
@@ -122,6 +126,8 @@ export function ContactsBoard({ initial }: Props) {
       setRows((prev) => [...prev, ...res.rows]);
       setHasMore(res.hasMore);
       setPage(res.page);
+      setTotalCount(res.totalCount);
+      setFilteredCount(res.filteredCount);
       setDerivedAdvisors((prev) => ({ ...prev, ...res.derivedAdvisors }));
     } catch (e) {
       if (seq !== requestSeqRef.current) return;
@@ -137,15 +143,31 @@ export function ContactsBoard({ initial }: Props) {
     filters.advisorId !== null ||
     filters.includeArchived;
 
+  // "Acotado" = búsqueda/fecha/asesor activos. El toggle de archivados NO
+  // cuenta (reajusta el scope base, que ya se refleja en totalCount).
+  const narrowed =
+    appliedQuery.trim().length > 0 ||
+    filters.dateFrom !== null ||
+    filters.dateTo !== null ||
+    filters.advisorId !== null;
+  const fmtCount = (n: number) => n.toLocaleString("es-MX");
+  const countLabel = narrowed
+    ? `Mostrando ${fmtCount(filteredCount)} de ${fmtCount(totalCount)}`
+    : `${fmtCount(totalCount)} ${totalCount === 1 ? "contacto" : "contactos"}`;
+
   return (
     <div className="flex flex-col gap-3 h-full min-h-0">
       <header className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-bold text-gray-900 dark:text-gray-50">Contactos</h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400">
-            {initial.role === "vendedor"
-              ? "Tus contactos asignados."
-              : "Todos los contactos de la organización."}
+          <p
+            className="text-sm text-gray-500 dark:text-gray-400 tabular-nums"
+            aria-live="polite"
+          >
+            {countLabel}
+            {initial.role === "vendedor" && (
+              <span className="text-gray-400 dark:text-gray-500"> · asignados a ti</span>
+            )}
           </p>
         </div>
         <div className="flex-1 min-w-[200px] max-w-md">

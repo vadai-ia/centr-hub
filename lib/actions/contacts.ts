@@ -6,6 +6,7 @@ import {
   getContactById,
   updateContact,
   searchContactsForList,
+  countContactsForList,
   getDerivedAdvisorsForContacts,
   type ContactListRow,
   type DerivedAdvisor,
@@ -80,6 +81,10 @@ export interface ContactsBoardState {
   hasMore: boolean;
   page: number;
   query: string;
+  /** Total absoluto de contactos del scope (vendedor: los suyos). */
+  totalCount: number;
+  /** Total que matchea el filtro/búsqueda activos (= totalCount si no hay). */
+  filteredCount: number;
   advisors: AdvisorOption[];
   /** Rol del caller — el Client lo necesita para mostrar/ocultar
    *  filtros de admin (futuro). */
@@ -102,6 +107,8 @@ export type SearchContactsActionResult =
       rows: ContactListRow[];
       hasMore: boolean;
       page: number;
+      totalCount: number;
+      filteredCount: number;
       derivedAdvisors: Record<UUID, DerivedAdvisor>;
     }
   | { ok: false; reason: string; message: string };
@@ -162,13 +169,24 @@ export async function loadInitialContactsState(opts: {
       };
     }
 
-    const [{ rows, hasMore }, vendors] = await Promise.all([
+    const hasQuery = (opts.query ?? "").trim().length > 0;
+    const [{ rows, hasMore }, totalCount, filteredCount, vendors] = await Promise.all([
       searchContactsForList({
         query: opts.query ?? "",
         assignedAdvisorId: effectiveAdvisorId,
         limit: CONTACTS_PAGE_SIZE,
         offset: 0,
       }),
+      // Total absoluto del scope (sin búsqueda ni filtros).
+      countContactsForList({ assignedAdvisorId: effectiveAdvisorId, includeArchived: false }),
+      // Total filtrado (= absoluto si no hay búsqueda en el snapshot inicial).
+      hasQuery
+        ? countContactsForList({
+            query: opts.query ?? "",
+            assignedAdvisorId: effectiveAdvisorId,
+            includeArchived: false,
+          })
+        : Promise.resolve<number | null>(null),
       listActiveRealVendors(orgId),
     ]);
 
@@ -185,6 +203,8 @@ export async function loadInitialContactsState(opts: {
         hasMore,
         page: 0,
         query: opts.query ?? "",
+        totalCount,
+        filteredCount: filteredCount ?? totalCount,
         role,
         selfMembershipId: membership,
         derivedAdvisors,
@@ -239,24 +259,43 @@ export async function searchContactsAction(
     }
 
     const isAdmin = role === "admin" || role === "superadmin";
-    const { rows, hasMore } = await searchContactsForList({
+    const filterAdvisorId = isAdmin ? parsed.data.filterAdvisorId ?? undefined : undefined;
+    const includeArchived = parsed.data.includeArchived ?? false;
+    const listOpts = {
       query: parsed.data.query ?? "",
       assignedAdvisorId: effectiveAdvisorId,
       // Admin puede filtrar por asesor adicionalmente (lote polish M6).
-      filterAdvisorId: isAdmin ? parsed.data.filterAdvisorId ?? undefined : undefined,
+      filterAdvisorId,
       dateFrom: parsed.data.dateFrom,
       dateTo: parsed.data.dateTo,
-      includeArchived: parsed.data.includeArchived ?? false,
-      limit: CONTACTS_PAGE_SIZE,
-      offset: parsed.data.page * CONTACTS_PAGE_SIZE,
-    });
+      includeArchived,
+    };
+    // ¿La vista está "acotada" (búsqueda/fecha/asesor)? El toggle de
+    // archivados NO cuenta como acotar — reajusta el scope base.
+    const narrowed =
+      (parsed.data.query ?? "").trim().length > 0 ||
+      !!parsed.data.dateFrom ||
+      !!parsed.data.dateTo ||
+      filterAdvisorId != null;
+
+    const [{ rows, hasMore }, totalCount, filteredCountRaw] = await Promise.all([
+      searchContactsForList({
+        ...listOpts,
+        limit: CONTACTS_PAGE_SIZE,
+        offset: parsed.data.page * CONTACTS_PAGE_SIZE,
+      }),
+      // Total absoluto del scope base (respeta archivados + scope de vendedor).
+      countContactsForList({ assignedAdvisorId: effectiveAdvisorId, includeArchived }),
+      narrowed ? countContactsForList(listOpts) : Promise.resolve<number | null>(null),
+    ]);
+    const filteredCount = filteredCountRaw ?? totalCount;
 
     const unassignedIds = rows.filter((r) => r.assigned_advisor_id === null).map((r) => r.id);
     const derivedMap = await getDerivedAdvisorsForContacts(unassignedIds);
     const derivedAdvisors: Record<UUID, DerivedAdvisor> = {};
     derivedMap.forEach((v, k) => { derivedAdvisors[k] = v; });
 
-    return { ok: true, rows, hasMore, page: parsed.data.page, derivedAdvisors };
+    return { ok: true, rows, hasMore, page: parsed.data.page, totalCount, filteredCount, derivedAdvisors };
   }, { source: "user_session" });
 }
 

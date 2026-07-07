@@ -456,3 +456,68 @@ export async function searchContactsForList(
   }));
   return { rows, hasMore };
 }
+
+/**
+ * Cuenta contactos que matchean los MISMOS filtros que
+ * `searchContactsForList` (sin paginación). Alimenta el contador del
+ * header de Contactos: total absoluto (scope base) y total filtrado.
+ *
+ * MANTENER EN SYNC con los filtros de `searchContactsForList` — si un
+ * filtro cambia allá y no aquí, el contador miente. (Se replica en vez de
+ * compartir helper porque los genéricos del query builder de Supabase no
+ * componen entre un select de filas y uno de `count`/`head`.)
+ */
+export async function countContactsForList(
+  opts: Pick<
+    SearchContactsOpts,
+    "query" | "assignedAdvisorId" | "filterAdvisorId" | "dateFrom" | "dateTo" | "includeArchived"
+  >,
+): Promise<number> {
+  const { supabase, organizationId } = getTenantScopedClient();
+  let query = supabase
+    .from("contacts")
+    .select("id", { count: "exact", head: true })
+    .eq("organization_id", organizationId);
+
+  if (!opts.includeArchived) query = query.eq("deleted_in_whaapy", false);
+
+  if (opts.assignedAdvisorId !== undefined) {
+    query =
+      opts.assignedAdvisorId === null
+        ? query.is("assigned_advisor_id", null)
+        : query.eq("assigned_advisor_id", opts.assignedAdvisorId);
+  }
+  if (opts.filterAdvisorId !== undefined && opts.assignedAdvisorId === undefined) {
+    if (opts.filterAdvisorId === null) {
+      query = query.is("assigned_advisor_id", null);
+    } else {
+      const derivedIds = await getContactIdsWithDerivedAdvisor(opts.filterAdvisorId);
+      query =
+        derivedIds.length === 0
+          ? query.eq("assigned_advisor_id", opts.filterAdvisorId)
+          : query.or(`assigned_advisor_id.eq.${opts.filterAdvisorId},id.in.(${derivedIds.join(",")})`);
+    }
+  }
+  if (opts.dateFrom) query = query.gte("last_modified_at", opts.dateFrom);
+  if (opts.dateTo) query = query.lte("last_modified_at", opts.dateTo);
+
+  const raw = (opts.query ?? "").trim();
+  if (raw.length > 0) {
+    const sanitized = sanitizeOrFragment(raw);
+    if (sanitized.length > 0) {
+      const phoneTerm = normalizePhone(sanitized) ?? sanitized;
+      const emailTerm = normalizeEmail(sanitized) ?? sanitized;
+      query = query.or(
+        [
+          `full_name.ilike.%${sanitized}%`,
+          `email.ilike.%${emailTerm}%`,
+          `phone.ilike.%${phoneTerm}%`,
+        ].join(","),
+      );
+    }
+  }
+
+  const { count, error } = await query;
+  if (error) throw error;
+  return count ?? 0;
+}
