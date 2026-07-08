@@ -49,9 +49,6 @@ const serverSchema = clientSchema.extend({
   // Se aceptan vacías en el schema (patrón de entrada diferida) — los
   // helpers del Vault validan en runtime.
   WHAAPY_POSTVENTA_API_KEY: z.string().optional(),
-  // Email del usuario "Customer Success" al que se atribuye la resolución
-  // de casos originada en Whaapy (webhook 3). Se resuelve a user_profiles.id.
-  POSTVENTA_RESOLVER_EMAIL: z.string().optional(),
   // Kill switch de la sincronización Post-venta↔Whaapy. Default OFF: sin
   // POSTVENTA_WHAAPY_SYNC_ENABLED=true no se dispara ninguna llamada
   // saliente a Whaapy Post-venta (el endpoint entrante sí puede recibir).

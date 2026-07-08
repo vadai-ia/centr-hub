@@ -58,14 +58,3 @@ export const WHAAPY_POSTVENTA_CUSTOM_FIELDS = {
 export function isPostventaWhaapySyncEnabled(): boolean {
   return process.env.POSTVENTA_WHAAPY_SYNC_ENABLED === "true";
 }
-
-/**
- * Email del usuario "Customer Success" al que el webhook 3 atribuye la
- * resolución de un caso originada en Whaapy. Se resuelve a
- * `user_profiles.id` (FK de `opportunities.resolved_by_user_id`).
- * Sin default: si falta, el worker del webhook 3 falla con error claro.
- */
-export function getPostventaResolverEmail(): string | null {
-  const raw = process.env.POSTVENTA_RESOLVER_EMAIL;
-  return raw && raw.trim() ? raw.trim().toLowerCase() : null;
-}

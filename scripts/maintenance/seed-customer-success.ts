@@ -21,8 +21,9 @@
  * Idempotente: si ya existe un membership "Customer Success" en la org,
  * imprime su user_id y no hace nada.
  *
- * Tras correrlo, poné el email en `POSTVENTA_RESOLVER_EMAIL` (Vercel env)
- * para que el webhook 3 resuelva la atribución.
+ * Ancla la atribución del webhook 3 por `user_id` ESTABLE: escribe
+ * `organizations.config.postventa.resolver_user_id`. Editar email/nombre
+ * de este usuario después NO cambia el user_id → la atribución no se rompe.
  *
  * Uso:
  *   npm run maintenance:seed-customer-success -- --org-slug centr --email customer.success@centr.test
@@ -36,6 +37,7 @@ import {
   createUserProfile,
   listManageableMemberships,
 } from "@/lib/db/users";
+import { storePostventaResolverUserId } from "@/lib/whaapy-postventa/resolver-user";
 import { withTenantContext } from "@/lib/tenant/context";
 import type { UUID } from "@/lib/types/database";
 
@@ -71,10 +73,13 @@ async function main() {
       const existing = await listManageableMemberships(org.id as UUID);
       const already = existing.find((m) => m.profile.full_name === CS_NAME);
       if (already) {
+        // Idempotente + reafirma el ancla estable: apunta el resolutor a
+        // su user_id (por si el config no estaba puesto).
+        await storePostventaResolverUserId(org.id as UUID, already.user_id as UUID);
         console.log(
-          `Ya existe "${CS_NAME}" (membership ${already.id}, user ${already.user_id}, activo=${already.is_active}). No-op.`,
+          `Ya existe "${CS_NAME}" (membership ${already.id}, user ${already.user_id}). ` +
+            `Resolutor Post-venta apuntado a ese user_id.`,
         );
-        console.log(`Asegurate de que POSTVENTA_RESOLVER_EMAIL apunte a su email.`);
         return;
       }
 
@@ -111,13 +116,22 @@ async function main() {
         whaapy_agent_id: null,
       });
 
+      // Ancla ESTABLE del resolutor: guarda el user_id en
+      // organizations.config.postventa.resolver_user_id. Editar el
+      // email/nombre de este usuario después NO cambia el user_id → la
+      // atribución del webhook 3 nunca se rompe.
+      await storePostventaResolverUserId(org.id as UUID, userId);
+
       console.log(`✓ "${CS_NAME}" creado (login latente, sin contraseña).`);
       console.log(`  email:    ${email}`);
       console.log(`  user_id:  ${userId}`);
+      console.log(
+        `  resolutor Post-venta → user_id ${userId} ` +
+          `(organizations.config.postventa.resolver_user_id).`,
+      );
       console.log("");
-      console.log("Siguiente paso:");
-      console.log(`  Poné POSTVENTA_RESOLVER_EMAIL=${email} en Vercel env.`);
-      console.log("  El webhook 3 atribuirá a este usuario la resolución venida de Whaapy.");
+      console.log("El webhook 3 atribuye a este user_id (estable). Para cambiar la persona,");
+      console.log("editá su email/nombre en Admin → Usuarios (el user_id no cambia).");
     },
     { source: "script" },
   );
