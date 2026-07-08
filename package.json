@@ -17,6 +17,7 @@
     "whaapy:configure-webhook": "tsx --tsconfig scripts/tsconfig.json scripts/whaapy/configure-webhook.ts",
     "whaapy:inspect-get-contact": "tsx --tsconfig scripts/tsconfig.json scripts/whaapy/inspect-get-contact.ts",
     "whaapy:inspect-webhook-headers": "tsx --tsconfig scripts/tsconfig.json scripts/whaapy/inspect-webhook-headers.ts",
+    "whaapy:inspect-postventa-stages": "tsx --tsconfig scripts/tsconfig.json scripts/whaapy/inspect-postventa-stages.ts",
     "maintenance:cancel-orphaned-lead-nuevo": "tsx --tsconfig scripts/tsconfig.json scripts/maintenance/cancel-orphaned-lead-nuevo.ts",
     "maintenance:backfill-postventa-child-data": "tsx --tsconfig scripts/tsconfig.json scripts/maintenance/backfill-postventa-child-data.ts",
     "maintenance:reattribute-postventa-child-advisor": "tsx --tsconfig scripts/tsconfig.json scripts/maintenance/reattribute-postventa-child-advisor.ts",
@@ -30,6 +31,7 @@
     "maintenance:diagnose-advisor-population": "tsx --tsconfig scripts/tsconfig.json scripts/maintenance/diagnose-advisor-population.ts",
     "maintenance:diagnose-users-and-advisors": "tsx --tsconfig scripts/tsconfig.json scripts/maintenance/diagnose-users-and-advisors.ts",
     "maintenance:seed-test-vendor": "tsx --tsconfig scripts/tsconfig.json scripts/maintenance/seed-test-vendor.ts",
+    "maintenance:seed-customer-success": "tsx --tsconfig scripts/tsconfig.json scripts/maintenance/seed-customer-success.ts",
     "maintenance:snapshot-goal-results": "tsx --tsconfig scripts/tsconfig.json scripts/maintenance/snapshot-goal-results.ts",
     "maintenance:preview-postventa-transitions": "tsx --tsconfig scripts/tsconfig.json scripts/maintenance/preview-postventa-transitions.ts",
     "maintenance:backfill-order-delivery-status": "tsx --tsconfig scripts/tsconfig.json scripts/maintenance/backfill-order-delivery-status.ts"

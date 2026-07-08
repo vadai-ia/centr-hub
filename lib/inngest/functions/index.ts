@@ -6,6 +6,8 @@ import { dlqFunctions } from "./dlq";
 import { whaapyContactFunctions } from "./whaapy-contacts";
 import { whaapyConversationFunctions } from "./whaapy-conversations";
 import { whaapyOutboundFunctions } from "./whaapy-outbound";
+import { whaapyPostventaFunctions } from "./whaapy-postventa";
+import { whaapyPostventaInboundFunctions } from "./whaapy-postventa-inbound";
 import { shopifyOutboundFunctions } from "./shopify-outbound";
 import { tagReprocessFunctions } from "./tag-reprocess";
 import { advisorReconciliationFunctions } from "./advisor-reconciliation";
@@ -28,6 +30,8 @@ export const allFunctions = [
   ...whaapyContactFunctions,
   ...whaapyConversationFunctions,
   ...whaapyOutboundFunctions,
+  ...whaapyPostventaFunctions,
+  ...whaapyPostventaInboundFunctions,
   ...shopifyOutboundFunctions,
   ...tagReprocessFunctions,
   ...advisorReconciliationFunctions,

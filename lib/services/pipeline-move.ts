@@ -7,6 +7,7 @@ import {
 import { getStageById } from "@/lib/db/pipeline";
 import { recordAuditEvent } from "@/lib/db/operational";
 import { getTenantScopedClient } from "@/lib/db/client";
+import { dispatchPostventaPushForMove } from "@/lib/whaapy-postventa/dispatch";
 import type {
   OpportunityRow,
   PipelineStageRow,
@@ -255,6 +256,15 @@ export async function moveOpportunityStage(
         "No se pudo registrar el cambio en el historial. La oportunidad volvió a su etapa anterior.",
     };
   }
+
+  // Hook Post-venta ↔ Whaapy (webhooks 1 y 2): si el destino es Entregado
+  // o Caso Problemático del funnel Post-venta, propaga el push a Whaapy.
+  // Non-fatal + gateado por kill switch (default OFF): el move ya commiteó.
+  await dispatchPostventaPushForMove({
+    organizationId: updated.organization_id,
+    opportunityId: updated.id,
+    targetStage,
+  });
 
   return { ok: true, opportunity: updated };
 }

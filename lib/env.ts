@@ -44,6 +44,18 @@ const serverSchema = clientSchema.extend({
   SHOPIFY_API_SECRET: z.string().optional(),
   SHOPIFY_WEBHOOK_SECRET: z.string().optional(),
   WHAAPY_API_KEY: z.string().optional(),
+  // Whaapy de Post-venta (segundo Whaapy, independiente del de Venta).
+  // Fallback single-org del api_key; el webhook_secret vive solo en Vault.
+  // Se aceptan vacías en el schema (patrón de entrada diferida) — los
+  // helpers del Vault validan en runtime.
+  WHAAPY_POSTVENTA_API_KEY: z.string().optional(),
+  // Email del usuario "Customer Success" al que se atribuye la resolución
+  // de casos originada en Whaapy (webhook 3). Se resuelve a user_profiles.id.
+  POSTVENTA_RESOLVER_EMAIL: z.string().optional(),
+  // Kill switch de la sincronización Post-venta↔Whaapy. Default OFF: sin
+  // POSTVENTA_WHAAPY_SYNC_ENABLED=true no se dispara ninguna llamada
+  // saliente a Whaapy Post-venta (el endpoint entrante sí puede recibir).
+  POSTVENTA_WHAAPY_SYNC_ENABLED: z.string().optional(),
 });
 
 function parseClient() {

@@ -27,6 +27,13 @@ import type { UUID } from "@/lib/types/database";
 
 const VAULT_NAMESPACE_SHOPIFY = "shopify";
 const VAULT_NAMESPACE_WHAAPY = "whaapy";
+/**
+ * Namespace del SEGUNDO Whaapy — el de Post-venta (integración de
+ * webhooks bidireccionales). Es una instancia Whaapy INDEPENDIENTE del
+ * de Venta (`whaapy`): credenciales propias, businessId propio, endpoint
+ * propio. Aislar el bag garantiza que el Whaapy de Venta queda intacto.
+ */
+const VAULT_NAMESPACE_WHAAPY_POSTVENTA = "whaapy_postventa";
 
 type ShopifyVaultBag = {
   client_id?: string;
@@ -44,11 +51,23 @@ type WhaapyVaultBag = {
    * organización, separado del api_key (que es de las APIs outbound).
    */
   webhook_secret?: string;
+  /**
+   * Token compartido del webhook 3 del Whaapy de POST-VENTA (Option A).
+   * El evento `contact.stage_changed` no existe en Whaapy, así que la
+   * resolución entrante llega por una Automation `http_request` (trigger
+   * `pipeline_stage_entered` sobre "Caso Resuelto") que NO firma HMAC. Se
+   * autentica con este token (lo generamos nosotros, se configura en la
+   * automation y se verifica constant-time en el endpoint). Solo aplica al
+   * namespace `whaapy_postventa`.
+   */
+  inbound_token?: string;
 };
 
 type OrgVaultKeys = {
   [VAULT_NAMESPACE_SHOPIFY]?: ShopifyVaultBag;
   [VAULT_NAMESPACE_WHAAPY]?: WhaapyVaultBag;
+  /** Credenciales del Whaapy de Post-venta (misma forma que el de Venta). */
+  [VAULT_NAMESPACE_WHAAPY_POSTVENTA]?: WhaapyVaultBag;
 };
 
 async function readVaultKeys(organizationId: UUID): Promise<OrgVaultKeys> {
@@ -251,5 +270,94 @@ export async function storeWhaapyWebhookSecret(
 ): Promise<void> {
   await patchVaultBag(organizationId, VAULT_NAMESPACE_WHAAPY, {
     webhook_secret: webhookSecret,
+  });
+}
+
+// ============================================================
+// Whaapy Post-venta (segundo Whaapy, independiente del de Venta)
+// ============================================================
+
+/**
+ * api_key del Whaapy de Post-venta. Fallback a env
+ * `WHAAPY_POSTVENTA_API_KEY` para el MVP single-org (Centr); cuando se
+ * agreguen orgs se pobla `vault_keys.whaapy_postventa.api_key` por org.
+ * Scopes esperados: funnels:read/write + contacts:read/write.
+ */
+export async function getWhaapyPostventaApiKey(
+  organizationId: UUID,
+): Promise<string> {
+  const bag = await readVaultKeys(organizationId);
+  const fromVault = bag.whaapy_postventa?.api_key;
+  if (fromVault) return fromVault;
+  const fromEnv = getServerEnv().WHAAPY_POSTVENTA_API_KEY;
+  if (!fromEnv) {
+    throw new Error(
+      `vault: WHAAPY_POSTVENTA api_key no configurado (org ${organizationId} + env vacío)`,
+    );
+  }
+  return fromEnv;
+}
+
+export async function storeWhaapyPostventaApiKey(
+  organizationId: UUID,
+  apiKey: string,
+): Promise<void> {
+  await patchVaultBag(organizationId, VAULT_NAMESPACE_WHAAPY_POSTVENTA, {
+    api_key: apiKey,
+  });
+}
+
+/**
+ * Secret HMAC del webhook del Whaapy de Post-venta. Sin fallback a env —
+ * se obtiene al registrar el webhook `contact.stage_changed` contra el
+ * Whaapy de Post-venta y se persiste en Vault. Separado del secret del
+ * Whaapy de Venta para que ambos endpoints verifiquen con su propia llave.
+ */
+export async function getWhaapyPostventaWebhookSecret(
+  organizationId: UUID,
+): Promise<string> {
+  const bag = await readVaultKeys(organizationId);
+  const fromVault = bag.whaapy_postventa?.webhook_secret;
+  if (!fromVault) {
+    throw new Error(
+      `vault: WHAAPY_POSTVENTA webhook_secret no configurado (org ${organizationId}).`,
+    );
+  }
+  return fromVault;
+}
+
+export async function storeWhaapyPostventaWebhookSecret(
+  organizationId: UUID,
+  webhookSecret: string,
+): Promise<void> {
+  await patchVaultBag(organizationId, VAULT_NAMESPACE_WHAAPY_POSTVENTA, {
+    webhook_secret: webhookSecret,
+  });
+}
+
+/**
+ * Token compartido del webhook 3 (Option A — Automation `http_request`).
+ * Sin fallback a env: vive solo en Vault. Lo genera el operador (o el
+ * script de setup) y se configura idéntico en la automation de Whaapy.
+ */
+export async function getWhaapyPostventaInboundToken(
+  organizationId: UUID,
+): Promise<string> {
+  const bag = await readVaultKeys(organizationId);
+  const fromVault = bag.whaapy_postventa?.inbound_token;
+  if (!fromVault) {
+    throw new Error(
+      `vault: WHAAPY_POSTVENTA inbound_token no configurado (org ${organizationId}).`,
+    );
+  }
+  return fromVault;
+}
+
+export async function storeWhaapyPostventaInboundToken(
+  organizationId: UUID,
+  token: string,
+): Promise<void> {
+  await patchVaultBag(organizationId, VAULT_NAMESPACE_WHAAPY_POSTVENTA, {
+    inbound_token: token,
   });
 }

@@ -8,6 +8,7 @@ import {
 } from "@/lib/db/opportunities";
 import { resolvePostventaStages } from "@/lib/services/dashboard-stages";
 import { recordAuditEvent } from "@/lib/db/operational";
+import { dispatchPostventaPushForReopen } from "@/lib/whaapy-postventa/dispatch";
 import type { OpportunityRow, UUID } from "@/lib/types/database";
 
 /**
@@ -76,6 +77,20 @@ export async function reopenOpportunityIntoProblemCase(
     };
   }
 
+  // Hook Post-venta ↔ Whaapy (webhook 2): toda reapertura aterriza en Caso
+  // Problemático → push a Whaapy. Non-fatal + gateado por kill switch; la
+  // opp reabierta ya persistió antes de encolar.
+  const finish = async (
+    opportunityId: UUID,
+    mode: "mutated" | "created_child",
+  ): Promise<ReopenResult> => {
+    await dispatchPostventaPushForReopen({
+      organizationId: opp.organization_id,
+      opportunityId,
+    });
+    return { ok: true, opportunityId, mode };
+  };
+
   try {
     if (opp.funnel === "post_venta") {
       await mutateIntoProblemCase(
@@ -84,7 +99,7 @@ export async function reopenOpportunityIntoProblemCase(
         input.actorUserId,
         "post_venta_direct",
       );
-      return { ok: true, opportunityId: opp.id, mode: "mutated" };
+      return await finish(opp.id, "mutated");
     }
 
     // Venta: reusar la hija Post-venta si ya existe; si no, crear una nueva.
@@ -98,7 +113,7 @@ export async function reopenOpportunityIntoProblemCase(
           input.actorUserId,
           "venta_existing_child",
         );
-        return { ok: true, opportunityId: child.id, mode: "mutated" };
+        return await finish(child.id, "mutated");
       }
     }
     const newId = await createProblemCaseChild(
@@ -106,7 +121,7 @@ export async function reopenOpportunityIntoProblemCase(
       problematicStage.id,
       input.actorUserId,
     );
-    return { ok: true, opportunityId: newId, mode: "created_child" };
+    return await finish(newId, "created_child");
   } catch {
     return {
       ok: false,

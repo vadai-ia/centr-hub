@@ -5,6 +5,7 @@ import {
 } from "@/lib/db/opportunities";
 import { recordAuditEvent } from "@/lib/db/operational";
 import { resolvePostventaEngineStages } from "@/lib/services/postventa-transition";
+import { dispatchPostventaPushForResolve } from "@/lib/whaapy-postventa/dispatch";
 import type { OpportunityRow, UUID } from "@/lib/types/database";
 
 /**
@@ -38,6 +39,14 @@ export interface ResolvePostventaCaseInput {
   resolvedByUserId: UUID;
   /** Nota libre opcional de cómo se resolvió. */
   note?: string | null;
+  /**
+   * Origen de la resolución. ANTI-BUCLE capa 1 (webhooks 3↔4): solo cuando
+   * es `"platform"` se propaga la resolución a Whaapy (webhook 4). El worker
+   * del webhook 3 (resolución venida de Whaapy) pasa
+   * `"whaapy_postventa_inbound"` para NO rebotar de vuelta a Whaapy.
+   * Default `"platform"` (el botón de la UI y cualquier caller existente).
+   */
+  source?: "platform" | "whaapy_postventa_inbound";
 }
 
 export async function resolvePostventaCase(
@@ -107,8 +116,20 @@ export async function resolvePostventaCase(
       stage_id: opp.stage_id,
       resolved_at: nowIso,
       has_note: note !== null,
+      source: input.source ?? "platform",
     },
   });
+
+  // Hook Post-venta ↔ Whaapy (webhook 4): sincroniza la resolución a Whaapy.
+  // ANTI-BUCLE capa 1: SOLO si el origen es la plataforma — una resolución
+  // venida del webhook 3 (Whaapy) no se re-propaga a Whaapy. Non-fatal +
+  // gateado por kill switch.
+  if ((input.source ?? "platform") === "platform") {
+    await dispatchPostventaPushForResolve({
+      organizationId: updated.organization_id,
+      opportunityId: input.opportunityId,
+    });
+  }
 
   return { ok: true, opportunity: updated };
 }

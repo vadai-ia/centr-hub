@@ -80,6 +80,26 @@ export async function getOrganizationByWhaapyBusinessId(
   return data ?? null;
 }
 
+/**
+ * Resuelve la org por el businessId del Whaapy de Post-venta (0037).
+ * Espejo de `getOrganizationByWhaapyBusinessId` para el segundo Whaapy;
+ * lo usa el endpoint `/api/webhooks/whaapy-postventa`. Un webhook de
+ * Venta nunca resuelve por acá (usa una columna distinta) — aislamiento
+ * estructural entre ambos Whaapys.
+ */
+export async function getOrganizationByWhaapyPostventaBusinessId(
+  businessId: string,
+): Promise<OrganizationRow | null> {
+  const supabase = getSupabaseAdminClient();
+  const { data, error } = await supabase
+    .from("organizations")
+    .select("*")
+    .eq("whaapy_postventa_business_id", businessId)
+    .maybeSingle();
+  if (error) throw error;
+  return data ?? null;
+}
+
 export async function updateOrganization(
   id: UUID,
   patch: Update,

@@ -138,6 +138,53 @@ export interface WhaapyWebhookEnvelope {
   payload: Json;
 }
 
+/**
+ * Envelope del PUSH de etapa al Whaapy de POST-VENTA (webhooks 1, 2, 4).
+ *
+ * Emitido por los hooks de la plataforma (`moveOpportunityStage`,
+ * `reopenOpportunityIntoProblemCase`, `resolvePostventaCase`) SOLO cuando
+ * el kill switch está ON. Consumido por `whaapyPostventaStagePush`, que
+ * resuelve contacto por teléfono, escribe custom_fields y mueve de etapa
+ * en el Whaapy de Post-venta. Independiente del outbound de Venta.
+ */
+export interface WhaapyPostventaStagePushEnvelope {
+  organizationId: UUID;
+  opportunityId: UUID;
+  /** Clave lógica de la etapa destino (ver WHAAPY_POSTVENTA_STAGE_NAMES). */
+  target: "entregado" | "casoProblematico" | "casoResuelto";
+  /** Origen del disparo (traza + diagnóstico). */
+  reason: string;
+}
+
+export const WHAAPY_POSTVENTA_STAGE_PUSH_EVENT =
+  "whaapy/postventa.stage_push_requested" as const;
+
+/**
+ * Envelope INBOUND del Whaapy de Post-venta (webhook 3 — Option A).
+ *
+ * El evento `contact.stage_changed` no existe en Whaapy, así que la
+ * resolución entrante llega por una Automation `http_request` (trigger
+ * `pipeline_stage_entered` sobre "Caso Resuelto"). El endpoint
+ * `/api/webhooks/whaapy-postventa` autentica por token compartido
+ * (constant-time), resuelve tenant por `org` del body y normaliza el
+ * envelope. El worker archiva la opp reusando `resolvePostventaCase`
+ * (source inbound). Como el trigger YA es "Caso Resuelto", no hay filtro
+ * de etapa; la idempotencia la da `resolvePostventaCase`.
+ */
+export interface WhaapyPostventaInboundEnvelope {
+  organizationId: UUID;
+  /** Id de dedup/traza (del body o generado). */
+  deliveryId: string;
+  receivedAt: string;
+  /** opportunity_id si la automation lo pudo enviar; si no, null. */
+  opportunityId: string | null;
+  /** Teléfono del contacto (E.164, `{{contact.phoneNumber}}`). */
+  phone: string | null;
+}
+
+export const WHAAPY_POSTVENTA_INBOUND_EVENT =
+  "whaapy/postventa.stage_changed_inbound" as const;
+
 let cached: Inngest | null = null;
 
 export function getInngestClient(): Inngest {

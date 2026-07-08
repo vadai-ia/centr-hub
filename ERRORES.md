@@ -317,6 +317,30 @@ Toda entrada NUEVA sigue este mismo formato condensado — **solo la lección ac
 - **Causa raíz:** `tag_mappings` es append-only (`upsert onConflict normalized_tag`) y NO refleja si la tag sigue viva. Una tag queda huérfana por corrección de ortografía/acento en Shopify, borrado de la entidad, o tag de prueba. La normalización actual (`trim().toLowerCase()`, SIN strip de acentos) es consistente.
 - **Regla:** una tag con conteo 0 = señal de huérfano, eliminable manualmente desde la UI de Mapeo (`deleteTagMappingAction` re-verifica el conteo en servidor, bloqueado si >0). **Sin purga automática** (decisión manual del admin). NO asumir "fila en tag_mappings ⇒ tag activa".
 
+## Integración Post-venta ↔ Whaapy Post-venta (segundo Whaapy, webhooks 1–4)
+
+### `contact.stage_changed` no es un evento suscribible; el inbound va por Automation `http_request`
+- **Causa raíz:** la doc de Funnels de Whaapy referencia `contact.stage_changed`, pero NO está en la lista real de eventos suscribibles (solo `contact.created/updated/deleted`, `conversation.*`, `message.*`, `broadcast.*`, `agent.*`). Además `contact.updated` no trae la etapa (solo `updated_fields` + name/phone) y no está confirmado que un cambio de etapa lo dispare.
+- **Regla:** el webhook 3 (resolución Whaapy → plataforma) NO usa webhook firmado por HMAC. Usa una **Automation `http_request`** (trigger `pipeline_stage_entered` sobre "Caso Resuelto") autenticada con **token compartido** (`Authorization: Bearer` o header `x-centrhub-token` o body `token`; comparación constant-time contra Vault `whaapy_postventa.inbound_token`). Verificar SIEMPRE los eventos contra la lista/panel real del proveedor, no contra ejemplos de otra sección de la doc.
+
+### Segundo Whaapy (Post-venta) totalmente aislado del de Venta
+- **Regla:** todo el stack Post-venta usa namespace propio `whaapy_postventa` para no tocar el Whaapy de Venta: bag de Vault `{api_key, webhook_secret, inbound_token}`, namespace de dedup `whaapy_postventa`, endpoint `/api/webhooks/whaapy-postventa`, cliente `lib/whaapy-postventa/*`, columna `organizations.whaapy_postventa_business_id` (migración 0037), filas `whaapy_raw_webhooks.endpoint='postventa'`. Base URL compartida (`https://api.whaapy.com`). **Kill switch `POSTVENTA_WHAAPY_SYNC_ENABLED` (default OFF)** gatea TODO el outbound (webhooks 1,2,4); el deploy es seguro sin activarlo. Al agregar un segundo destino de un proveedor ya integrado, duplicar cada punto single-valued (credenciales, tenant lookup, endpoint, dedup, cliente) en vez de parametrizar el existente.
+
+### Funnel de Whaapy es contact-céntrico → la resolución entrante NUNCA adivina
+- **Causa raíz:** Whaapy tiene un solo funnel, **una etapa por contacto**, y NO existe entidad deal/card → no hay identificador por-caso. Un contacto con ≥2 casos activos es indistinguible desde Whaapy (un solo `custom_fields` por contacto; el push del 2º caso pisa el `centrhub_opportunity_id` del 1º). "Resolver el más reciente" archivaría potencialmente el caso equivocado.
+- **Regla:** el worker inbound resuelve SOLO si el contacto tiene **exactamente 1** opp en "Caso problemático" no resuelta (candidatos scoped a esa etapa + `resolved_at IS NULL`); 0 → no-op; **≥2 → NO auto-archiva**: audit `postventa_whaapy_inbound_needs_manual_review` + notifica a Customer Success para resolver el correcto en la plataforma. Escalar a revisión manual es correcto; adivinar no. `resolvePostventaCase` reusa el flujo M4v2 (setea `resolved_at`, no mueve etapa) y guarda etapa+no-resuelto, así que ningún id fuera de "Caso problemático" se archiva por ninguna vía.
+
+### Anti-bucle bidireccional de la resolución (webhooks 3↔4)
+- **Causa raíz:** resolver en la plataforma mueve el contacto de Whaapy a "Caso Resuelto" (webhook 4), lo que dispara el inbound de vuelta (webhook 3) — y viceversa → eco infinito.
+- **Regla (R11-style, dos capas + idempotencia):** capa 1 — `resolvePostventaCase` dispara el push saliente SOLO con `source="platform"`; el worker inbound llama con `source="whaapy_postventa_inbound"` → no re-propaga. Capa 2 — el push saliente **salta el `move`** si el contacto ya está en la etapa destino (no re-dispara el evento de Whaapy). Idempotencia — `resolvePostventaCase` sobre opp ya resuelta = no-op. Cortan el bucle por ambos lados.
+
+### Disparo outbound cubre TODAS las vías; match por teléfono
+- **Regla:** los webhooks 1/2 se enganchan en `moveOpportunityStage` (motor automático + drag manual) Y en `reopenOpportunityIntoProblemCase` (botón "+", drag de reapertura, reapertura M4v2) — no hay choke point único, hay que cubrir ambos. El webhook 4 se engancha en `resolvePostventaCase`. Todos los hooks son **non-fatal** (encolan a Inngest tras el commit; fallo de Whaapy → retry → DLQ, nunca rompe el movimiento de la opp) y gateados por el kill switch. Match del contacto: por **teléfono E.164** (Whaapy Post-venta es instancia independiente; la plataforma no tiene su contact_id). Las variables de Automation NO exponen custom_fields (solo `{{contact.name/phoneNumber/email}}`, system, business), por eso el inbound recibe solo teléfono y resuelve por conteo de casos.
+
+### Autoría de la resolución inbound = usuario real, creado por GoTrue (no SQL crudo)
+- **Causa raíz:** `opportunities.resolved_by_user_id` es FK a `user_profiles(id)` y el webhook corre server-side sin sesión; además `admin.auth.admin.listUsers()` bulk falla en este entorno ("Database error finding users").
+- **Regla:** el resolutor es el usuario real "Customer Success", creado vía GoTrue `createUser` (login latente, rol vendedor) — NUNCA por SQL crudo (revienta GoTrue, ver "auth.users insertado por SQL crudo" + migración 0028). Su id se resuelve **por-membership** (`getAuthUserInfo`/`getUserById`) matcheando `POSTVENTA_RESOLVER_EMAIL`, no por el bulk roto. Sin resolver configurado → audit `postventa_whaapy_inbound_resolver_unresolved` + NO resolver (seguro, no rompe).
+
 ## Notas operativas
 
 ### Protected Customer Data — Custom Apps tienen acceso automático

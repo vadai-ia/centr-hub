@@ -54,6 +54,7 @@ export interface OrganizationRow {
   shopify_store_url: string | null;
   shopify_store_domain: string | null;
   whaapy_business_id: string | null;
+  whaapy_postventa_business_id: string | null;
   branding: Json;
   config: Json;
   vault_keys: Json;
