@@ -1,5 +1,8 @@
 import "server-only";
-import { whaapyPostventaRest } from "@/lib/whaapy-postventa/client";
+import {
+  whaapyPostventaRest,
+  whaapyPostventaRestWith409,
+} from "@/lib/whaapy-postventa/client";
 import {
   WHAAPY_POSTVENTA_STAGE_NAMES,
   type WhaapyPostventaStageKey,
@@ -117,6 +120,72 @@ export async function findPostventaContactByPhone(
     contactId: first.id,
     currentStageId: first.funnel_stage?.id ?? null,
   };
+}
+
+// ============================================================
+// Contacto: crear (cuando no existe en el Whaapy de Post-venta)
+// ============================================================
+
+export interface CreatePostventaContactInput {
+  name: string | null;
+  phoneE164: string;
+  email: string | null;
+  customFields: Record<string, string | null>;
+}
+
+/**
+ * Crea el contacto en el Whaapy de Post-venta (que arranca vacío — la base
+ * maestra vive en el Whaapy de Venta). Se crea SIN etapa; el caller mueve
+ * después con `movePostventaContactToStage` para GARANTIZAR que dispare la
+ * automatización `pipeline_stage_entered` (crear con funnel_stage_id no está
+ * confirmado que la dispare).
+ *
+ * Idempotente: si el teléfono ya existe, Whaapy devuelve 409
+ * `duplicate_contact` con `existing_contact_id` → se enlaza en vez de
+ * duplicar (cubre la carrera "search miss + create concurrente").
+ *
+ * Devuelve el contact_id (parseo defensivo: la respuesta viene envuelta en
+ * `{contact:{id}}`, con fallback a `{id}` plano — ver lección del wrapper
+ * del GET en ERRORES.md).
+ */
+export async function createPostventaContact(
+  organizationId: UUID,
+  input: CreatePostventaContactInput,
+): Promise<string> {
+  const body: Record<string, unknown> = {
+    phone_number: input.phoneE164,
+    custom_fields: input.customFields,
+  };
+  if (input.name) body.name = input.name;
+  if (input.email) body.email = input.email;
+
+  const result = await whaapyPostventaRestWith409<{
+    contact?: { id?: string } | null;
+    id?: string;
+  }>(organizationId, "POST", "/contacts/v1", body);
+
+  if (result.ok) {
+    const id = result.data?.contact?.id ?? result.data?.id;
+    if (!id) throw new Error("whaapy_postventa_create_no_id_in_response");
+    return id;
+  }
+  // 409 duplicate_contact → usar el existing_contact_id del body.
+  const existing = extractExistingContactId(result.body);
+  if (existing) return existing;
+  throw new Error("whaapy_postventa_create_conflict_without_existing_id");
+}
+
+function extractExistingContactId(body: unknown): string | null {
+  if (!body || typeof body !== "object") return null;
+  const obj = body as Record<string, unknown>;
+  const direct = obj.existing_contact_id;
+  if (typeof direct === "string" && direct) return direct;
+  const err = obj.error;
+  if (err && typeof err === "object") {
+    const inner = (err as Record<string, unknown>).existing_contact_id;
+    if (typeof inner === "string" && inner) return inner;
+  }
+  return null;
 }
 
 // ============================================================

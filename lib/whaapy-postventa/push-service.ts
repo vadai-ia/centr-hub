@@ -4,6 +4,7 @@ import { getContactById } from "@/lib/db/contacts";
 import { recordAuditEvent } from "@/lib/db/operational";
 import { normalizePhone } from "@/lib/services/identity-matching";
 import {
+  createPostventaContact,
   findPostventaContactByPhone,
   movePostventaContactToStage,
   patchPostventaContactCustomFields,
@@ -19,31 +20,42 @@ import type { Json, UUID } from "@/lib/types/database";
  * Servicio de PUSH de etapa al Whaapy de Post-venta (webhooks 1, 2, 4).
  *
  * Orquesta: opp → contacto (teléfono) → match en Whaapy por teléfono →
- * escribir contexto del pedido en custom_fields → mover de etapa (lo que
- * dispara la automatización interna de Whaapy).
+ * (si no existe, CREAR el contacto) → escribir contexto del pedido en
+ * custom_fields → mover de etapa (lo que dispara la automatización interna
+ * de Whaapy).
+ *
+ * Auto-creación (cases 1, 2, 4): el Whaapy de Post-venta arranca vacío (la
+ * base maestra vive en el Whaapy de Venta), así que sin crear el contacto
+ * ausente ningún webhook funcionaría. Si el contacto no existe → se crea
+ * (name + phone + email si hay + custom_fields) y LUEGO se mueve — la
+ * automatización dispara igual que moviendo uno existente (siempre vía el
+ * move API). Idempotente: search-first + 409 `duplicate_contact` → enlaza
+ * el `existing_contact_id`, nunca duplica. Sin eco a la plataforma: no
+ * suscribimos webhooks del Whaapy de Post-venta (el único inbound es la
+ * Automation de "Caso Resuelto"), así que crear/mover no llama de vuelta.
  *
  * Contrato de errores (importante para la semántica del worker):
- *   - Casos "no aplica" (opp inexistente, sin teléfono, sin match en
- *     Whaapy, etapa no resuelta) NO lanzan — auditan y devuelven un
- *     `skipped`. Son estados esperados (decisión aprobada: "registrar y no
- *     romper"), reintentar no ayuda.
+ *   - Casos "no aplica" (opp inexistente, sin teléfono, etapa no resuelta)
+ *     NO lanzan — auditan y devuelven un `skipped`. Reintentar no ayuda.
  *   - Fallos de red/HTTP de Whaapy (429/5xx/4xx) SÍ lanzan `WhaapyApiError`
- *     → el worker de Inngest reintenta con backoff → DLQ tras agotar.
+ *     → el worker de Inngest reintenta con backoff → DLQ tras agotar. La opp
+ *     ya movió antes de encolar → operación de plataforma nunca se rompe.
  *
  * Anti-bucle capa 2 (outbound): si el contacto YA está en la etapa destino
- * en Whaapy, se salta el move — así no se re-dispara `contact.stage_changed`.
+ * en Whaapy, se salta el move — así no se re-dispara la automatización
+ * (evita mensaje duplicado al cliente). Solo aplica a contactos existentes;
+ * un contacto recién creado siempre se mueve.
  */
 
 export type PostventaPushResult =
-  | { ok: true; moved: boolean; whaapyContactId: string }
+  | { ok: true; moved: boolean; created: boolean; whaapyContactId: string }
   | { ok: false; skipped: PostventaPushSkipReason };
 
 export type PostventaPushSkipReason =
   | "opportunity_not_found"
   | "contact_not_found"
   | "missing_phone"
-  | "stage_unresolved"
-  | "no_whaapy_match";
+  | "stage_unresolved";
 
 export interface PushPostventaStageInput {
   organizationId: UUID;
@@ -93,41 +105,59 @@ export async function pushPostventaStage(
     return { ok: false, skipped: "stage_unresolved" };
   }
 
-  // Match por teléfono. Sin match → registrar y no romper (decisión aprobada).
-  const match = await findPostventaContactByPhone(organizationId, phone);
-  if (!match) {
-    await audit(opportunityId, "postventa_whaapy_no_match", {
-      target,
-      stage_id: stageId,
-    });
-    return { ok: false, skipped: "no_whaapy_match" };
-  }
-
-  // Escribir contexto del pedido en custom_fields (match inverso + template).
-  await patchPostventaContactCustomFields(organizationId, match.contactId, {
+  const customFields = {
     [WHAAPY_POSTVENTA_CUSTOM_FIELDS.opportunityId]: opportunityId,
     [WHAAPY_POSTVENTA_CUSTOM_FIELDS.orderRef]: opp.display_reference ?? null,
     [WHAAPY_POSTVENTA_CUSTOM_FIELDS.orderId]: opp.shopify_order_id ?? null,
-  });
+  };
 
-  // Anti-bucle capa 2: si ya está en la etapa destino, no re-mover.
-  if (match.currentStageId === stageId) {
+  // Match por teléfono. Si existe → PATCH custom_fields. Si NO existe →
+  // CREAR el contacto (con custom_fields) — el Whaapy de Post-venta arranca
+  // vacío, sin crearlo ningún webhook funcionaría.
+  const match = await findPostventaContactByPhone(organizationId, phone);
+  let contactId: string;
+  let currentStageId: string | null;
+  let created = false;
+
+  if (match) {
+    contactId = match.contactId;
+    currentStageId = match.currentStageId;
+    await patchPostventaContactCustomFields(organizationId, contactId, customFields);
+  } else {
+    contactId = await createPostventaContact(organizationId, {
+      name: contact.full_name,
+      phoneE164: phone,
+      email: contact.email,
+      customFields,
+    });
+    currentStageId = null; // recién creado (sin etapa) → siempre se mueve
+    created = true;
+    await audit(opportunityId, "postventa_whaapy_contact_created", {
+      target,
+      whaapy_contact_id: contactId,
+    });
+  }
+
+  // Anti-bucle capa 2: si ya está en la etapa destino, no re-mover (evita
+  // mensaje duplicado). Nunca aplica a un contacto recién creado.
+  if (currentStageId === stageId) {
     await audit(opportunityId, "postventa_whaapy_already_in_stage", {
       target,
       stage_id: stageId,
-      whaapy_contact_id: match.contactId,
+      whaapy_contact_id: contactId,
     });
-    return { ok: true, moved: false, whaapyContactId: match.contactId };
+    return { ok: true, moved: false, created, whaapyContactId: contactId };
   }
 
-  await movePostventaContactToStage(organizationId, match.contactId, stageId);
+  await movePostventaContactToStage(organizationId, contactId, stageId);
   await audit(opportunityId, "postventa_whaapy_stage_pushed", {
     target,
     stage_id: stageId,
-    whaapy_contact_id: match.contactId,
+    whaapy_contact_id: contactId,
+    created,
     order_ref: opp.display_reference ?? null,
   });
-  return { ok: true, moved: true, whaapyContactId: match.contactId };
+  return { ok: true, moved: true, created, whaapyContactId: contactId };
 }
 
 async function audit(

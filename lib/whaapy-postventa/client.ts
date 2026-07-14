@@ -75,6 +75,39 @@ export async function whaapyPostventaRest<T = unknown>(
   }
 }
 
+/**
+ * Variante que tolera 409 conflict — retorna el body parseado en lugar de
+ * lanzar. La usa la creación de contacto: en 409 (`duplicate_contact`)
+ * Whaapy devuelve `existing_contact_id`, que enlazamos en vez de duplicar.
+ */
+export async function whaapyPostventaRestWith409<T = unknown>(
+  organizationId: UUID,
+  method: "POST" | "PATCH",
+  path: string,
+  body: unknown,
+): Promise<{ ok: true; data: T } | { ok: false; status: number; body: unknown }> {
+  const res = await postventaFetch(organizationId, path, {
+    method,
+    body: JSON.stringify(body),
+  });
+  if (res.ok) {
+    if (res.status === 204) return { ok: true, data: undefined as unknown as T };
+    const txt = await res.text();
+    if (!txt) return { ok: true, data: undefined as unknown as T };
+    return { ok: true, data: JSON.parse(txt) as T };
+  }
+  if (res.status === 409) {
+    const txt = await res.text();
+    return { ok: false, status: 409, body: safeJson(txt) };
+  }
+  const text = await res.text();
+  throw new WhaapyApiError(
+    `whaapy_postventa_rest_failed: ${method} ${path} status=${res.status}`,
+    res.status,
+    safeJson(text),
+  );
+}
+
 function safeJson(text: string): unknown {
   try {
     return JSON.parse(text);
