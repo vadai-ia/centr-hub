@@ -8,6 +8,7 @@ import type { ContactListRow, DerivedAdvisor } from "@/lib/db/contacts";
 import type { UUID } from "@/lib/types/database";
 import { CONTACT_SEARCH_DEBOUNCE_MS } from "@/lib/constants";
 import { ContactRow } from "./contact-row";
+import { CreateLeadButton } from "@/components/leads/create-lead-dialog";
 
 interface Props {
   initial: ContactsBoardState;
@@ -187,6 +188,7 @@ export function ContactsBoard({ initial }: Props) {
             />
           </div>
         </div>
+        <CreateLeadButton />
       </header>
 
       {/* Filtros */}
