@@ -1,3 +1,4 @@
+import { requireTabOrRedirect } from "@/lib/auth/require-tab";
 import { loadAdminTagMappings } from "@/lib/actions/admin-tags";
 import { MapeoTagsScreen } from "./mapeo-tags-screen";
 
@@ -5,6 +6,7 @@ import { MapeoTagsScreen } from "./mapeo-tags-screen";
  * Admin → Mapeo de tags ↔ vendedor (M7.2, Bloque 5).
  */
 export default async function MapeoTagsPage() {
+  await requireTabOrRedirect("admin-mapeo-tags");
   const res = await loadAdminTagMappings();
   if (!res.ok) {
     return (

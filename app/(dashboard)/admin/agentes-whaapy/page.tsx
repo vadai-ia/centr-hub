@@ -1,3 +1,4 @@
+import { requireTabOrRedirect } from "@/lib/auth/require-tab";
 import { loadWhaapyAgentMapping } from "@/lib/actions/admin-whaapy-agents";
 import { AgentesWhaapyScreen } from "./agentes-whaapy-screen";
 
@@ -7,6 +8,7 @@ import { AgentesWhaapyScreen } from "./agentes-whaapy-screen";
  * asignación bidireccional.
  */
 export default async function AgentesWhaapyPage() {
+  await requireTabOrRedirect("admin-agentes-whaapy");
   const res = await loadWhaapyAgentMapping();
   if (!res.ok) {
     return (

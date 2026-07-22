@@ -1,6 +1,7 @@
 "use server";
 import { z } from "zod";
 import { getSession } from "@/lib/auth/session";
+import { canSeeAllData, type RoleCapabilities } from "@/lib/auth/capabilities";
 import { withTenantContext } from "@/lib/tenant/context";
 import {
   getContactById,
@@ -54,7 +55,6 @@ import { CONTACTS_PAGE_SIZE } from "@/lib/constants";
 import type {
   ContactRow,
   Json,
-  Role,
   UUID,
 } from "@/lib/types/database";
 
@@ -86,10 +86,13 @@ export interface ContactsBoardState {
   /** Total que matchea el filtro/búsqueda activos (= totalCount si no hay). */
   filteredCount: number;
   advisors: AdvisorOption[];
-  /** Rol del caller — el Client lo necesita para mostrar/ocultar
-   *  filtros de admin (futuro). */
-  role: Role;
-  /** Membership del usuario activo (null si admin). Usado por la UI
+  /** Key del rol del caller (sistema o custom). Para display/hints. */
+  role: string;
+  /** True si el rol alcanza todos los datos (admin/superadmin/SDR); false
+   *  si solo los propios (vendedor). El Client oculta hints de "asignados
+   *  a ti" y muestra filtros de todo-el-equipo con esto (0039). */
+  canSeeAll: boolean;
+  /** Membership del usuario activo (null si ve todo). Usado por la UI
    *  para destacar "tus contactos" en futuras iteraciones. */
   selfMembershipId: UUID | null;
   /** Lote polish M6: asesor derivado por contacto (solo si el contacto
@@ -127,10 +130,9 @@ const searchSchema = z.object({
 async function resolveEffectiveAdvisor(
   orgId: UUID,
   userId: UUID,
-  role: Role,
+  caps: RoleCapabilities,
 ): Promise<{ effectiveAdvisorId: UUID | null | undefined; membership: UUID | null }> {
-  const isAdmin = role === "admin" || role === "superadmin";
-  if (isAdmin) {
+  if (canSeeAllData(caps)) {
     return { effectiveAdvisorId: undefined, membership: null };
   }
   const membership = await getMembership(userId, orgId);
@@ -153,15 +155,16 @@ export async function loadInitialContactsState(opts: {
   }
   const orgId = session.data.activeOrg.id;
   const role = session.data.activeOrg.role;
+  const caps = session.data.activeRole;
   const userId = session.data.userId;
 
   return withTenantContext(orgId, async () => {
     const { effectiveAdvisorId, membership } = await resolveEffectiveAdvisor(
       orgId,
       userId,
-      role,
+      caps,
     );
-    if (role === "vendedor" && !membership) {
+    if (!canSeeAllData(caps) && !membership) {
       return {
         ok: false,
         reason: "no_membership",
@@ -206,6 +209,7 @@ export async function loadInitialContactsState(opts: {
         totalCount,
         filteredCount: filteredCount ?? totalCount,
         role,
+        canSeeAll: canSeeAllData(caps),
         selfMembershipId: membership,
         derivedAdvisors,
         advisors: vendors.map((v) => ({
@@ -241,16 +245,17 @@ export async function searchContactsAction(
     return { ok: false, reason: "no_session", message: "Sesión expirada." };
   }
   const orgId = session.data.activeOrg.id;
-  const role = session.data.activeOrg.role;
+  const caps = session.data.activeRole;
   const userId = session.data.userId;
 
   return withTenantContext(orgId, async () => {
     const { effectiveAdvisorId, membership } = await resolveEffectiveAdvisor(
       orgId,
       userId,
-      role,
+      caps,
     );
-    if (role === "vendedor" && !membership) {
+    const isAdmin = canSeeAllData(caps);
+    if (!isAdmin && !membership) {
       return {
         ok: false,
         reason: "no_membership",
@@ -258,7 +263,6 @@ export async function searchContactsAction(
       };
     }
 
-    const isAdmin = role === "admin" || role === "superadmin";
     const filterAdvisorId = isAdmin ? parsed.data.filterAdvisorId ?? undefined : undefined;
     const includeArchived = parsed.data.includeArchived ?? false;
     const listOpts = {
@@ -307,7 +311,9 @@ export interface ContactDetailBundle {
   detail: ContactDetail;
   timeline: TimelineEvent[];
   advisors: AdvisorOption[];
-  role: Role;
+  role: string;
+  /** True si el rol alcanza todos los datos (admin/superadmin/SDR). */
+  canSeeAll: boolean;
   selfMembershipId: UUID | null;
   /** True si el caller tiene permiso de edición. Vendedor: solo si
    *  asignado al contacto. Admin: siempre. */
@@ -341,7 +347,7 @@ export async function loadContactDetail(opts: {
   const orgId = session.data.activeOrg.id;
   const role = session.data.activeOrg.role;
   const userId = session.data.userId;
-  const isAdmin = role === "admin" || role === "superadmin";
+  const isAdmin = canSeeAllData(session.data.activeRole);
 
   return withTenantContext(orgId, async () => {
     const membership = await getMembership(userId, orgId);
@@ -400,6 +406,7 @@ export async function loadContactDetail(opts: {
         detail,
         timeline,
         role,
+        canSeeAll: isAdmin,
         selfMembershipId: membership?.id ?? null,
         canEdit: isAdmin || detail.contact.assigned_advisor_id === membership?.id,
         canReassign: isAdmin,
@@ -484,9 +491,8 @@ export async function createContactInShopifyAction(
     return { ok: false, reason: "no_session", message: "Sesión expirada." };
   }
   const orgId = session.data.activeOrg.id;
-  const role = session.data.activeOrg.role;
   const userId = session.data.userId;
-  const isAdmin = role === "admin" || role === "superadmin";
+  const isAdmin = canSeeAllData(session.data.activeRole);
 
   return withTenantContext(orgId, async () => {
     const membership = await getMembership(userId, orgId);
@@ -694,9 +700,8 @@ export async function reassignAdvisorAction(
     return { ok: false, reason: "no_session", message: "Sesión expirada." };
   }
   const orgId = session.data.activeOrg.id;
-  const role = session.data.activeOrg.role;
   const userId = session.data.userId;
-  const isAdmin = role === "admin" || role === "superadmin";
+  const isAdmin = canSeeAllData(session.data.activeRole);
 
   if (!isAdmin) {
     return {
@@ -997,9 +1002,8 @@ export async function updateContactWithPropagationAction(
     return { ok: false, reason: "no_session", message: "Sesión expirada." };
   }
   const orgId = session.data.activeOrg.id;
-  const role = session.data.activeOrg.role;
   const userId = session.data.userId;
-  const isAdmin = role === "admin" || role === "superadmin";
+  const isAdmin = canSeeAllData(session.data.activeRole);
 
   return withTenantContext(orgId, async () => {
     const membership = await getMembership(userId, orgId);

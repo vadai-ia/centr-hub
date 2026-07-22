@@ -1,6 +1,7 @@
 "use server";
 import { z } from "zod";
 import { getSession } from "@/lib/auth/session";
+import { canSeeAllData } from "@/lib/auth/capabilities";
 import { withTenantContext } from "@/lib/tenant/context";
 import {
   getOpportunityDetail,
@@ -54,7 +55,7 @@ export interface OpportunityDialogBundle {
   timeline: TimelineEvent[];
   tasks: OpportunityTaskItem[];
   advisors: AdvisorOption[];
-  role: Role;
+  role: string;
   selfMembershipId: UUID | null;
   /** URL absoluta al customer en Shopify Admin, si el contacto tiene
    *  identidad enlazada y la org tiene shopify_store_domain configurado.
@@ -112,9 +113,9 @@ export async function loadOpportunityDetailForDialog(
     return { ok: false, reason: "no_session", message: "Sesión expirada." };
   }
   const orgId = session.data.activeOrg.id;
-  const role = session.data.activeOrg.role;
   const userId = session.data.userId;
-  const isAdmin = role === "admin" || role === "superadmin";
+  // "Sees all data" (admin/superadmin/SDR) vs "own only" (vendedor) — 0039.
+  const isAdmin = canSeeAllData(session.data.activeRole);
 
   return withTenantContext(orgId, async () => {
     const membership = await getMembership(userId, orgId);
@@ -247,7 +248,7 @@ export async function loadOpportunityDetailForDialog(
         detail,
         timeline,
         tasks: taskItems,
-        role,
+        role: session.data.activeOrg.role,
         selfMembershipId: membership?.id ?? null,
         shopifyCustomerUrl,
         lineItemsSubtotal,
@@ -317,9 +318,9 @@ export async function addNoteToOpportunityAction(
     return { ok: false, reason: "no_session", message: "Sesión expirada." };
   }
   const orgId = session.data.activeOrg.id;
-  const role = session.data.activeOrg.role;
   const userId = session.data.userId;
-  const isAdmin = role === "admin" || role === "superadmin";
+  // "Sees all data" (admin/superadmin/SDR) vs "own only" (vendedor) — 0039.
+  const isAdmin = canSeeAllData(session.data.activeRole);
 
   return withTenantContext(orgId, async () => {
     const membership = await getMembership(userId, orgId);
@@ -410,9 +411,9 @@ export async function resolvePostventaCaseAction(
     return { ok: false, reason: "no_session", message: "Sesión expirada." };
   }
   const orgId = session.data.activeOrg.id;
-  const role = session.data.activeOrg.role;
   const userId = session.data.userId;
-  const isAdmin = role === "admin" || role === "superadmin";
+  // "Sees all data" (admin/superadmin/SDR) vs "own only" (vendedor) — 0039.
+  const isAdmin = canSeeAllData(session.data.activeRole);
   const note =
     parsed.data.note && parsed.data.note.length > 0 ? parsed.data.note : null;
 
@@ -500,9 +501,9 @@ export async function createTaskForOpportunityAction(
     return { ok: false, reason: "no_session", message: "Sesión expirada." };
   }
   const orgId = session.data.activeOrg.id;
-  const role = session.data.activeOrg.role;
   const userId = session.data.userId;
-  const isAdmin = role === "admin" || role === "superadmin";
+  // "Sees all data" (admin/superadmin/SDR) vs "own only" (vendedor) — 0039.
+  const isAdmin = canSeeAllData(session.data.activeRole);
 
   return withTenantContext(orgId, async () => {
     const membership = await getMembership(userId, orgId);
@@ -612,9 +613,9 @@ async function loadTaskWithAccess(
     };
   }
   const orgId = session.data.activeOrg.id;
-  const role = session.data.activeOrg.role;
   const userId = session.data.userId;
-  const isAdmin = role === "admin" || role === "superadmin";
+  // "Sees all data" (admin/superadmin/SDR) vs "own only" (vendedor) — 0039.
+  const isAdmin = canSeeAllData(session.data.activeRole);
 
   const inner = await withTenantContext(orgId, async () => {
     const membership = await getMembership(userId, orgId);

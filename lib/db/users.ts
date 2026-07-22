@@ -220,7 +220,7 @@ export async function listManageableMemberships(
 
 export async function updateMembershipRole(
   membershipId: UUID,
-  role: Role,
+  role: string,
 ): Promise<MembershipRow> {
   const supabase = getSupabaseAdminClient();
   const { data, error } = await supabase

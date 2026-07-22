@@ -1,3 +1,4 @@
+import { requireTabOrRedirect } from "@/lib/auth/require-tab";
 import { loadAdminRules } from "@/lib/actions/admin-rules";
 import { ReglasScreen } from "./reglas-screen";
 
@@ -6,6 +7,7 @@ import { ReglasScreen } from "./reglas-screen";
 // Component que pre-carga reglas + etapas y delega la interacción al
 // client component.
 export default async function ReglasPage() {
+  await requireTabOrRedirect("admin-reglas");
   const res = await loadAdminRules();
   if (!res.ok) {
     return (

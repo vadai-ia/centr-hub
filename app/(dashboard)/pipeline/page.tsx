@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/auth/session";
+import { canSeeAllData } from "@/lib/auth/capabilities";
 import {
   loadInitialPipelineState,
   readFunnelPreference,
@@ -27,8 +28,7 @@ export default async function PipelinePage() {
     redirect("/login");
   }
 
-  const role = session.data.activeOrg.role;
-  const isAdmin = role === "admin" || role === "superadmin";
+  const isAdmin = canSeeAllData(session.data.activeRole);
 
   const [funnel, unassignedRaw] = await Promise.all([
     readFunnelPreference(),
@@ -54,7 +54,7 @@ export default async function PipelinePage() {
       // la UI debe reflejar la org activa de inmediato.
       key={session.data.activeOrg.id}
       initial={initial.state}
-      role={role}
+      canSeeAll={isAdmin}
       userId={session.data.userId}
       organizationId={session.data.activeOrg.id}
       unassignedFilter={unassignedFilter}

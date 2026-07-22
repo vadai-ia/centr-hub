@@ -113,7 +113,7 @@ function buildRulePayload(raw: unknown):
 }
 
 export async function loadAdminRules(): Promise<RulesLoadResult> {
-  const admin = await resolveAdminContext();
+  const admin = await resolveAdminContext("admin-reglas");
   if (!admin.ok) return admin;
   return withTenantContext(
     admin.ctx.orgId,
@@ -127,7 +127,7 @@ export async function loadAdminRules(): Promise<RulesLoadResult> {
 }
 
 export async function createRuleAction(raw: unknown): Promise<RulesActionResult> {
-  const admin = await resolveAdminContext();
+  const admin = await resolveAdminContext("admin-reglas");
   if (!admin.ok) return admin;
   const built = buildRulePayload(raw);
   if (!built.ok) return built;
@@ -165,7 +165,7 @@ export async function createRuleAction(raw: unknown): Promise<RulesActionResult>
 const updateSchema = baseRuleSchema.extend({ id: z.string().uuid() });
 
 export async function updateRuleAction(raw: unknown): Promise<RulesActionResult> {
-  const admin = await resolveAdminContext();
+  const admin = await resolveAdminContext("admin-reglas");
   if (!admin.ok) return admin;
   const idParse = updateSchema.safeParse(raw);
   if (!idParse.success) return { ok: false, message: "Datos de la regla inválidos." };
@@ -203,7 +203,7 @@ export async function updateRuleAction(raw: unknown): Promise<RulesActionResult>
 const toggleSchema = z.object({ id: z.string().uuid(), is_active: z.boolean() });
 
 export async function toggleRuleAction(raw: unknown): Promise<RulesActionResult> {
-  const admin = await resolveAdminContext();
+  const admin = await resolveAdminContext("admin-reglas");
   if (!admin.ok) return admin;
   const parsed = toggleSchema.safeParse(raw);
   if (!parsed.success) return { ok: false, message: "Datos inválidos." };
@@ -231,7 +231,7 @@ export async function toggleRuleAction(raw: unknown): Promise<RulesActionResult>
 const deleteSchema = z.object({ id: z.string().uuid() });
 
 export async function deleteRuleAction(raw: unknown): Promise<RulesActionResult> {
-  const admin = await resolveAdminContext();
+  const admin = await resolveAdminContext("admin-reglas");
   if (!admin.ok) return admin;
   const parsed = deleteSchema.safeParse(raw);
   if (!parsed.success) return { ok: false, message: "Identificador inválido." };

@@ -1,3 +1,4 @@
+import { requireTabOrRedirect } from "@/lib/auth/require-tab";
 import { loadAdminMetas } from "@/lib/actions/admin-metas";
 import { MetasScreen } from "./metas-screen";
 
@@ -7,6 +8,7 @@ import { MetasScreen } from "./metas-screen";
  * el histórico mensual.
  */
 export default async function MetasPage() {
+  await requireTabOrRedirect("admin-metas");
   const res = await loadAdminMetas();
   if (!res.ok) {
     return (

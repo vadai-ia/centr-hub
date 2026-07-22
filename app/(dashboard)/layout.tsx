@@ -25,7 +25,7 @@ export default async function DashboardLayout({
     <div className="h-screen flex flex-col bg-gray-50 dark:bg-gray-900 overflow-hidden">
       <Navbar session={data} />
       <div className="flex flex-1 min-h-0 overflow-hidden">
-        <Sidebar role={data.activeOrg.role} />
+        <Sidebar role={data.activeRole} />
         <main className="flex-1 min-w-0 min-h-0 overflow-y-auto p-6">
           {children}
         </main>

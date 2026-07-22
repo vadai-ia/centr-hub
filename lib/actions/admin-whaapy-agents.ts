@@ -53,7 +53,7 @@ async function loadAdvisors(orgId: string): Promise<AdvisorMappingRow[]> {
 }
 
 export async function loadWhaapyAgentMapping(): Promise<WhaapyAgentMappingLoadResult> {
-  const admin = await resolveAdminContext();
+  const admin = await resolveAdminContext("admin-agentes-whaapy");
   if (!admin.ok) return admin;
   return withTenantContext(
     admin.ctx.orgId,
@@ -83,7 +83,7 @@ export async function setWhaapyAgentIdAction(
 ): Promise<WhaapyAgentMappingSetResult> {
   const parsed = setSchema.safeParse(raw);
   if (!parsed.success) return { ok: false, message: "Datos inválidos." };
-  const admin = await resolveAdminContext();
+  const admin = await resolveAdminContext("admin-agentes-whaapy");
   if (!admin.ok) return admin;
 
   const whaapyAgentId = parsed.data.whaapyAgentId ?? null;

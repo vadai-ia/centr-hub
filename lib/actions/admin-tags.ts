@@ -44,7 +44,7 @@ type LoadResult =
   | { ok: false; message: string };
 
 export async function loadAdminTagMappings(): Promise<LoadResult> {
-  const admin = await resolveAdminContext();
+  const admin = await resolveAdminContext("admin-mapeo-tags");
   if (!admin.ok) return admin;
 
   return withTenantContext(admin.ctx.orgId, async () => {
@@ -105,7 +105,7 @@ export async function reclassifyTagAction(
   const parsed = reclassifySchema.safeParse(raw);
   if (!parsed.success) return { ok: false, message: "Datos de clasificación inválidos." };
   const input = parsed.data;
-  const admin = await resolveAdminContext();
+  const admin = await resolveAdminContext("admin-mapeo-tags");
   if (!admin.ok) return admin;
 
   return withTenantContext(admin.ctx.orgId, async () => {
@@ -164,7 +164,7 @@ export async function deleteTagMappingAction(
 ): Promise<TagMappingActionResult> {
   const parsed = deleteSchema.safeParse(raw);
   if (!parsed.success) return { ok: false, message: "Identificador de tag inválido." };
-  const admin = await resolveAdminContext();
+  const admin = await resolveAdminContext("admin-mapeo-tags");
   if (!admin.ok) return admin;
 
   return withTenantContext(admin.ctx.orgId, async () => {
@@ -208,7 +208,7 @@ export async function reprocessTagAction(
   const parsed = reprocessSchema.safeParse(raw);
   if (!parsed.success) return { ok: false, message: "Parámetros de re-proceso inválidos." };
   const input = parsed.data;
-  const admin = await resolveAdminContext();
+  const admin = await resolveAdminContext("admin-mapeo-tags");
   if (!admin.ok) return admin;
 
   return withTenantContext(admin.ctx.orgId, async () => {

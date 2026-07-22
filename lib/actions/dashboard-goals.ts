@@ -1,5 +1,6 @@
 "use server";
 import { getSession } from "@/lib/auth/session";
+import { canSeeAllData } from "@/lib/auth/capabilities";
 import { withTenantContext } from "@/lib/tenant/context";
 import { getMembership } from "@/lib/db/users";
 import {
@@ -59,8 +60,9 @@ export async function loadDashboardGoals(): Promise<LoadDashboardGoalsResult> {
   }
   const orgId = session.data.activeOrg.id;
   const userId = session.data.userId;
-  const role = session.data.activeOrg.role;
-  const isAdmin = role === "admin" || role === "superadmin";
+  // Vista de equipo (metas de todos) cuando el rol alcanza todos los datos
+  // (admin/superadmin/SDR); vista propia para vendedor (0039).
+  const isAdmin = canSeeAllData(session.data.activeRole);
 
   return withTenantContext(
     orgId,

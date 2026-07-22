@@ -96,7 +96,7 @@ function revalidateMetasSurfaces(): void {
 
 // ── Carga inicial ───────────────────────────────────────────────────────
 export async function loadAdminMetas(): Promise<LoadAdminMetasResult> {
-  const admin = await resolveAdminContext();
+  const admin = await resolveAdminContext("admin-metas");
   if (!admin.ok) return admin;
   return withTenantContext(
     admin.ctx.orgId,
@@ -154,7 +154,7 @@ export async function upsertGoalAction(raw: unknown): Promise<GoalsMutationResul
     return { ok: false, message: parsed.error.issues[0]?.message ?? "Datos inválidos." };
   }
   const input = parsed.data;
-  const admin = await resolveAdminContext();
+  const admin = await resolveAdminContext("admin-metas");
   if (!admin.ok) return admin;
 
   return withTenantContext(
@@ -214,7 +214,7 @@ const goalActiveSchema = z.object({ id: z.string().uuid(), isActive: z.boolean()
 export async function setGoalActiveAction(raw: unknown): Promise<GoalsMutationResult> {
   const parsed = goalActiveSchema.safeParse(raw);
   if (!parsed.success) return { ok: false, message: "Datos inválidos." };
-  const admin = await resolveAdminContext();
+  const admin = await resolveAdminContext("admin-metas");
   if (!admin.ok) return admin;
 
   return withTenantContext(
@@ -241,7 +241,7 @@ const goalDeleteSchema = z.object({ id: z.string().uuid() });
 export async function deleteGoalAction(raw: unknown): Promise<GoalsMutationResult> {
   const parsed = goalDeleteSchema.safeParse(raw);
   if (!parsed.success) return { ok: false, message: "Identificador inválido." };
-  const admin = await resolveAdminContext();
+  const admin = await resolveAdminContext("admin-metas");
   if (!admin.ok) return admin;
 
   return withTenantContext(
@@ -269,7 +269,7 @@ export async function saveThresholdsAction(
 ): Promise<ThresholdsMutationResult> {
   const parsed = goalThresholdsInputSchema.safeParse(raw);
   if (!parsed.success) return { ok: false, message: "Umbrales inválidos." };
-  const admin = await resolveAdminContext();
+  const admin = await resolveAdminContext("admin-metas");
   if (!admin.ok) return admin;
 
   const thresholds = sanitizeGoalThresholds(parsed.data);

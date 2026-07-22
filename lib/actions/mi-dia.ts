@@ -2,6 +2,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { getSession } from "@/lib/auth/session";
+import { canSeeAllData } from "@/lib/auth/capabilities";
 import { withTenantContext } from "@/lib/tenant/context";
 import { getMembership } from "@/lib/db/users";
 import {
@@ -39,8 +40,9 @@ async function resolveActor(): Promise<
   }
   const orgId = session.data.activeOrg.id;
   const userId = session.data.userId;
-  const role = session.data.activeOrg.role;
-  const isAdmin = role === "admin" || role === "superadmin";
+  // "Sees all" (admin/superadmin/SDR) puede operar tareas/avisos de
+  // cualquiera; "own" (vendedor) solo los suyos (0039).
+  const isAdmin = canSeeAllData(session.data.activeRole);
   const membership = await withTenantContext(
     orgId,
     () => getMembership(userId, orgId),

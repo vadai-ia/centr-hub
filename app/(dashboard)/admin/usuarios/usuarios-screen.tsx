@@ -5,15 +5,17 @@ import {
   deactivateUserAction,
   resendInviteAction,
 } from "@/lib/actions/admin-users";
-import type { ManagedUserView } from "@/lib/types/admin";
+import type { ManagedUserView, RoleOption } from "@/lib/types/admin";
 import { UserEditModal } from "./user-edit-modal";
-import { InviteVendorModal } from "./invite-vendor-modal";
+import { InviteUserModal } from "./invite-vendor-modal";
 import { LinkLoginModal } from "./link-login-modal";
 import { DeactivateModal } from "./deactivate-modal";
 import { RoleBadge, StateBadge, LoginBadge } from "./user-badges";
 
 interface Props {
   initialUsers: ManagedUserView[];
+  /** Roles asignables de la org (para invitar / editar) — 0039. */
+  assignableRoles: RoleOption[];
 }
 
 /**
@@ -23,7 +25,7 @@ interface Props {
  * modal. Invitar/vincular login y activar/desactivar se agregan en los
  * Blocks 2 y 3.
  */
-export function UsuariosScreen({ initialUsers }: Props) {
+export function UsuariosScreen({ initialUsers, assignableRoles }: Props) {
   const [users, setUsers] = useState(initialUsers);
   const [editing, setEditing] = useState<ManagedUserView | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
@@ -100,7 +102,7 @@ export function UsuariosScreen({ initialUsers }: Props) {
           onClick={() => setInviteOpen(true)}
           className="px-3 py-1.5 text-sm rounded-md bg-indigo-600 text-white hover:bg-indigo-700 whitespace-nowrap"
         >
-          + Invitar vendedor
+          + Invitar usuario
         </button>
       </header>
 
@@ -152,7 +154,7 @@ export function UsuariosScreen({ initialUsers }: Props) {
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
-              <RoleBadge role={u.role} />
+              <RoleBadge role={u.role} label={u.roleLabel} />
               <StateBadge active={u.isActive} />
               <LoginBadge status={u.loginStatus} />
               {u.loginStatus === "placeholder" && (
@@ -215,6 +217,7 @@ export function UsuariosScreen({ initialUsers }: Props) {
       <UserEditModal
         open={modalOpen}
         user={editing}
+        assignableRoles={assignableRoles}
         onClose={() => setModalOpen(false)}
         onSaved={(next) => {
           setUsers(next);
@@ -223,8 +226,9 @@ export function UsuariosScreen({ initialUsers }: Props) {
         }}
       />
 
-      <InviteVendorModal
+      <InviteUserModal
         open={inviteOpen}
+        assignableRoles={assignableRoles}
         onClose={() => setInviteOpen(false)}
         onInvited={(next, email) => {
           setUsers(next);
@@ -251,6 +255,9 @@ export function UsuariosScreen({ initialUsers }: Props) {
         candidates={users.filter(
           (c) =>
             c.isActive &&
+            // Solo vendedores son asesores asignables (0039): un SDR/admin no
+            // puede recibir oportunidades reasignadas.
+            c.role === "vendedor" &&
             c.membershipId !== deactivateTarget?.user.membershipId,
         )}
         onClose={() => setDeactivateTarget(null)}

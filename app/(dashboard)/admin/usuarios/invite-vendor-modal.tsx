@@ -1,10 +1,11 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
-import { inviteVendorAction } from "@/lib/actions/admin-users";
-import type { ManagedUserView } from "@/lib/types/admin";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { inviteUserAction } from "@/lib/actions/admin-users";
+import type { ManagedUserView, RoleOption } from "@/lib/types/admin";
 
 interface Props {
   open: boolean;
+  assignableRoles: RoleOption[];
   onClose: () => void;
   onInvited: (users: ManagedUserView[], email: string) => void;
 }
@@ -13,15 +14,22 @@ interface Props {
 const PALETTE = ["#F59E0B", "#10B981", "#8B5CF6", "#EF4444", "#06B6D4", "#F97316"];
 
 /**
- * Modal "Invitar vendedor" (M9.2, Block 2). Crea un usuario NUEVO:
+ * Modal "Invitar usuario" (0039). Crea un usuario NUEVO con el rol elegido:
  * envía la invitación por email (Supabase built-in) y da de alta su
- * membership de vendedor. Para asesores YA existentes (Gina/Pepe) se
- * usa "Vincular login", no este modal.
+ * membership. Para asesores YA existentes (Gina/Pepe) se usa "Vincular
+ * login", no este modal.
  */
-export function InviteVendorModal({ open, onClose, onInvited }: Props) {
+export function InviteUserModal({ open, assignableRoles, onClose, onInvited }: Props) {
+  // Rol por defecto: vendedor si existe, si no el primero disponible.
+  const defaultRole = useMemo(() => {
+    if (assignableRoles.some((r) => r.key === "vendedor")) return "vendedor";
+    return assignableRoles[0]?.key ?? "";
+  }, [assignableRoles]);
+
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [color, setColor] = useState(PALETTE[0]);
+  const [role, setRole] = useState(defaultRole);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -31,9 +39,10 @@ export function InviteVendorModal({ open, onClose, onInvited }: Props) {
     setFullName("");
     setEmail("");
     setColor(PALETTE[0]);
+    setRole(defaultRole);
     setError(null);
     setSubmitting(false);
-  }, [open]);
+  }, [open, defaultRole]);
 
   useEffect(() => {
     if (!open) return;
@@ -47,12 +56,20 @@ export function InviteVendorModal({ open, onClose, onInvited }: Props) {
 
   if (!open) return null;
 
+  const selectedRole = assignableRoles.find((r) => r.key === role);
+  const isAdvisorRole = role === "vendedor";
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (submitting) return;
     setSubmitting(true);
     setError(null);
-    const res = await inviteVendorAction({ fullName: fullName.trim(), email: email.trim(), color });
+    const res = await inviteUserAction({
+      fullName: fullName.trim(),
+      email: email.trim(),
+      color,
+      role,
+    });
     setSubmitting(false);
     if (!res.ok) {
       setError(res.message);
@@ -76,10 +93,11 @@ export function InviteVendorModal({ open, onClose, onInvited }: Props) {
         className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full p-6 outline-none"
       >
         <p id="invite-title" className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-          Invitar vendedor
+          Invitar usuario
         </p>
         <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-          Le enviaremos un correo para que defina su contraseña y acceda.
+          Le enviaremos un correo para que defina su contraseña y acceda con el
+          rol seleccionado.
         </p>
 
         <form onSubmit={handleSubmit} className="mt-4 space-y-4">
@@ -111,6 +129,33 @@ export function InviteVendorModal({ open, onClose, onInvited }: Props) {
               autoComplete="off"
               className="w-full rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-700 text-sm px-2 py-1.5 text-gray-900 dark:text-gray-100"
             />
+          </label>
+
+          <label className="block">
+            <span className="block text-xs font-medium text-gray-600 dark:text-gray-300 mb-1">
+              Rol
+            </span>
+            <select
+              value={role}
+              onChange={(e) => setRole(e.target.value)}
+              disabled={submitting}
+              className="w-full rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-700 text-sm px-2 py-1.5 text-gray-900 dark:text-gray-100"
+            >
+              {assignableRoles.map((r) => (
+                <option key={r.key} value={r.key}>
+                  {r.label}
+                </option>
+              ))}
+            </select>
+            <span className="block text-xs text-gray-400 dark:text-gray-500 mt-1">
+              {selectedRole
+                ? selectedRole.dataScope === "all"
+                  ? "Verá y operará sobre los datos de toda la organización."
+                  : "Verá y operará solo sobre lo asignado a esta persona."
+                : ""}
+              {!isAdvisorRole &&
+                " No es asesor asignable (no entra al reparto ni al selector de asesor)."}
+            </span>
           </label>
 
           <div>
@@ -154,7 +199,7 @@ export function InviteVendorModal({ open, onClose, onInvited }: Props) {
             </button>
             <button
               type="submit"
-              disabled={submitting}
+              disabled={submitting || !role}
               className="px-3 py-1.5 text-sm rounded-md bg-indigo-600 text-white hover:bg-indigo-700 disabled:bg-indigo-300"
             >
               {submitting ? "Enviando..." : "Enviar invitación"}

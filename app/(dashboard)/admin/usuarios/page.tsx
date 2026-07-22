@@ -1,3 +1,4 @@
+import { requireTabOrRedirect } from "@/lib/auth/require-tab";
 import { loadAdminUsers } from "@/lib/actions/admin-users";
 import { UsuariosScreen } from "./usuarios-screen";
 
@@ -6,6 +7,7 @@ import { UsuariosScreen } from "./usuarios-screen";
  * `loadAdminUsers` revalida sesión + rol. "Histórico" no se lista (R10).
  */
 export default async function UsuariosPage() {
+  await requireTabOrRedirect("admin-usuarios");
   const res = await loadAdminUsers();
   if (!res.ok) {
     return (
@@ -14,5 +16,10 @@ export default async function UsuariosPage() {
       </div>
     );
   }
-  return <UsuariosScreen initialUsers={res.users} />;
+  return (
+    <UsuariosScreen
+      initialUsers={res.users}
+      assignableRoles={res.assignableRoles}
+    />
+  );
 }

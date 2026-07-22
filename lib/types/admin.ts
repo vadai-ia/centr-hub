@@ -1,7 +1,7 @@
 import type {
+  DataScope,
   LossReasonRow,
   PipelineStageRow,
-  Role,
   TagClassification,
   UUID,
 } from "@/lib/types/database";
@@ -63,12 +63,39 @@ export type TagReprocessResult =
  */
 export type UserLoginStatus = "active" | "pending" | "placeholder";
 
+/** Opción de rol asignable en la UI (invitar / editar) — 0039. */
+export interface RoleOption {
+  key: string;
+  label: string;
+  isSystem: boolean;
+  dataScope: DataScope;
+}
+
+/** Fila del constructor de roles (Admin → Roles y permisos, 0039). */
+export interface RoleAdminView {
+  id: UUID;
+  key: string;
+  label: string;
+  dataScope: DataScope;
+  allowedTabs: string[];
+  isSystem: boolean;
+  /** Usuarios (activos + inactivos) que usan este rol — bloquea borrado si > 0. */
+  userCount: number;
+}
+
+export type RolesActionResult =
+  | { ok: true; roles: RoleAdminView[] }
+  | { ok: false; message: string };
+
 /** Fila del listado de gestión de usuarios (M9.2). "Histórico" se excluye. */
 export interface ManagedUserView {
   membershipId: UUID;
   userId: UUID;
   fullName: string;
-  role: Role;
+  /** Key del rol (sistema o custom) — 0039. */
+  role: string;
+  /** Nombre visible del rol (roles.label). */
+  roleLabel: string;
   isActive: boolean;
   color: string;
   /** null si la fila de auth no es recuperable todavía (placeholder). */
@@ -82,6 +109,16 @@ export interface ManagedUserView {
 
 export type UsersActionResult =
   | { ok: true; users: ManagedUserView[] }
+  | { ok: false; message: string };
+
+/**
+ * Carga inicial de la pantalla Usuarios (0039): además de los usuarios,
+ * trae los roles asignables (para los selects de invitar/editar). Las
+ * mutaciones devuelven `UsersActionResult` (solo users) — el cliente
+ * conserva los roles del load inicial.
+ */
+export type LoadAdminUsersResult =
+  | { ok: true; users: ManagedUserView[]; assignableRoles: RoleOption[] }
   | { ok: false; message: string };
 
 /**

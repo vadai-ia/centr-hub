@@ -30,7 +30,7 @@ export async function createLossReasonAction(
 ): Promise<LossReasonActionResult> {
   const parsed = createSchema.safeParse(raw);
   if (!parsed.success) return { ok: false, message: "Datos del motivo inválidos." };
-  const admin = await resolveAdminContext();
+  const admin = await resolveAdminContext("admin-motivos");
   if (!admin.ok) return admin;
 
   return withTenantContext(admin.ctx.orgId, async () => {
@@ -56,7 +56,7 @@ export async function updateLossReasonAction(
 ): Promise<LossReasonActionResult> {
   const parsed = updateSchema.safeParse(raw);
   if (!parsed.success) return { ok: false, message: "Datos del motivo inválidos." };
-  const admin = await resolveAdminContext();
+  const admin = await resolveAdminContext("admin-motivos");
   if (!admin.ok) return admin;
 
   return withTenantContext(admin.ctx.orgId, async () => {
@@ -79,7 +79,7 @@ export async function deleteLossReasonAction(
 ): Promise<LossReasonActionResult> {
   const parsed = deleteSchema.safeParse(raw);
   if (!parsed.success) return { ok: false, message: "Identificador inválido." };
-  const admin = await resolveAdminContext();
+  const admin = await resolveAdminContext("admin-motivos");
   if (!admin.ok) return admin;
 
   return withTenantContext(admin.ctx.orgId, async () => {
@@ -102,7 +102,7 @@ export async function loadAdminLossReasons(): Promise<
   | { ok: true; reasons: Awaited<ReturnType<typeof listLossReasons>> }
   | { ok: false; message: string }
 > {
-  const admin = await resolveAdminContext();
+  const admin = await resolveAdminContext("admin-motivos");
   if (!admin.ok) return admin;
   return withTenantContext(admin.ctx.orgId, async () => {
     return { ok: true, reasons: await listLossReasons() };

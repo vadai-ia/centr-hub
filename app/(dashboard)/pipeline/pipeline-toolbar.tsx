@@ -5,11 +5,11 @@ import {
   setUnassignedFilterPreference,
 } from "@/lib/actions/pipeline";
 import { HIDE_CLOSED_DAYS_MAX, HIDE_CLOSED_DAYS_MIN } from "@/lib/constants";
-import type { Funnel, Role } from "@/lib/types/database";
+import type { Funnel } from "@/lib/types/database";
 
 interface Props {
   funnel: Funnel;
-  role: Role;
+  canSeeAll: boolean;
   unassignedFilter: boolean;
   realtimeStatus: "connected" | "connecting" | "disconnected" | "stale";
   /** Umbral global vigente (días) de auto-ocultar cerradas. */
@@ -35,7 +35,7 @@ interface Props {
  */
 export function PipelineToolbar({
   funnel,
-  role,
+  canSeeAll,
   unassignedFilter,
   realtimeStatus,
   hideClosedAfterDays,
@@ -46,7 +46,7 @@ export function PipelineToolbar({
   onResolvedViewToggle,
 }: Props) {
   const [isPending, startTransition] = useTransition();
-  const isAdmin = role === "admin" || role === "superadmin";
+  const isAdmin = canSeeAll;
 
   // Draft local del umbral — se aplica al blur/Enter, no por tecla, para
   // no recargar el tablero en cada dígito.

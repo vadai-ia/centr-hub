@@ -23,12 +23,16 @@ import {
   updateUserProfile,
 } from "@/lib/db/users";
 import { listActiveOpportunitiesByAdvisor } from "@/lib/db/opportunities";
+import { listRoles } from "@/lib/db/roles";
 import { recordAuditEvent } from "@/lib/db/operational";
 import { reassignOpportunityAdvisor } from "@/lib/services/opportunity-reassignment";
-import type { UUID } from "@/lib/types/database";
+import { hasTab } from "@/lib/auth/capabilities";
+import type { RoleRow, UUID } from "@/lib/types/database";
 import type {
   DeactivateUserResult,
+  LoadAdminUsersResult,
   ManagedUserView,
+  RoleOption,
   UserLoginStatus,
   UsersActionResult,
 } from "@/lib/types/admin";
@@ -62,14 +66,46 @@ async function resolveAdmin(): Promise<
   if (session.status !== "ok") {
     return { ok: false, message: "Sesión expirada. Vuelve a iniciar sesión." };
   }
-  const role = session.data.activeOrg.role;
-  if (role !== "admin" && role !== "superadmin") {
-    return { ok: false, message: "No tienes permisos de administrador." };
+  // Gate por pestaña (0039): gestionar usuarios exige la pestaña Usuarios.
+  if (!hasTab(session.data.activeRole, "admin-usuarios")) {
+    return { ok: false, message: "No tienes permisos para gestionar usuarios." };
   }
   return {
     ok: true,
     ctx: { orgId: session.data.activeOrg.id, userId: session.data.userId },
   };
+}
+
+/** Mapa key→RoleRow de los roles de la org (labels + capacidades). */
+async function loadOrgRolesMap(orgId: UUID): Promise<Map<string, RoleRow>> {
+  const rows = await listRoles(orgId);
+  return new Map(rows.map((r) => [r.key, r]));
+}
+
+function roleLabelOf(rolesMap: Map<string, RoleRow>, key: string): string {
+  return rolesMap.get(key)?.label ?? key;
+}
+
+/**
+ * ¿Un rol puede GESTIONAR usuarios? = tiene la pestaña Usuarios. Es el
+ * invariante que sustituye al viejo "es admin/superadmin" en los guardrails
+ * de último-administrador (no dejar la org sin quien administre usuarios).
+ */
+function roleCanManageUsers(rolesMap: Map<string, RoleRow>, key: string): boolean {
+  const r = rolesMap.get(key);
+  return !!r && r.allowed_tabs.includes("admin-usuarios");
+}
+
+/** Roles asignables desde la UI: todos los de la org excepto superadmin. */
+function assignableRolesFrom(rows: RoleRow[]): RoleOption[] {
+  return rows
+    .filter((r) => r.key !== "superadmin")
+    .map((r) => ({
+      key: r.key,
+      label: r.label,
+      isSystem: r.is_system,
+      dataScope: r.data_scope,
+    }));
 }
 
 function deriveLoginStatus(info: {
@@ -91,9 +127,11 @@ function deriveLoginStatus(info: {
 export async function buildManagedUsers(
   orgId: UUID,
   selfUserId: UUID,
+  rolesMap?: Map<string, RoleRow>,
 ): Promise<ManagedUserView[]> {
   const memberships = await listManageableMemberships(orgId);
   const activeOpps = await countActiveOpportunitiesByAdvisor(orgId);
+  const map = rolesMap ?? (await loadOrgRolesMap(orgId));
 
   const users: ManagedUserView[] = [];
   for (const m of memberships) {
@@ -103,6 +141,7 @@ export async function buildManagedUsers(
       userId: m.user_id,
       fullName: m.profile.full_name,
       role: m.role,
+      roleLabel: roleLabelOf(map, m.role),
       isActive: m.is_active,
       color: m.profile.color,
       email: info.email,
@@ -114,14 +153,24 @@ export async function buildManagedUsers(
   return users;
 }
 
-export async function loadAdminUsers(): Promise<UsersActionResult> {
+export async function loadAdminUsers(): Promise<LoadAdminUsersResult> {
   const admin = await resolveAdmin();
   if (!admin.ok) return admin;
   return withTenantContext(
     admin.ctx.orgId,
     async () => {
-      const users = await buildManagedUsers(admin.ctx.orgId, admin.ctx.userId);
-      return { ok: true, users };
+      const roleRows = await listRoles(admin.ctx.orgId);
+      const rolesMap = new Map(roleRows.map((r) => [r.key, r]));
+      const users = await buildManagedUsers(
+        admin.ctx.orgId,
+        admin.ctx.userId,
+        rolesMap,
+      );
+      return {
+        ok: true as const,
+        users,
+        assignableRoles: assignableRolesFrom(roleRows),
+      };
     },
     { source: "user_session" },
   );
@@ -266,8 +315,9 @@ export async function updateUserEmailAction(
 
 const roleSchema = z.object({
   membershipId: z.string().uuid(),
-  // V1: solo admin y vendedor son asignables desde la UI.
-  role: z.enum(["admin", "vendedor"]),
+  // Cualquier rol de la org; se valida en runtime contra `roles`. superadmin
+  // NO es asignable desde la UI (0039).
+  role: z.string().trim().min(1),
 });
 
 export async function updateUserRoleAction(
@@ -275,7 +325,7 @@ export async function updateUserRoleAction(
 ): Promise<UsersActionResult> {
   const parsed = roleSchema.safeParse(raw);
   if (!parsed.success) {
-    return { ok: false, message: "Rol inválido (solo admin o vendedor en V1)." };
+    return { ok: false, message: "Rol inválido." };
   }
   const admin = await resolveAdmin();
   if (!admin.ok) return admin;
@@ -283,6 +333,11 @@ export async function updateUserRoleAction(
   return withTenantContext(
     admin.ctx.orgId,
     async () => {
+      const rolesMap = await loadOrgRolesMap(admin.ctx.orgId);
+      const newRole = rolesMap.get(parsed.data.role);
+      if (!newRole || newRole.key === "superadmin") {
+        return { ok: false, message: "Rol inválido o no asignable." };
+      }
       const memberships = await listManageableMemberships(admin.ctx.orgId);
       const target = memberships.find((m) => m.id === parsed.data.membershipId);
       if (!target) {
@@ -290,41 +345,49 @@ export async function updateUserRoleAction(
       }
       // No te cambies tu propio rol (evita auto-bloqueo accidental).
       if (target.user_id === admin.ctx.userId) {
-        return {
-          ok: false,
-          message: "No puedes cambiar tu propio rol.",
-        };
+        return { ok: false, message: "No puedes cambiar tu propio rol." };
       }
-      // No gestionamos superadmin desde V1.
+      // No gestionamos superadmin desde esta pantalla.
       if (target.role === "superadmin") {
         return {
           ok: false,
           message: "El rol superadmin no se gestiona desde esta pantalla.",
         };
       }
-      if (target.role === parsed.data.role) {
-        const users = await buildManagedUsers(admin.ctx.orgId, admin.ctx.userId);
+      if (target.role === newRole.key) {
+        const users = await buildManagedUsers(
+          admin.ctx.orgId,
+          admin.ctx.userId,
+          rolesMap,
+        );
         return { ok: true, users };
       }
-      // No dejes la org sin ningún admin ACTIVO.
-      if (target.role === "admin" && parsed.data.role === "vendedor") {
-        const otherActiveAdmins = memberships.filter(
+      // No dejes la org sin ningún usuario ACTIVO que pueda gestionar usuarios.
+      if (
+        roleCanManageUsers(rolesMap, target.role) &&
+        !roleCanManageUsers(rolesMap, newRole.key)
+      ) {
+        const othersCanManage = memberships.filter(
           (m) =>
             m.id !== target.id &&
             m.is_active &&
-            (m.role === "admin" || m.role === "superadmin"),
+            roleCanManageUsers(rolesMap, m.role),
         );
-        if (otherActiveAdmins.length === 0) {
+        if (othersCanManage.length === 0) {
           return {
             ok: false,
             message:
-              "No puedes quitar el último administrador activo. Asigna otro admin primero.",
+              "No puedes quitar el último usuario que puede gestionar usuarios. Asigna a otro primero.",
           };
         }
       }
-      await updateMembershipRole(target.id, parsed.data.role);
+      await updateMembershipRole(target.id, newRole.key);
       revalidatePath("/admin/usuarios");
-      const users = await buildManagedUsers(admin.ctx.orgId, admin.ctx.userId);
+      const users = await buildManagedUsers(
+        admin.ctx.orgId,
+        admin.ctx.userId,
+        rolesMap,
+      );
       return { ok: true, users };
     },
     { source: "user_session" },
@@ -339,15 +402,19 @@ const inviteSchema = z.object({
   fullName: z.string().trim().min(1, "El nombre es obligatorio.").max(120),
   email: z.string().trim().email("Email inválido."),
   color: z.string().regex(HEX_COLOR, "Color inválido (usa formato #RRGGBB)."),
+  // Rol del invitado: cualquier rol de la org (validado en runtime),
+  // excepto superadmin. Antes estaba cableado a "vendedor" (0039).
+  role: z.string().trim().min(1, "Elige un rol."),
 });
 
 /**
- * Invita un vendedor NUEVO por email (Supabase built-in). Crea la fila
- * de auth + user_profile + membership(role=vendedor, activo). Si la
- * creación de perfil/membership falla tras crear el auth user, se
- * compensa borrando el auth user para no dejar huérfanos.
+ * Invita un usuario NUEVO por email (Supabase built-in) con el rol elegido.
+ * Crea la fila de auth + user_profile + membership(role, activo). Si la
+ * creación de perfil/membership falla tras crear el auth user, se compensa
+ * borrando el auth user para no dejar huérfanos. El rol se valida contra la
+ * tabla `roles` de la org (superadmin no es invitable).
  */
-export async function inviteVendorAction(
+export async function inviteUserAction(
   raw: unknown,
 ): Promise<UsersActionResult> {
   const parsed = inviteSchema.safeParse(raw);
@@ -365,6 +432,12 @@ export async function inviteVendorAction(
   return withTenantContext(
     admin.ctx.orgId,
     async () => {
+      const rolesMap = await loadOrgRolesMap(admin.ctx.orgId);
+      const role = rolesMap.get(parsed.data.role);
+      if (!role || role.key === "superadmin") {
+        return { ok: false, message: "Rol inválido o no asignable." };
+      }
+
       const invited = await inviteAuthUser(
         email,
         parsed.data.fullName,
@@ -394,7 +467,7 @@ export async function inviteVendorAction(
         await createMembership({
           user_id: invited.userId,
           organization_id: admin.ctx.orgId,
-          role: "vendedor",
+          role: role.key,
           is_active: true,
           whaapy_agent_id: null,
         });
@@ -586,19 +659,20 @@ export async function deactivateUserAction(
           message: "No puedes desactivar tu propia cuenta.",
         };
       }
-      if (target.role === "admin" || target.role === "superadmin") {
-        const otherActiveAdmins = memberships.filter(
+      const rolesMap = await loadOrgRolesMap(admin.ctx.orgId);
+      if (roleCanManageUsers(rolesMap, target.role)) {
+        const othersCanManage = memberships.filter(
           (m) =>
             m.id !== target.id &&
             m.is_active &&
-            (m.role === "admin" || m.role === "superadmin"),
+            roleCanManageUsers(rolesMap, m.role),
         );
-        if (otherActiveAdmins.length === 0) {
+        if (othersCanManage.length === 0) {
           return {
             ok: false,
             reason: "last_admin",
             message:
-              "No puedes desactivar el último administrador activo de la organización.",
+              "No puedes desactivar el último usuario que puede gestionar usuarios de la organización.",
           };
         }
       }
@@ -702,6 +776,14 @@ export async function reassignActiveOpportunitiesAction(
         return {
           ok: false,
           message: "No puedes reasignar a un asesor desactivado.",
+        };
+      }
+      // Solo vendedores son asesores asignables (0039): no reasignar a un
+      // SDR/admin (no es dueño de oportunidades).
+      if (to.role !== "vendedor") {
+        return {
+          ok: false,
+          message: "Solo puedes reasignar oportunidades a un vendedor.",
         };
       }
 

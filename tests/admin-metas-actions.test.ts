@@ -58,7 +58,20 @@ const mAudit = vi.mocked(recordAuditEvent);
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mAdmin.mockResolvedValue({ ok: true, ctx: { orgId: ORG, userId: USER } });
+  mAdmin.mockResolvedValue({
+    ok: true,
+    ctx: {
+      orgId: ORG,
+      userId: USER,
+      role: {
+        key: "admin",
+        label: "Administrador",
+        dataScope: "all",
+        allowedTabs: ["admin-metas"],
+        isSystem: true,
+      },
+    },
+  });
   mListGoals.mockResolvedValue([]);
   mVendors.mockResolvedValue([{ id: A, profile: { full_name: "Gina" } }] as never);
 });

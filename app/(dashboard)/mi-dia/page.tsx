@@ -2,6 +2,7 @@ import { loadMiDiaAction } from "@/lib/actions/mi-dia";
 import { loadMiDiaAdminExtrasAction } from "@/lib/actions/mi-dia-admin";
 import { loadMyGoalProgress } from "@/lib/actions/dashboard-goals";
 import { getSession } from "@/lib/auth/session";
+import { canSeeAllData, fallbackCapabilities } from "@/lib/auth/capabilities";
 import type { MiDiaAdminExtras } from "@/lib/services/mi-dia-admin";
 import type { VendorGoalProgress } from "@/lib/services/goal-progress";
 import { MiDiaScreen } from "./mi-dia-screen";
@@ -22,8 +23,10 @@ export default async function MiDiaPage() {
   const ok = session.status === "ok";
   const organizationId = ok ? session.data.activeOrg.id : "";
   const userId = ok ? session.data.userId : "";
-  const role = ok ? session.data.activeOrg.role : "vendedor";
-  const isAdmin = role === "admin" || role === "superadmin";
+  // "Vista de equipo" (todos los asesores) para roles que alcanzan todos
+  // los datos (admin/superadmin/SDR); vista propia para vendedor (0039).
+  const caps = ok ? session.data.activeRole : fallbackCapabilities("vendedor");
+  const isAdmin = canSeeAllData(caps);
 
   let adminExtras: MiDiaAdminExtras | null = null;
   if (isAdmin) {

@@ -2,6 +2,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { getSession } from "@/lib/auth/session";
+import { hasTab } from "@/lib/auth/capabilities";
 import { withTenantContext } from "@/lib/tenant/context";
 import {
   countOpportunitiesForStage,
@@ -39,9 +40,8 @@ async function resolveAdmin(): Promise<
   if (session.status !== "ok") {
     return { ok: false, message: "Sesión expirada. Vuelve a iniciar sesión." };
   }
-  const role = session.data.activeOrg.role;
-  if (role !== "admin" && role !== "superadmin") {
-    return { ok: false, message: "No tienes permisos de administrador." };
+  if (!hasTab(session.data.activeRole, "admin-etapas")) {
+    return { ok: false, message: "No tienes permisos para esta sección." };
   }
   return {
     ok: true,

@@ -1,3 +1,4 @@
+import { requireTabOrRedirect } from "@/lib/auth/require-tab";
 import { loadAdminStages } from "@/lib/actions/admin-stages";
 import { EtapasScreen } from "./etapas-screen";
 
@@ -6,6 +7,7 @@ import { EtapasScreen } from "./etapas-screen";
  * en el layout de admin; `loadAdminStages` revalida sesión + rol.
  */
 export default async function EtapasPage() {
+  await requireTabOrRedirect("admin-etapas");
   const res = await loadAdminStages();
   if (!res.ok) {
     return (

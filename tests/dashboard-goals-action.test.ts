@@ -29,9 +29,16 @@ const mAdmin = vi.mocked(loadAdminGoalProgress);
 const mVendor = vi.mocked(loadVendorGoalProgress);
 
 function sessionWithRole(role: "admin" | "vendedor") {
+  const activeRole = {
+    key: role,
+    label: role === "admin" ? "Administrador" : "Vendedor",
+    dataScope: role === "admin" ? "all" : "own",
+    allowedTabs: role === "admin" ? ["dashboard", "admin-metas"] : ["dashboard"],
+    isSystem: true,
+  };
   mSession.mockResolvedValue({
     status: "ok",
-    data: { activeOrg: { id: ORG, role, name: "Centr" }, userId: USER },
+    data: { activeOrg: { id: ORG, role, name: "Centr" }, userId: USER, activeRole },
   } as never);
 }
 

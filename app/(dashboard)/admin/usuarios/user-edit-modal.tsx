@@ -5,11 +5,12 @@ import {
   updateUserProfileAction,
   updateUserRoleAction,
 } from "@/lib/actions/admin-users";
-import type { ManagedUserView } from "@/lib/types/admin";
+import type { ManagedUserView, RoleOption } from "@/lib/types/admin";
 
 interface Props {
   open: boolean;
   user: ManagedUserView | null;
+  assignableRoles: RoleOption[];
   onClose: () => void;
   onSaved: (users: ManagedUserView[]) => void;
 }
@@ -22,11 +23,11 @@ const HEX = /^#[0-9A-Fa-f]{6}$/;
  * propio admin y para superadmin. Guarda perfil y rol en acciones
  * separadas; los guardrails (último admin, auto-rol) viven en backend.
  */
-export function UserEditModal({ open, user, onClose, onSaved }: Props) {
+export function UserEditModal({ open, user, assignableRoles, onClose, onSaved }: Props) {
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [color, setColor] = useState("#6B7280");
-  const [role, setRole] = useState<"admin" | "vendedor">("vendedor");
+  const [role, setRole] = useState<string>("vendedor");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -36,7 +37,7 @@ export function UserEditModal({ open, user, onClose, onSaved }: Props) {
     setFullName(user.fullName);
     setEmail(user.email ?? "");
     setColor(HEX.test(user.color) ? user.color : "#6B7280");
-    setRole(user.role === "admin" ? "admin" : "vendedor");
+    setRole(user.role);
     setError(null);
     setSubmitting(false);
   }, [open, user]);
@@ -210,15 +211,18 @@ export function UserEditModal({ open, user, onClose, onSaved }: Props) {
             </span>
             <select
               value={user.role === "superadmin" ? "superadmin" : role}
-              onChange={(e) => setRole(e.target.value as "admin" | "vendedor")}
+              onChange={(e) => setRole(e.target.value)}
               disabled={submitting || roleLocked}
               className="w-full rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-700 text-sm px-2 py-1.5 text-gray-900 dark:text-gray-100 disabled:opacity-60"
             >
               {user.role === "superadmin" && (
                 <option value="superadmin">Superadmin</option>
               )}
-              <option value="admin">Administrador</option>
-              <option value="vendedor">Vendedor</option>
+              {assignableRoles.map((r) => (
+                <option key={r.key} value={r.key}>
+                  {r.label}
+                </option>
+              ))}
             </select>
             {roleLocked && (
               <span className="block text-xs text-gray-400 dark:text-gray-500 mt-1">

@@ -44,7 +44,7 @@ export function ContactsBoard({ initial }: Props) {
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const requestSeqRef = useRef(0);
 
-  const isAdmin = initial.role === "admin" || initial.role === "superadmin";
+  const isAdmin = initial.canSeeAll;
 
   useEffect(() => {
     if (query === appliedQuery) return;
@@ -166,7 +166,7 @@ export function ContactsBoard({ initial }: Props) {
             aria-live="polite"
           >
             {countLabel}
-            {initial.role === "vendedor" && (
+            {!initial.canSeeAll && (
               <span className="text-gray-400 dark:text-gray-500"> · asignados a ti</span>
             )}
           </p>

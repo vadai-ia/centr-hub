@@ -53,7 +53,7 @@ function endpointUrlFor(slug: string): string {
 }
 
 export async function loadInboundWebhookSources(): Promise<WebhookSourceListResult> {
-  const admin = await resolveAdminContext();
+  const admin = await resolveAdminContext("admin-webhooks");
   if (!admin.ok) return admin;
   return withTenantContext(
     admin.ctx.orgId,
@@ -69,7 +69,7 @@ export async function createInboundWebhookSourceAction(
 ): Promise<WebhookSourceCreateResult> {
   const parsed = createSchema.safeParse(raw);
   if (!parsed.success) return { ok: false, message: "Nombre de la fuente inválido." };
-  const admin = await resolveAdminContext();
+  const admin = await resolveAdminContext("admin-webhooks");
   if (!admin.ok) return admin;
 
   return withTenantContext(
@@ -104,7 +104,7 @@ export async function rotateInboundWebhookSourceTokenAction(
 ): Promise<WebhookSourceRotateResult> {
   const parsed = idSchema.safeParse(raw);
   if (!parsed.success) return { ok: false, message: "Identificador inválido." };
-  const admin = await resolveAdminContext();
+  const admin = await resolveAdminContext("admin-webhooks");
   if (!admin.ok) return admin;
 
   return withTenantContext(
@@ -139,7 +139,7 @@ export async function setInboundWebhookSourceActiveAction(
 ): Promise<WebhookSourceListResult> {
   const parsed = setActiveSchema.safeParse(raw);
   if (!parsed.success) return { ok: false, message: "Datos inválidos." };
-  const admin = await resolveAdminContext();
+  const admin = await resolveAdminContext("admin-webhooks");
   if (!admin.ok) return admin;
 
   return withTenantContext(

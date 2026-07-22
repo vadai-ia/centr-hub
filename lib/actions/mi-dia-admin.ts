@@ -2,7 +2,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { withTenantContext } from "@/lib/tenant/context";
-import { resolveAdminContext } from "@/lib/auth/admin-guard";
+import { resolveSeesAllContext } from "@/lib/auth/admin-guard";
 import { getMembershipUserId } from "@/lib/db/operational";
 import { reassignOpportunityAdvisor } from "@/lib/services/opportunity-reassignment";
 import {
@@ -23,7 +23,7 @@ export type MiDiaAdminExtrasResult =
   | { ok: false; message: string };
 
 export async function loadMiDiaAdminExtrasAction(): Promise<MiDiaAdminExtrasResult> {
-  const admin = await resolveAdminContext();
+  const admin = await resolveSeesAllContext();
   if (!admin.ok) return admin;
   return withTenantContext(
     admin.ctx.orgId,
@@ -41,7 +41,7 @@ export type MiDiaMemberResult =
 export async function loadMiDiaMemberAction(raw: unknown): Promise<MiDiaMemberResult> {
   const parsed = memberSchema.safeParse(raw);
   if (!parsed.success) return { ok: false, message: "Parámetros inválidos." };
-  const admin = await resolveAdminContext();
+  const admin = await resolveSeesAllContext();
   if (!admin.ok) return admin;
   return withTenantContext(
     admin.ctx.orgId,
@@ -68,7 +68,7 @@ export type MiDiaAssignResult = { ok: true } | { ok: false; message: string };
 export async function assignOpportunityAction(raw: unknown): Promise<MiDiaAssignResult> {
   const parsed = assignSchema.safeParse(raw);
   if (!parsed.success) return { ok: false, message: "Parámetros inválidos." };
-  const admin = await resolveAdminContext();
+  const admin = await resolveSeesAllContext();
   if (!admin.ok) return admin;
 
   return withTenantContext(

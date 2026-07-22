@@ -20,7 +20,14 @@ export type Json =
   | Json[];
 
 export type Funnel = "venta" | "post_venta";
+/**
+ * Roles de SISTEMA (protegidos, siembra 0039). NO es el universo cerrado
+ * de roles: desde el constructor de roles se crean roles custom cuya `key`
+ * es un string arbitrario. Por eso `MembershipRow.role` es `string`, no
+ * `Role` — este alias solo tipa las comparaciones contra roles de sistema.
+ */
 export type Role = "superadmin" | "admin" | "vendedor";
+export type DataScope = "own" | "all";
 export type TaskStatus = "pending" | "completed" | "snoozed";
 export type NotificationStatus =
   | "pending"
@@ -77,9 +84,30 @@ export interface MembershipRow {
   id: UUID;
   user_id: UUID;
   organization_id: UUID;
-  role: Role;
+  // Dinámico desde 0039: es la `key` de una fila `roles` de la org (FK
+  // compuesto memberships(org, role) → roles(org, key)). Puede ser un rol
+  // de sistema ('admin'|'vendedor'|'superadmin') o uno custom ('sdr', ...).
+  role: string;
   is_active: boolean;
   whaapy_agent_id: string | null;
+  created_at: ISODateString;
+  updated_at: ISODateString;
+}
+
+/**
+ * Rol configurable de una organización (0039). Modelo de dos ejes:
+ * `allowed_tabs` (qué pestañas ve) + `data_scope` (qué datos alcanza).
+ * `is_system` protege admin/vendedor/superadmin de borrado y de quedar
+ * sin pestañas. La proyección de capacidades vive en lib/auth/capabilities.
+ */
+export interface RoleRow {
+  id: UUID;
+  organization_id: UUID;
+  key: string;
+  label: string;
+  data_scope: DataScope;
+  allowed_tabs: string[];
+  is_system: boolean;
   created_at: ISODateString;
   updated_at: ISODateString;
 }
@@ -482,6 +510,7 @@ export interface Database {
       organizations: { Row: OrganizationRow; Insert: Insertable<OrganizationRow>; Update: Updatable<OrganizationRow> };
       user_profiles: { Row: UserProfileRow; Insert: Insertable<UserProfileRow>; Update: Updatable<UserProfileRow> };
       memberships: { Row: MembershipRow; Insert: Insertable<MembershipRow>; Update: Updatable<MembershipRow> };
+      roles: { Row: RoleRow; Insert: Insertable<RoleRow>; Update: Updatable<RoleRow> };
       contacts: { Row: ContactRow; Insert: Insertable<ContactRow>; Update: Updatable<ContactRow> };
       pipeline_stages: { Row: PipelineStageRow; Insert: Insertable<PipelineStageRow>; Update: Updatable<PipelineStageRow> };
       loss_reasons: { Row: LossReasonRow; Insert: Insertable<LossReasonRow>; Update: Updatable<LossReasonRow> };

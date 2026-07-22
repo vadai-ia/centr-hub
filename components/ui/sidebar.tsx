@@ -1,37 +1,25 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import type { Role } from "@/lib/types/database";
-
-// Mi Día, Reglas y Metas ya están en la nav. M2v2 plegó "Umbrales" dentro de
-// la pestaña Metas (su ruta placeholder se eliminó). Branding sigue pospuesto
-// a V2: oculto de la nav y su ruta redirige limpio a /pipeline.
-const VENDOR_TABS = [
-  { href: "/mi-dia", label: "Mi Día" },
-  { href: "/pipeline", label: "Pipeline" },
-  { href: "/contactos", label: "Contactos" },
-  { href: "/whaapy", label: "Whaapy" },
-  { href: "/dashboard", label: "Dashboard" },
-] as const;
-
-const ADMIN_PAGES = [
-  { href: "/admin/etapas", label: "Etapas del pipeline" },
-  { href: "/admin/motivos", label: "Motivos de pérdida" },
-  { href: "/admin/mapeo-tags", label: "Mapeo de tags" },
-  { href: "/admin/reglas", label: "Reglas" },
-  { href: "/admin/metas", label: "Metas" },
-  { href: "/admin/usuarios", label: "Usuarios" },
-  { href: "/admin/webhooks", label: "Webhooks de leads" },
-  { href: "/admin/agentes-whaapy", label: "Agentes Whaapy" },
-] as const;
+import {
+  TAB_REGISTRY,
+  type RoleCapabilities,
+  type TabDef,
+} from "@/lib/auth/capabilities";
 
 interface Props {
-  role: Role;
+  /** Capacidades del rol activo (0039). La nav se renderiza desde
+   *  `allowedTabs`: cada rol ve exactamente sus pestañas, generales y de
+   *  administración. */
+  role: RoleCapabilities;
 }
 
 export function Sidebar({ role }: Props) {
   const pathname = usePathname();
-  const isAdmin = role === "admin" || role === "superadmin";
+
+  const allowed = TAB_REGISTRY.filter((t) => role.allowedTabs.includes(t.key));
+  const generalTabs = allowed.filter((t) => t.section === "general");
+  const adminTabs = allowed.filter((t) => t.section === "admin");
 
   function linkClass(href: string) {
     const active = pathname === href || pathname.startsWith(href + "/");
@@ -43,35 +31,27 @@ export function Sidebar({ role }: Props) {
     ].join(" ");
   }
 
+  function renderTab(tab: TabDef) {
+    return (
+      <Link key={tab.href} href={tab.href} className={linkClass(tab.href)}>
+        {tab.label}
+      </Link>
+    );
+  }
+
   return (
     <aside className="w-56 flex-shrink-0 border-r border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 flex flex-col overflow-y-auto">
       {/* Vendor + admin fluyen juntos arriba. El nav NO lleva flex-1
           (empujaba el bloque admin al fondo del aside, lejos de las
           pestañas). El spacer va DESPUÉS para ocupar el resto. */}
-      <nav className="p-3 space-y-1">
-        {VENDOR_TABS.map((tab) => (
-          <Link key={tab.href} href={tab.href} className={linkClass(tab.href)}>
-            {tab.label}
-          </Link>
-        ))}
-      </nav>
+      <nav className="p-3 space-y-1">{generalTabs.map(renderTab)}</nav>
 
-      {isAdmin && (
+      {adminTabs.length > 0 && (
         <div className="border-t border-gray-200 dark:border-gray-700 mt-1 p-3">
           <p className="px-3 py-1 text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-1">
             Administración
           </p>
-          <nav className="space-y-1">
-            {ADMIN_PAGES.map((page) => (
-              <Link
-                key={page.href}
-                href={page.href}
-                className={linkClass(page.href)}
-              >
-                {page.label}
-              </Link>
-            ))}
-          </nav>
+          <nav className="space-y-1">{adminTabs.map(renderTab)}</nav>
         </div>
       )}
 

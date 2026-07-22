@@ -2,6 +2,7 @@
 import { cookies } from "next/headers";
 import { z } from "zod";
 import { getSession } from "@/lib/auth/session";
+import { canSeeAllData } from "@/lib/auth/capabilities";
 import { withTenantContext } from "@/lib/tenant/context";
 import {
   countKanbanOpportunitiesByStage,
@@ -174,8 +175,9 @@ export async function loadKanbanPageAction(
   }
 
   const orgId = session.data.activeOrg.id;
-  const role = session.data.activeOrg.role;
-  const isAdmin = role === "admin" || role === "superadmin";
+  // "Sees all data" (admin/superadmin/SDR) vs "own only" (vendedor).
+  // Sustituye al viejo isAdmin por dato-scope (0039).
+  const isAdmin = canSeeAllData(session.data.activeRole);
 
   // Defensa multi-tenant + role: si el caller es vendedor, ignorar
   // `assignedAdvisorId` explícito y forzar al membership del usuario.
@@ -304,8 +306,9 @@ export async function searchOpportunitiesForReopenAction(
     return { ok: false, reason: "no_session", message: "Sesión expirada." };
   }
   const orgId = session.data.activeOrg.id;
-  const role = session.data.activeOrg.role;
-  const isAdmin = role === "admin" || role === "superadmin";
+  // "Sees all data" (admin/superadmin/SDR) vs "own only" (vendedor).
+  // Sustituye al viejo isAdmin por dato-scope (0039).
+  const isAdmin = canSeeAllData(session.data.activeRole);
 
   return withTenantContext(orgId, async () => {
     let assignedAdvisorId: UUID | undefined;
@@ -349,8 +352,9 @@ export async function reopenOpportunityAction(
     return { ok: false, reason: "no_session", message: "Sesión expirada." };
   }
   const orgId = session.data.activeOrg.id;
-  const role = session.data.activeOrg.role;
-  const isAdmin = role === "admin" || role === "superadmin";
+  // "Sees all data" (admin/superadmin/SDR) vs "own only" (vendedor).
+  // Sustituye al viejo isAdmin por dato-scope (0039).
+  const isAdmin = canSeeAllData(session.data.activeRole);
 
   return withTenantContext(orgId, async () => {
     const opp = await getOpportunityById(parsed.data.opportunityId);
@@ -440,8 +444,9 @@ export async function loadInitialPipelineState(opts: {
     return { ok: false, reason: "no_session" };
   }
   const orgId = session.data.activeOrg.id;
-  const role = session.data.activeOrg.role;
-  const isAdmin = role === "admin" || role === "superadmin";
+  // "Sees all data" (admin/superadmin/SDR) vs "own only" (vendedor).
+  // Sustituye al viejo isAdmin por dato-scope (0039).
+  const isAdmin = canSeeAllData(session.data.activeRole);
 
   return withTenantContext(orgId, async () => {
     let effectiveAdvisorId: UUID | null | undefined;
@@ -619,8 +624,9 @@ export async function setHideClosedDaysAction(
   if (session.status !== "ok") {
     return { ok: false, reason: "no_session", message: "Sesión expirada." };
   }
-  const role = session.data.activeOrg.role;
-  const isAdmin = role === "admin" || role === "superadmin";
+  // "Sees all data" (admin/superadmin/SDR) vs "own only" (vendedor).
+  // Sustituye al viejo isAdmin por dato-scope (0039).
+  const isAdmin = canSeeAllData(session.data.activeRole);
   if (!isAdmin) {
     return {
       ok: false,

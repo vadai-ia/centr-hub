@@ -29,7 +29,6 @@ import type {
 import type {
   Funnel,
   PipelineStageRow,
-  Role,
   UUID,
 } from "@/lib/types/database";
 import { KanbanCard } from "./kanban-card";
@@ -56,7 +55,8 @@ import { PipelineFiltersBar, type ActiveFilters } from "./pipeline-filters-bar";
 
 interface Props {
   initial: PipelineInitialState;
-  role: Role;
+  /** True si el rol alcanza todos los datos (admin/superadmin/SDR) — 0039. */
+  canSeeAll: boolean;
   userId: UUID;
   organizationId: UUID;
   unassignedFilter: boolean;
@@ -83,13 +83,13 @@ interface PendingLoss {
  */
 export function PipelineBoard({
   initial,
-  role,
+  canSeeAll,
   userId,
   organizationId,
   unassignedFilter: initialUnassigned,
 }: Props) {
   void userId;
-  const isAdmin = role === "admin" || role === "superadmin";
+  const isAdmin = canSeeAll;
 
   const router = useRouter();
   const pathname = usePathname();
@@ -580,7 +580,7 @@ export function PipelineBoard({
     <div className="flex flex-col h-full">
       <PipelineToolbar
         funnel={funnel}
-        role={role}
+        canSeeAll={canSeeAll}
         unassignedFilter={isAdmin && unassignedFilter}
         realtimeStatus={realtimeStatus}
         hideClosedAfterDays={hideClosedAfterDays}

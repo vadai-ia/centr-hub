@@ -1,3 +1,4 @@
+import { requireTabOrRedirect } from "@/lib/auth/require-tab";
 import { loadInboundWebhookSources } from "@/lib/actions/admin-lead-webhooks";
 import { WebhooksScreen } from "./webhooks-screen";
 
@@ -7,6 +8,7 @@ import { WebhooksScreen } from "./webhooks-screen";
  * y credencial propios.
  */
 export default async function WebhooksPage() {
+  await requireTabOrRedirect("admin-webhooks");
   const res = await loadInboundWebhookSources();
   if (!res.ok) {
     return (

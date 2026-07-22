@@ -1,3 +1,4 @@
+import { requireTabOrRedirect } from "@/lib/auth/require-tab";
 import { loadAdminLossReasons } from "@/lib/actions/admin-loss-reasons";
 import { MotivosScreen } from "./motivos-screen";
 
@@ -5,6 +6,7 @@ import { MotivosScreen } from "./motivos-screen";
  * Admin → Motivos de pérdida (M7.2, Bloque 4).
  */
 export default async function MotivosPage() {
+  await requireTabOrRedirect("admin-motivos");
   const res = await loadAdminLossReasons();
   if (!res.ok) {
     return (
