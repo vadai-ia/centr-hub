@@ -76,7 +76,7 @@
 
 - **M6-DT-04 — Tests sintéticos para Server Actions B6/B7/B8/B9.** M6 entregó la capa de datos (B1) con 23 tests sintéticos + helpers de display (B2) con 20 tests. Las Server Actions de B6-B9 (createContactInShopifyAction, reassignAdvisorAction, updateContactWithPropagationAction, addNoteToOpportunityAction, createTaskForOpportunityAction) NO tienen tests sintéticos: el `FakeSupabase` no simula joins PostgREST ni RPC outbound real, y mockear `createCustomer`/`updateCustomer` requiere wiring no trivial. Validación E2E del CHECKPOINT manual cubre el camino feliz. Para milestones posteriores que dependan de estas actions (M7+ admin, M9 Mi Día), considerar extraer la lógica pura (validación + diff + builders de envelopes) a funciones testables sin BD — patrón M3 con `last-write-wins.ts` y `sync-loop-defense.ts`. Estimar 3-4h.
 
-- **M6-DT-05 — Crear contacto en Whaapy manualmente desde la UI para lead capturado fuera de Whaapy.** Brecha menor del outbound (documentada en `lib/inngest/functions/whaapy-outbound.ts` y reportada al operador al aprobar el plan M6). El worker hoy soporta `create_from_shopify`, `update_from_shopify`, `update_from_platform_ui`. NO existe `create_from_platform_ui`. Caso edge raro: lead capturado por referido o evento presencial, que el admin quiere registrar en Whaapy desde Centr Hub sin pasar primero por Shopify. La auto-creación R12 cubre el caso "contacto entra POR Whaapy" — esta deuda es para "contacto registrado en Centr que el admin quiere empujar a Whaapy". Estimar 1.5h (añadir reason al envelope + branch en worker + ajustar UI).
+- **M6-DT-05 — Crear contacto en Whaapy manualmente desde la UI para lead capturado fuera de Whaapy.** **RESUELTO por 0038 (creación de leads):** el reason `create_from_platform_ui` ya existe en `lib/inngest/functions/whaapy-outbound.ts` (enruta a `runCreate`) y `createLead` lo dispara para todo lead nacido en la plataforma (manual o webhook). El worker hoy soporta `create_from_shopify`, `create_from_platform_ui`, `update_from_shopify`, `update_from_platform_ui`. Caso edge raro: lead capturado por referido o evento presencial, que el admin quiere registrar en Whaapy desde Centr Hub sin pasar primero por Shopify. La auto-creación R12 cubre el caso "contacto entra POR Whaapy" — esta deuda es para "contacto registrado en Centr que el admin quiere empujar a Whaapy". Estimar 1.5h (añadir reason al envelope + branch en worker + ajustar UI).
 
 - **M6-DT-06 — Quitar tags de un contacto en Whaapy.** El outbound de Whaapy hoy solo envía `add_tags`. No hay equivalente `remove_tags`. Caso edge: vendedor reasignado cuyo tag de vendedor anterior debería removerse del contacto Whaapy. Hoy queda acumulado. Estimar 30min en `lib/inngest/functions/whaapy-outbound.ts` para extender `buildOutboundBody` con `remove_tags` derivado del snapshot vs previous state.
 
@@ -86,3 +86,19 @@
 
 - **M6-DT-09 — Notas manuales del popup NO propagan a Shopify ni Whaapy.** Decisión consciente: las notas son anotaciones internas del vendedor sobre la opp. Shopify `customer.note` es un campo distinto que ya se sincroniza desde edición del contact (B8). Whaapy no expone "notas internas" por API. Si Centr lo pide en V2 (notas que el equipo entero ve en cada sistema), considerar mapeo a `customer.note` en Shopify + `internal_note` del maestro. Estimar 2h.
 
+
+## Creación de leads (0038 — Track 1 entregado / Track 2 pendiente)
+
+- **Pasos operativos obligatorios de Track 1 (NO son código):**
+  1. **Aplicar la migración 0038** (`inbound_webhook_sources` + `opportunities.lead_source`/`inbound_webhook_source_id`) a la BD.
+  2. **`NEXT_PUBLIC_SITE_URL`** con el dominio de producción en Vercel — la pantalla Admin → Webhooks de leads arma la URL del endpoint con ese valor (cae a `http://localhost:3000` si falta, correcto en local, NO en prod).
+  3. Entregar al cliente el documento `docs/CONTRATO-WEBHOOK-LEADS.md` para que configure sus formularios.
+
+- **Track 2 — Bloque C: reflejar la asignación de asesor en Whaapy (trabajo aparte, decidido con el operador).** El plumbing outbound ya existe (`assigned_agent_id` en `buildOutboundBody` + `resolveWhaapyAgentIdForMembership`), pero `memberships.whaapy_agent_id` **no se puebla desde código** → hoy la asignación inbound (`conversation.assigned`) se descarta (`whaapy_agent_mapping_missing`) y la outbound omite el agente. Ver memoria `whaapy-agent-id-mapping-gap` + ERRORES.md. Trabajo:
+  - Agregar `GET /team/v1` al cliente Whaapy de Venta (`lib/whaapy/*`) + pantalla admin para elegir el agente Whaapy de cada vendedor y escribir `whaapy_agent_id` (decisión del operador: UI que trae la lista del team, no SQL manual).
+  - Registrar a los vendedores como agentes en Whaapy (paso operativo) y validar E2E `conversation.assigned` + el `assigned_agent_id` outbound.
+  - Una vez poblado el mapeo, tanto la creación de leads (Track 1) como la reasignación existente empiezan a cargar el agente SIN cambios de código.
+
+- **Adaptador nativo de Meta Lead Ads (futuro, decidido con el operador).** El webhook de leads v1 acepta un contrato JSON genérico (formularios web/landings/Zapier/Make). Meta Lead Ads usa otro flujo (handshake `hub.verify_token` + fetch a Graph API para traer el lead) → construir un adaptador dedicado cuando se requiera; desemboca en el mismo `createLead`.
+
+- **M4-DT-02 se desbloquea parcialmente:** los vendedores YA están dados de alta como agentes en Whaapy (confirmado jul-2026), así que el bloqueo operativo de M4-DT-02 ahora es solo poblar `whaapy_agent_id` (lo cubre Track 2).
