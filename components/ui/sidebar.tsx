@@ -22,6 +22,7 @@ const ADMIN_PAGES = [
   { href: "/admin/metas", label: "Metas" },
   { href: "/admin/usuarios", label: "Usuarios" },
   { href: "/admin/webhooks", label: "Webhooks de leads" },
+  { href: "/admin/agentes-whaapy", label: "Agentes Whaapy" },
 ] as const;
 
 interface Props {

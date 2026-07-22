@@ -233,6 +233,31 @@ export async function updateMembershipRole(
   return data;
 }
 
+/**
+ * Mapea (o des-mapea con `null`) el agente Whaapy de un vendedor
+ * (`memberships.whaapy_agent_id`, columna de 0002). Es el eslabón que faltaba
+ * poblar: sin él, la asignación inbound (`conversation.assigned`) se descarta
+ * y el `assigned_agent_id` outbound se omite (Track 2 / Bloque C). Filtra por
+ * org como defensa multi-tenant (el caller ya validó que el membership es un
+ * vendedor real de la org).
+ */
+export async function updateMembershipWhaapyAgentId(
+  organizationId: UUID,
+  membershipId: UUID,
+  whaapyAgentId: string | null,
+): Promise<MembershipRow> {
+  const supabase = getSupabaseAdminClient();
+  const { data, error } = await supabase
+    .from("memberships")
+    .update({ whaapy_agent_id: whaapyAgentId })
+    .eq("id", membershipId)
+    .eq("organization_id", organizationId)
+    .select("*")
+    .single();
+  if (error) throw error;
+  return data;
+}
+
 export interface AuthUserInfo {
   email: string | null;
   lastSignInAt: string | null;
