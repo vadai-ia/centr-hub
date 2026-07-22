@@ -195,6 +195,13 @@ export interface OpportunityRow {
   // desde el botón "+". Flag de procedencia (badge "Reabierto"), ortogonal
   // al estado de archivado. La reapertura limpia cancelled/won/lost/resolved.
   reopened_at: ISODateString | null;
+  // Atribución de origen del lead (0038). Se sella al crear la opp "Lead
+  // nuevo" desde el camino canónico de creación de leads: "manual" |
+  // "webhook". NULL = nacida por otra vía (draft Shopify, R12, reapertura).
+  lead_source: string | null;
+  // Fuente de webhook específica que originó el lead (0038, FK a
+  // inbound_webhook_sources). NULL para leads manuales o de otra vía.
+  inbound_webhook_source_id: UUID | null;
 }
 
 export interface OpportunityLineItemRow {
@@ -448,6 +455,21 @@ export interface TagMappingRow {
  * tipadas no requieran el generador. Para campos auto-generados
  * (id, created_at, updated_at) usamos `?` en Insert.
  */
+export interface InboundWebhookSourceRow {
+  id: UUID;
+  organization_id: UUID;
+  name: string;
+  slug: string;
+  token_hash: string;
+  token_last4: string;
+  is_active: boolean;
+  created_by_user_id: UUID | null;
+  last_used_at: ISODateString | null;
+  rotated_at: ISODateString | null;
+  created_at: ISODateString;
+  updated_at: ISODateString;
+}
+
 type Insertable<R extends { id: UUID; created_at: ISODateString; updated_at: ISODateString }> =
   Omit<R, "id" | "created_at" | "updated_at"> &
     Partial<Pick<R, "id" | "created_at" | "updated_at">>;
@@ -472,6 +494,8 @@ export interface Database {
         // resolved_* (0032) son nullable con default NULL: opcionales en
         // Insert para no romper los callers V1 (createOpportunity/trigger);
         // solo el flujo de cierre de caso (M3v2) las escribe.
+        // lead_source / inbound_webhook_source_id (0038) idem: nullable con
+        // default NULL, solo el camino canónico de creación de leads las setea.
         Insert: Omit<
           Insertable<OpportunityRow>,
           | "effective_created_at"
@@ -479,6 +503,8 @@ export interface Database {
           | "resolved_by_user_id"
           | "resolution_note"
           | "reopened_at"
+          | "lead_source"
+          | "inbound_webhook_source_id"
         > &
           Partial<
             Pick<
@@ -487,6 +513,8 @@ export interface Database {
               | "resolved_by_user_id"
               | "resolution_note"
               | "reopened_at"
+              | "lead_source"
+              | "inbound_webhook_source_id"
             >
           >;
         Update: Omit<Updatable<OpportunityRow>, "effective_created_at">;
@@ -538,6 +566,14 @@ export interface Database {
         Update: Updatable<GoalResultRow>;
       };
       tag_mappings: { Row: TagMappingRow; Insert: Insertable<TagMappingRow>; Update: Updatable<TagMappingRow> };
+      inbound_webhook_sources: {
+        Row: InboundWebhookSourceRow;
+        // last_used_at / rotated_at (0038) nullable con default NULL:
+        // opcionales en Insert (se pueblan en runtime, no al crear la fila).
+        Insert: Omit<Insertable<InboundWebhookSourceRow>, "last_used_at" | "rotated_at"> &
+          Partial<Pick<InboundWebhookSourceRow, "last_used_at" | "rotated_at">>;
+        Update: Updatable<InboundWebhookSourceRow>;
+      };
     };
     Views: Record<string, never>;
     Functions: {

@@ -13,7 +13,7 @@ import { getRedisClient } from "@/lib/redis/client";
 
 export interface DedupOptions {
   /** Namespace requerido para evitar colisión entre proveedores. */
-  namespace: "shopify" | "whaapy" | "whaapy_postventa";
+  namespace: "shopify" | "whaapy" | "whaapy_postventa" | "leads";
   /** Identificador único del evento entregado por el proveedor. */
   eventId: string;
   /** Sufijo opcional para discriminar topics dentro del namespace. */

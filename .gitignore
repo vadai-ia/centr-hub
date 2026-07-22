@@ -38,3 +38,8 @@ supabase/.branches/
 
 # Reporte generado por el backfill M11 (artefacto, no se versiona)
 backfill-recon-report.csv
+
+# Local agent/skill tooling (not part of the app)
+.agent/
+.claude/
+.mcp.json
