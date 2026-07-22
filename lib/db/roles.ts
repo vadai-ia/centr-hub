@@ -117,7 +117,14 @@ export async function deleteRoleRow(
   if (error) throw error;
 }
 
-/** Cuenta memberships (activos + inactivos) que usan una role key. Guardrail de borrado. */
+/**
+ * Cuenta memberships REALES (activos + inactivos) que usan una role key.
+ * Excluye al usuario sistema "Histórico" (`is_system_user=true`, R10) para
+ * cuadrar con la lista de Usuarios (`listManageableMemberships`, que también
+ * lo oculta) — si no, el rol 'vendedor' del Histórico inflaba el contador en
+ * +1. Alimenta el contador del constructor de roles y el guardrail de borrado
+ * (un rol que solo tuviera al Histórico sí debe poder borrarse).
+ */
 export async function countMembershipsWithRoleKey(
   organizationId: UUID,
   roleKey: string,
@@ -125,9 +132,13 @@ export async function countMembershipsWithRoleKey(
   const supabase = getSupabaseAdminClient();
   const { count, error } = await supabase
     .from("memberships")
-    .select("id", { count: "exact", head: true })
+    .select("id, profile:user_profiles!inner(is_system_user)", {
+      count: "exact",
+      head: true,
+    })
     .eq("organization_id", organizationId)
-    .eq("role", roleKey);
+    .eq("role", roleKey)
+    .eq("profile.is_system_user", false);
   if (error) throw error;
   return count ?? 0;
 }
