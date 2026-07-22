@@ -14,6 +14,7 @@ import { advisorReconciliationFunctions } from "./advisor-reconciliation";
 import { postventaTransitionFunctions } from "./postventa-transition-cron";
 import { ruleEvaluationFunctions } from "./rule-evaluation";
 import { goalSnapshotFunctions } from "./goal-snapshot";
+import { leadWebhookFunctions } from "./lead-webhook";
 
 /**
  * Registro completo de funciones Inngest para servir desde
@@ -38,4 +39,5 @@ export const allFunctions = [
   ...postventaTransitionFunctions,
   ...ruleEvaluationFunctions,
   ...goalSnapshotFunctions,
+  ...leadWebhookFunctions,
 ];

@@ -190,6 +190,30 @@ export interface WhaapyPostventaInboundEnvelope {
 export const WHAAPY_POSTVENTA_INBOUND_EVENT =
   "whaapy/postventa.stage_changed_inbound" as const;
 
+/**
+ * Envelope de creación de lead por WEBHOOK de fuente externa (0038,
+ * Bloque B). El endpoint `/api/webhooks/leads/{slug}` autentica por token
+ * de la fuente (constant-time), deduplica, valida el payload con Zod y
+ * encola este evento. El worker `leadWebhookCreate` corre `createLead`
+ * (camino canónico) con `source: "webhook"` + reparto round-robin.
+ */
+export interface LeadWebhookEnvelope {
+  organizationId: UUID;
+  inboundWebhookSourceId: UUID;
+  /** Id de dedup/traza del delivery. */
+  deliveryId: string;
+  receivedAt: string;
+  /** Payload ya validado por Zod en el endpoint (name+phone obligatorios). */
+  payload: {
+    fullName: string;
+    phone: string;
+    email: string | null;
+    address: Record<string, string> | null;
+  };
+}
+
+export const LEAD_WEBHOOK_CREATE_EVENT = "leads/webhook.create_requested" as const;
+
 let cached: Inngest | null = null;
 
 export function getInngestClient(): Inngest {
