@@ -281,6 +281,90 @@ export async function matchContactIdentity(
   };
 }
 
+export type LeadMatchRecommendation =
+  | "link_existing"        // contacto existente (lead o cliente) — usarlo, no duplicar
+  | "create_new"           // sin match — crear contacto nuevo
+  | "conflict_create_new"; // ≥2 contactos con el identificador — ambiguo, crear nuevo + audit
+
+export interface LeadIdentityMatchResult {
+  recommendation: LeadMatchRecommendation;
+  match: ContactRow | null;
+  normalizedPhone: string | null;
+  normalizedEmail: string | null;
+}
+
+/**
+ * Match de identidad para un lead NACIDO EN LA PLATAFORMA (creación
+ * manual o por webhook). Camino canónico compartido de creación de leads.
+ *
+ * A diferencia de `matchContactIdentity`, NO hay tier de identidad externa:
+ * un lead de plataforma no carga `shopify_customer_id` ni `whaapy_contact_id`
+ * propios. Por eso el merge-collapse de teléfonos (ERRORES.md "Teléfono
+ * compartido entre dos customers de Shopify los fusiona…") NO aplica aquí —
+ * no hay identidad externa entrante que pisar o perder. Enlazar a un
+ * contacto existente (lead O cliente) es el comportamiento CORRECTO por la
+ * regla Duplicados de la doctrina ("si el contacto ya existe, se enlaza al
+ * existente en vez de crear uno nuevo").
+ *
+ * Tiers (espejo de phone→email de `matchContactIdentity`):
+ *   - phone único → enlazar a ese contacto.
+ *   - phone en >1 contacto → conflicto (ambiguo) → crear nuevo + audit.
+ *   - sin phone match → email (mismo criterio).
+ *   - sin match → crear nuevo.
+ */
+export async function matchLeadIdentity(input: {
+  phone?: string | null;
+  email?: string | null;
+  defaultCountry?: CountryCode;
+}): Promise<LeadIdentityMatchResult> {
+  requireTenantContext();
+  const country: CountryCode = input.defaultCountry ?? "MX";
+  const normalizedPhone = normalizePhone(input.phone ?? null, country);
+  const normalizedEmail = normalizeEmail(input.email ?? null);
+
+  if (normalizedPhone) {
+    const phoneMatches = await findByPhone(normalizedPhone);
+    if (phoneMatches.length > 1) {
+      await recordAuditEvent({
+        actorUserId: null,
+        eventType: "lead_identity_conflict_phone",
+        entityType: "contact",
+        entityId: null,
+        payload: {
+          phone: normalizedPhone,
+          matched_contact_ids: phoneMatches.map((c) => c.id),
+        },
+      });
+      return { recommendation: "conflict_create_new", match: null, normalizedPhone, normalizedEmail };
+    }
+    if (phoneMatches[0]) {
+      return { recommendation: "link_existing", match: phoneMatches[0], normalizedPhone, normalizedEmail };
+    }
+  }
+
+  if (normalizedEmail) {
+    const emailMatches = await findByEmail(normalizedEmail);
+    if (emailMatches.length > 1) {
+      await recordAuditEvent({
+        actorUserId: null,
+        eventType: "lead_identity_conflict_email",
+        entityType: "contact",
+        entityId: null,
+        payload: {
+          email: normalizedEmail,
+          matched_contact_ids: emailMatches.map((c) => c.id),
+        },
+      });
+      return { recommendation: "conflict_create_new", match: null, normalizedPhone, normalizedEmail };
+    }
+    if (emailMatches[0]) {
+      return { recommendation: "link_existing", match: emailMatches[0], normalizedPhone, normalizedEmail };
+    }
+  }
+
+  return { recommendation: "create_new", match: null, normalizedPhone, normalizedEmail };
+}
+
 /** Helper para listar contactos por phone — útil para botón "Crear contacto en Shopify" (M6). */
 export async function findContactsByPhone(
   phoneE164: string,

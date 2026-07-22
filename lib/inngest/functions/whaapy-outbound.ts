@@ -30,6 +30,8 @@ import type { Json, MembershipRow, UUID } from "@/lib/types/database";
  *
  * Reasons soportados:
  *   - "create_from_shopify"      → POST /contacts/v1 (maneja 409 enlazando).
+ *   - "create_from_platform_ui"  → mismo flujo de create que create_from_shopify
+ *                                  (lead nacido en la plataforma — manual/webhook).
  *   - "update_from_shopify"      → PATCH /contacts/v1/{id}.
  *   - "update_from_platform_ui"  → mismo flujo que update_from_shopify.
  *
@@ -118,12 +120,15 @@ export const whaapyOutboundContactSync = inngest.createFunction(
         const baseBody = buildOutboundBody(snapshot, assignedAgentId);
 
         // 5. Ejecutar según reason.
-        if (envelope.reason === "create_from_shopify") {
+        if (
+          envelope.reason === "create_from_shopify" ||
+          envelope.reason === "create_from_platform_ui"
+        ) {
           return await runCreate(envelope, baseBody);
         }
         if (
           envelope.reason === "update_from_shopify" ||
-          (envelope.reason as string) === "update_from_platform_ui"
+          envelope.reason === "update_from_platform_ui"
         ) {
           return await runUpdate(envelope, baseBody);
         }

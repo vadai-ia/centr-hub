@@ -183,12 +183,19 @@ function hasReactivityElapsed(
   return diffDays >= thresholdDays;
 }
 
-function isBlockingOpportunity(opp: OpportunityRow): boolean {
-  // Bloquea cualquier opp con `cancelled_at IS NULL` (listOpportunities
-  // ya filtra por default, pero defensivo). Bloquea también las opps
-  // ya en etapa won/lost: si un contacto ya cerró ciclo previo en
-  // Funnel Venta, el ciclo nuevo lo dispara la lógica explícita
-  // del vendedor, no R12.
+/**
+ * Guard compartido "el contacto ya tiene un ciclo abierto en Funnel Venta".
+ * Reutilizado por R12 (auto-creación C2) y por el camino canónico de
+ * creación de leads (`createLead`) — misma semántica para "respetar la
+ * oportunidad/etapa existente en vez de crear un Lead nuevo duplicado".
+ *
+ * Bloquea cualquier opp con `cancelled_at IS NULL` (listOpportunities ya
+ * filtra por default, pero defensivo). Bloquea también las opps ya en
+ * etapa won/lost: si un contacto ya cerró un ciclo previo en Funnel Venta,
+ * el ciclo nuevo lo dispara la lógica explícita del vendedor, no la
+ * auto/lead-creación.
+ */
+export function isBlockingOpportunity(opp: OpportunityRow): boolean {
   return opp.cancelled_at === null;
 }
 

@@ -65,11 +65,16 @@ export interface WhaapyContactSyncEnvelope {
    *     contacto desde Centr Hub (M6 — B7/B8). Mismo flujo de PATCH
    *     que `update_from_shopify`, pero el motivo del audit diferencia
    *     el origen y deja claro que NO es eco de Shopify.
+   *   - `create_from_platform_ui` — lead nacido en la plataforma
+   *     (creación manual o por webhook) que debe crearse en el Whaapy de
+   *     Venta con su asesor. Mismo flujo de POST/409 que `create_from_shopify`;
+   *     `assigned_agent_id` viaja si el asesor mapea a un whaapy_agent_id.
    */
   reason:
     | "create_from_shopify"
     | "update_from_shopify"
-    | "update_from_platform_ui";
+    | "update_from_platform_ui"
+    | "create_from_platform_ui";
   contactSnapshot: {
     shopifyCustomerId: string | null;
     whaapyContactId: string | null;
