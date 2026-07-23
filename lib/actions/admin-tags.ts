@@ -6,6 +6,7 @@ import { resolveAdminContext } from "@/lib/auth/admin-guard";
 import { getInngestClient } from "@/lib/inngest/client";
 import {
   deleteTagMappingByNormalized,
+  getTagMappingByNormalized,
   listTagMappings,
   upsertTagMapping,
 } from "@/lib/db/configuration";
@@ -89,6 +90,101 @@ export async function loadAdminTagMappings(): Promise<LoadResult> {
     }));
 
     return { ok: true, mappings: views, vendors: vendorOptions };
+  }, { source: "user_session" });
+}
+
+/**
+ * Normaliza una tag igual que el parser de Shopify
+ * (`lib/services/tag-parser.ts` → `normalizeTag`): trim + lowercase. Debe
+ * coincidir EXACTAMENTE para que una tag creada a mano y la misma tag que
+ * luego llegue de Shopify colapsen a la misma fila (no duplicar).
+ */
+function normalizeTagInput(raw: string): string {
+  return raw.trim().toLowerCase();
+}
+
+const createMappingSchema = z.object({
+  tag: z.string().trim().min(1).max(120),
+  classification: z.enum(["vendor", "informational"]).default("vendor"),
+  membershipId: z.string().uuid().nullable().optional(),
+});
+
+/**
+ * Creación PROACTIVA de una fila de mapeo (Bloque B). Resuelve la deuda:
+ * un vendedor nuevo aparece en el dropdown pero no hay ninguna fila de tag
+ * a la cual asignarlo hasta que su tag aterrice en datos de Shopify ya
+ * ingeridos. Aquí el admin escribe la tag y le asigna su vendedor sin
+ * esperar a Shopify.
+ *
+ * Anti-duplicado: la tag se normaliza igual que el parser y la unicidad
+ * es `(organization_id, normalized_tag)`. Si ya existe una fila (sea
+ * creada a mano, auto-creada por ingest, o detectada), se BLOQUEA con
+ * mensaje accionable — el admin la edita desde la lista, no la re-crea.
+ * Cuando la misma tag llegue después de Shopify, el parser encuentra esta
+ * fila por `normalized_tag` y NO crea otra.
+ */
+export async function createTagMappingAction(
+  raw: unknown,
+): Promise<TagMappingActionResult> {
+  const parsed = createMappingSchema.safeParse(raw);
+  if (!parsed.success) return { ok: false, message: "Datos del mapeo inválidos." };
+  const input = parsed.data;
+  const normalized = normalizeTagInput(input.tag);
+  if (normalized.length === 0) {
+    return { ok: false, message: "La tag no puede quedar vacía." };
+  }
+  const admin = await resolveAdminContext("admin-mapeo-tags");
+  if (!admin.ok) return admin;
+
+  return withTenantContext(admin.ctx.orgId, async () => {
+    // Anti-duplicado: no re-crear una tag ya existente.
+    const existing = await getTagMappingByNormalized(normalized);
+    if (existing) {
+      return {
+        ok: false,
+        message:
+          "Ya existe un mapeo para esta tag. Edítalo desde la lista (botón Cambiar/Reclasificar).",
+      };
+    }
+
+    let membershipId: UUID | null = null;
+    if (input.classification === "vendor") {
+      if (!input.membershipId) {
+        return { ok: false, message: "Selecciona un vendedor para el mapeo De vendedor." };
+      }
+      // Defensa R10: solo vendedores reales (la lista excluye "Histórico").
+      const vendors = await listRealVendorsForMapping(admin.ctx.orgId);
+      if (!vendors.some((v) => v.id === input.membershipId)) {
+        return { ok: false, message: "El vendedor seleccionado no es válido." };
+      }
+      membershipId = input.membershipId;
+    }
+
+    await upsertTagMapping({
+      normalized_tag: normalized,
+      // Preserva lo que el admin tecleó como `original_tag` (display);
+      // cuando llegue de Shopify, la vista prioriza el original detectado.
+      original_tag: input.tag.trim(),
+      classification: input.classification,
+      mapped_membership_id: membershipId,
+      created_by_user_id: admin.ctx.userId,
+    });
+    await recordAuditEvent({
+      actorUserId: admin.ctx.userId,
+      eventType: "tag_mapping_created_manually",
+      entityType: "tag_mapping",
+      entityId: null,
+      payload: {
+        normalized_tag: normalized,
+        classification: input.classification,
+        mapped_membership_id: membershipId,
+      },
+    });
+    revalidatePath("/admin/mapeo-tags");
+
+    const result = await loadAdminTagMappings();
+    if (!result.ok) return { ok: false, message: result.message };
+    return { ok: true, mappings: result.mappings };
   }, { source: "user_session" });
 }
 

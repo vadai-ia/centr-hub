@@ -6,6 +6,7 @@ import { hasTab } from "@/lib/auth/capabilities";
 import { withTenantContext } from "@/lib/tenant/context";
 import {
   countOpportunitiesForStage,
+  countStageHistoryReferences,
   createStage,
   deleteStage,
   getStageById,
@@ -13,9 +14,16 @@ import {
   reorderStages,
   updateStage,
 } from "@/lib/db/pipeline";
+import { listActiveRuleStageNames } from "@/lib/db/automation";
+import { computeStageAutomation } from "@/lib/services/stage-automation";
+import { recordAuditEvent } from "@/lib/db/operational";
 import { FUNNELS } from "@/lib/constants";
-import type { PipelineStageRow, UUID } from "@/lib/types/database";
-import type { StageActionResult } from "@/lib/types/admin";
+import type { Funnel, PipelineStageRow, UUID } from "@/lib/types/database";
+import type {
+  StageActionResult,
+  StageAdminView,
+  StageDeletionPlanResult,
+} from "@/lib/types/admin";
 
 /**
  * Server actions de administración de etapas del pipeline (M7.2,
@@ -47,6 +55,23 @@ async function resolveAdmin(): Promise<
     ok: true,
     ctx: { orgId: session.data.activeOrg.id, userId: session.data.userId },
   };
+}
+
+/**
+ * Enriquece las etapas de un funnel con su dependencia de
+ * automatizaciones (para badges + advertencias en la UI). Debe correr
+ * dentro de `withTenantContext`. Una sola query de reglas activas se
+ * comparte para todas las etapas.
+ */
+async function enrichStages(funnel: Funnel): Promise<StageAdminView[]> {
+  const [stages, ruleRefs] = await Promise.all([
+    listPipelineStages(funnel),
+    listActiveRuleStageNames(),
+  ]);
+  return stages.map((s) => ({
+    ...s,
+    automation: computeStageAutomation(s, stages, ruleRefs),
+  }));
 }
 
 function isTerminalCountOk(
@@ -112,7 +137,7 @@ export async function createStageAction(raw: unknown): Promise<StageActionResult
     });
 
     revalidatePath("/admin/etapas");
-    return { ok: true, stages: await listPipelineStages(input.funnel) };
+    return { ok: true, stages: await enrichStages(input.funnel) };
   }, { source: "user_session" });
 }
 
@@ -185,11 +210,50 @@ export async function updateStageAction(raw: unknown): Promise<StageActionResult
     });
 
     revalidatePath("/admin/etapas");
-    return { ok: true, stages: await listPipelineStages(stage.funnel) };
+    return { ok: true, stages: await enrichStages(stage.funnel) };
   }, { source: "user_session" });
 }
 
-const deleteSchema = z.object({ id: z.string().uuid() });
+const deleteSchema = z.object({
+  id: z.string().uuid(),
+  /** Palabra "eliminar" tecleada por el admin — obligatoria solo para el
+   *  borrado en DURO de una etapa ligada a automatizaciones. */
+  confirm: z.string().optional(),
+});
+
+/**
+ * Resuelve QUÉ se puede hacer con una etapa al pedir su borrado, sin
+ * mutar nada (Bloque A). El cliente lo llama al abrir el diálogo para
+ * pintar el flujo correcto (borrar / desactivar / bloqueado) y las
+ * advertencias de automatización.
+ */
+export async function prepareStageDeletionAction(
+  raw: unknown,
+): Promise<StageDeletionPlanResult> {
+  const parsed = deleteSchema.safeParse(raw);
+  if (!parsed.success) return { ok: false, message: "Identificador inválido." };
+  const admin = await resolveAdmin();
+  if (!admin.ok) return admin;
+
+  return withTenantContext(admin.ctx.orgId, async () => {
+    const stage = await getStageById(parsed.data.id);
+    if (!stage) return { ok: false, message: "La etapa no existe." };
+    const [stages, ruleRefs, oppCount, historyCount] = await Promise.all([
+      listPipelineStages(stage.funnel),
+      listActiveRuleStageNames(),
+      countOpportunitiesForStage(stage.id),
+      countStageHistoryReferences(stage.id),
+    ]);
+    const automation = computeStageAutomation(stage, stages, ruleRefs);
+    const hasHistory = historyCount > 0;
+    const action: "delete" | "deactivate" | "blocked" =
+      oppCount > 0 ? "blocked" : hasHistory ? "deactivate" : "delete";
+    return {
+      ok: true,
+      plan: { action, opportunityCount: oppCount, hasHistory, automation },
+    };
+  }, { source: "user_session" });
+}
 
 export async function deleteStageAction(raw: unknown): Promise<StageActionResult> {
   const parsed = deleteSchema.safeParse(raw);
@@ -224,9 +288,103 @@ export async function deleteStageAction(raw: unknown): Promise<StageActionResult
       }
     }
 
-    await deleteStage(stage.id);
+    // ¿La etapa tiene historial inmutable? El FK
+    // `opportunity_stage_history.to_stage_id ... on delete restrict`
+    // impide el borrado en duro; en ese caso se DESACTIVA (archiva)
+    // preservando la trazabilidad, en lugar de fallar en silencio.
+    const historyCount = await countStageHistoryReferences(stage.id);
+    const ruleRefs = await listActiveRuleStageNames();
+    const automation = computeStageAutomation(stage, stages, ruleRefs);
+
+    if (historyCount > 0) {
+      // Desactivar. No pedimos la palabra "eliminar" (no es un borrado);
+      // la advertencia de automatización se muestra en la UI.
+      if (!stage.is_active) {
+        // Ya estaba desactivada — idempotente.
+        return { ok: true, stages: await enrichStages(stage.funnel), outcome: "deactivated" };
+      }
+      await updateStage(stage.id, { is_active: false });
+      await recordAuditEvent({
+        actorUserId: admin.ctx.userId,
+        eventType: "pipeline_stage_deactivated",
+        entityType: "pipeline_stage",
+        entityId: stage.id,
+        payload: {
+          funnel: stage.funnel,
+          name: stage.name,
+          reason: "has_immutable_history",
+          history_references: historyCount,
+          automation_linked: automation.linked,
+        },
+      });
+      revalidatePath("/admin/etapas");
+      return { ok: true, stages: await enrichStages(stage.funnel), outcome: "deactivated" };
+    }
+
+    // Borrado en DURO (sin oportunidades ni historial). Si la etapa está
+    // ligada a automatizaciones, exigimos la palabra "eliminar" (el
+    // backend revalida; la UI la pide).
+    if (automation.linked && parsed.data.confirm?.trim().toLowerCase() !== "eliminar") {
+      return {
+        ok: false,
+        message:
+          'Esta etapa está ligada a automatizaciones. Escribe la palabra "eliminar" para confirmar.',
+      };
+    }
+
+    try {
+      await deleteStage(stage.id);
+    } catch {
+      // Defensa de fondo: cualquier FK inesperado (p. ej. una referencia
+      // nueva) se traduce en mensaje accionable en vez de colgar la UI.
+      return {
+        ok: false,
+        message:
+          "No se pudo eliminar la etapa: tiene referencias en el sistema. Se puede desactivar en su lugar.",
+      };
+    }
+    await recordAuditEvent({
+      actorUserId: admin.ctx.userId,
+      eventType: "pipeline_stage_deleted",
+      entityType: "pipeline_stage",
+      entityId: stage.id,
+      payload: { funnel: stage.funnel, name: stage.name, automation_linked: automation.linked },
+    });
     revalidatePath("/admin/etapas");
-    return { ok: true, stages: await listPipelineStages(stage.funnel) };
+    return { ok: true, stages: await enrichStages(stage.funnel), outcome: "deleted" };
+  }, { source: "user_session" });
+}
+
+const reactivateSchema = z.object({ id: z.string().uuid() });
+
+/**
+ * Reactiva una etapa desactivada (deshace la desactivación por
+ * historial, Bloque A). Reponer el `is_initial`/terminales no aplica —
+ * solo levanta el flag `is_active`. La etapa vuelve a aparecer como
+ * columna del kanban y como destino válido de movimientos.
+ */
+export async function reactivateStageAction(raw: unknown): Promise<StageActionResult> {
+  const parsed = reactivateSchema.safeParse(raw);
+  if (!parsed.success) return { ok: false, message: "Identificador inválido." };
+  const admin = await resolveAdmin();
+  if (!admin.ok) return admin;
+
+  return withTenantContext(admin.ctx.orgId, async () => {
+    const stage = await getStageById(parsed.data.id);
+    if (!stage) return { ok: false, message: "La etapa no existe." };
+    if (stage.is_active) {
+      return { ok: true, stages: await enrichStages(stage.funnel), outcome: "reactivated" };
+    }
+    await updateStage(stage.id, { is_active: true });
+    await recordAuditEvent({
+      actorUserId: admin.ctx.userId,
+      eventType: "pipeline_stage_reactivated",
+      entityType: "pipeline_stage",
+      entityId: stage.id,
+      payload: { funnel: stage.funnel, name: stage.name },
+    });
+    revalidatePath("/admin/etapas");
+    return { ok: true, stages: await enrichStages(stage.funnel), outcome: "reactivated" };
   }, { source: "user_session" });
 }
 
@@ -244,7 +402,7 @@ export async function reorderStagesAction(raw: unknown): Promise<StageActionResu
   return withTenantContext(admin.ctx.orgId, async () => {
     await reorderStages(parsed.data.funnel, parsed.data.orderedIds);
     revalidatePath("/admin/etapas");
-    return { ok: true, stages: await listPipelineStages(parsed.data.funnel) };
+    return { ok: true, stages: await enrichStages(parsed.data.funnel) };
   }, { source: "user_session" });
 }
 
@@ -253,15 +411,15 @@ export async function reorderStagesAction(raw: unknown): Promise<StageActionResu
  * funnel. Usada por el Server Component de la página.
  */
 export async function loadAdminStages(): Promise<
-  | { ok: true; venta: PipelineStageRow[]; postVenta: PipelineStageRow[] }
+  | { ok: true; venta: StageAdminView[]; postVenta: StageAdminView[] }
   | { ok: false; message: string }
 > {
   const admin = await resolveAdmin();
   if (!admin.ok) return admin;
   return withTenantContext(admin.ctx.orgId, async () => {
     const [venta, postVenta] = await Promise.all([
-      listPipelineStages("venta"),
-      listPipelineStages("post_venta"),
+      enrichStages("venta"),
+      enrichStages("post_venta"),
     ]);
     return { ok: true, venta, postVenta };
   }, { source: "user_session" });

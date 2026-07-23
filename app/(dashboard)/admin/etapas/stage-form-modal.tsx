@@ -4,16 +4,16 @@ import {
   createStageAction,
   updateStageAction,
 } from "@/lib/actions/admin-stages";
-import type { Funnel, PipelineStageRow } from "@/lib/types/database";
-import type { StageActionResult } from "@/lib/types/admin";
+import type { Funnel } from "@/lib/types/database";
+import type { StageActionResult, StageAdminView } from "@/lib/types/admin";
 
 interface Props {
   open: boolean;
   funnel: Funnel;
   /** null = crear; row = editar. */
-  stage: PipelineStageRow | null;
+  stage: StageAdminView | null;
   onClose: () => void;
-  onSaved: (stages: PipelineStageRow[]) => void;
+  onSaved: (stages: StageAdminView[]) => void;
 }
 
 /**
@@ -124,6 +124,22 @@ export function StageFormModal({ open, funnel, stage, onClose, onSaved }: Props)
         <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
           {funnel === "venta" ? "Funnel Venta" : "Funnel Post-venta"}
         </p>
+
+        {isEdit && stage?.automation.linked && (
+          <div className="mt-3 rounded-md bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-800 px-3 py-2">
+            <p className="text-xs font-semibold text-amber-800 dark:text-amber-300">
+              ⚠ Hay automatizaciones ligadas a esta etapa. Renombrarla o cambiar sus marcas puede
+              romperlas:
+            </p>
+            <ul className="mt-1 list-disc list-inside space-y-0.5">
+              {stage.automation.reasons.map((r, i) => (
+                <li key={i} className="text-xs text-amber-800 dark:text-amber-300">
+                  {r}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
 
         <form onSubmit={handleSubmit} className="mt-4 space-y-3">
           <label className="block">

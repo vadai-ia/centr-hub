@@ -6,6 +6,7 @@ import {
 } from "@/lib/actions/admin-tags";
 import type { TagMappingView, TagVendorOption } from "@/lib/types/admin";
 import { TagReclassifyModal } from "./tag-reclassify-modal";
+import { CreateMappingModal } from "./create-mapping-modal";
 
 interface Props {
   initialMappings: TagMappingView[];
@@ -25,6 +26,7 @@ export function MapeoTagsScreen({ initialMappings, vendors }: Props) {
   const [busyTag, setBusyTag] = useState<string | null>(null);
   const [banner, setBanner] = useState<{ tone: "error" | "success" | "info"; text: string } | null>(null);
   const [modalTag, setModalTag] = useState<TagMappingView | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<TagMappingView | null>(null);
 
   const visible = useMemo(() => {
@@ -75,12 +77,21 @@ export function MapeoTagsScreen({ initialMappings, vendors }: Props) {
 
   return (
     <div className="max-w-3xl mx-auto">
-      <header className="mb-4">
-        <h1 className="text-xl font-semibold text-gray-900 dark:text-gray-100">Mapeo de tags</h1>
-        <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
-          Clasifica cada tag de Shopify como de vendedor (atribuye al asesor) o informativa. Las
-          informativas no asignan a nadie.
-        </p>
+      <header className="flex items-start justify-between gap-4 mb-4">
+        <div>
+          <h1 className="text-xl font-semibold text-gray-900 dark:text-gray-100">Mapeo de tags</h1>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
+            Clasifica cada tag de Shopify como de vendedor (atribuye al asesor) o informativa. Las
+            informativas no asignan a nadie.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => setCreateOpen(true)}
+          className="px-3 py-1.5 text-sm rounded-md bg-indigo-600 text-white hover:bg-indigo-700 whitespace-nowrap"
+        >
+          + Crear mapeo manual
+        </button>
       </header>
 
       <div className="inline-flex rounded-lg border border-gray-200 dark:border-gray-700 p-0.5 mb-4">
@@ -195,6 +206,20 @@ export function MapeoTagsScreen({ initialMappings, vendors }: Props) {
           setMappings(next);
           setModalTag(null);
           setBanner({ tone: "success", text: "Clasificación actualizada. Usa “Re-procesar” para aplicar la atribución a entidades existentes." });
+        }}
+      />
+
+      <CreateMappingModal
+        open={createOpen}
+        vendors={vendors}
+        onClose={() => setCreateOpen(false)}
+        onSaved={(next) => {
+          setMappings(next);
+          setCreateOpen(false);
+          setBanner({
+            tone: "success",
+            text: "Mapeo creado. Se aplicará cuando la tag llegue de Shopify; usa “Re-procesar” si ya existen entidades con ella.",
+          });
         }}
       />
 

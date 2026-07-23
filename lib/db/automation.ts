@@ -33,6 +33,29 @@ export async function listRules(opts: {
   return data ?? [];
 }
 
+/**
+ * Nombres de etapa referenciados por reglas de automatización ACTIVAS de
+ * la org, con el label de la regla. Las reglas de tiempo resuelven su
+ * etapa por `trigger_config.stage_name` (stage_aging) o
+ * `restricted_to_stage` (no_activity) — renombrar/borrar esa etapa deja
+ * la regla en `stage_not_found`. Usado por el detector de dependencia de
+ * automatizaciones del panel de Etapas (Bloque A).
+ */
+export async function listActiveRuleStageNames(): Promise<
+  { stageName: string; ruleLabel: string }[]
+> {
+  const rules = await listRules({ activeOnly: true });
+  const refs: { stageName: string; ruleLabel: string }[] = [];
+  for (const rule of rules) {
+    const cfg = (rule.trigger_config ?? {}) as Record<string, unknown>;
+    const stageName = cfg.stage_name ?? cfg.restricted_to_stage;
+    if (typeof stageName === "string" && stageName.trim().length > 0) {
+      refs.push({ stageName, ruleLabel: rule.name });
+    }
+  }
+  return refs;
+}
+
 export async function getRuleById(id: UUID): Promise<AutomationRuleRow | null> {
   const { supabase, organizationId } = getTenantScopedClient();
   const { data, error } = await supabase

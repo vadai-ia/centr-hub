@@ -5,6 +5,9 @@ import type {
   TagClassification,
   UUID,
 } from "@/lib/types/database";
+import type { StageAutomationInfo } from "@/lib/services/stage-automation";
+
+export type { StageAutomationInfo };
 
 /**
  * Tipos compartidos de las pantallas de administración (M7.2) entre
@@ -13,8 +16,40 @@ import type {
  * venir de otro módulo.
  */
 
+/**
+ * Etapa enriquecida para el panel admin: la fila + su dependencia de
+ * automatizaciones (para badges + advertencias en editar/borrar).
+ */
+export interface StageAdminView extends PipelineStageRow {
+  automation: StageAutomationInfo;
+}
+
+/** Qué pasó al confirmar la eliminación de una etapa (Bloque A). */
+export type StageDeletionOutcome = "deleted" | "deactivated" | "reactivated";
+
 export type StageActionResult =
-  | { ok: true; stages: PipelineStageRow[] }
+  | { ok: true; stages: StageAdminView[]; outcome?: StageDeletionOutcome }
+  | { ok: false; message: string };
+
+/**
+ * Plan de eliminación de una etapa, resuelto en servidor al abrir el
+ * diálogo (Bloque A). El cliente lo usa para mostrar el diálogo correcto:
+ *   - "delete"       → borrado real (sin historial ni oportunidades).
+ *   - "deactivate"   → tiene historial inmutable → se archiva (desactiva),
+ *                      no se puede borrar en duro.
+ *   - "blocked"      → tiene oportunidades vivas dentro → mover primero.
+ */
+export interface StageDeletionPlan {
+  action: "delete" | "deactivate" | "blocked";
+  /** Oportunidades (incluidas canceladas) actualmente en la etapa. */
+  opportunityCount: number;
+  /** true si existe historial que impide el borrado en duro. */
+  hasHistory: boolean;
+  automation: StageAutomationInfo;
+}
+
+export type StageDeletionPlanResult =
+  | { ok: true; plan: StageDeletionPlan }
   | { ok: false; message: string };
 
 export type LossReasonActionResult =

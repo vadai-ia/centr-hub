@@ -2,22 +2,36 @@
 import { useState } from "react";
 import {
   deleteStageAction,
+  prepareStageDeletionAction,
+  reactivateStageAction,
   reorderStagesAction,
 } from "@/lib/actions/admin-stages";
-import type { Funnel, PipelineStageRow, UUID } from "@/lib/types/database";
+import type { Funnel, UUID } from "@/lib/types/database";
+import type { StageAdminView, StageDeletionPlan } from "@/lib/types/admin";
 import { StageList } from "./stage-list";
 import { StageFormModal } from "./stage-form-modal";
 
 interface Props {
-  initialVenta: PipelineStageRow[];
-  initialPostVenta: PipelineStageRow[];
+  initialVenta: StageAdminView[];
+  initialPostVenta: StageAdminView[];
+}
+
+interface DeleteFlow {
+  stage: StageAdminView;
+  loading: boolean;
+  plan: StageDeletionPlan | null;
 }
 
 /**
- * Pantalla admin de Etapas del pipeline (M7.2, Bloque 3).
+ * Pantalla admin de Etapas del pipeline (M7.2, Bloque 3 + fix panel A).
  * Sub-toggle Venta/Post-venta, CRUD + reorder drag-and-drop.
- * Las validaciones estructurales se ejecutan en backend; aquí solo
- * se muestran los mensajes de bloqueo.
+ *
+ * Borrado (fix Bloque A): al pedir eliminar, el servidor resuelve el
+ * plan (borrar / desactivar / bloqueado). Una etapa con historial
+ * inmutable NO se puede borrar en duro (FK `on delete restrict`); se
+ * DESACTIVA (archiva) preservando la trazabilidad y el diálogo lo
+ * explica. Una etapa ligada a automatizaciones exige teclear "eliminar"
+ * para el borrado en duro. Las validaciones se revalidan en backend.
  */
 export function EtapasScreen({ initialVenta, initialPostVenta }: Props) {
   const [funnel, setFunnel] = useState<Funnel>("venta");
@@ -27,18 +41,18 @@ export function EtapasScreen({ initialVenta, initialPostVenta }: Props) {
   const [banner, setBanner] = useState<{ tone: "error" | "success"; text: string } | null>(null);
 
   const [modalOpen, setModalOpen] = useState(false);
-  const [editing, setEditing] = useState<PipelineStageRow | null>(null);
-  const [deleteTarget, setDeleteTarget] = useState<PipelineStageRow | null>(null);
+  const [editing, setEditing] = useState<StageAdminView | null>(null);
+  const [deleteFlow, setDeleteFlow] = useState<DeleteFlow | null>(null);
 
   const stages = funnel === "venta" ? venta : postVenta;
-  const applyStages = (next: PipelineStageRow[]) =>
+  const applyStages = (next: StageAdminView[]) =>
     funnel === "venta" ? setVenta(next) : setPostVenta(next);
 
   function openCreate() {
     setEditing(null);
     setModalOpen(true);
   }
-  function openEdit(stage: PipelineStageRow) {
+  function openEdit(stage: StageAdminView) {
     setEditing(stage);
     setModalOpen(true);
   }
@@ -51,7 +65,7 @@ export function EtapasScreen({ initialVenta, initialPostVenta }: Props) {
         const s = map.get(id);
         return s ? { ...s, position: i + 1 } : null;
       })
-      .filter((s): s is PipelineStageRow => s !== null);
+      .filter((s): s is StageAdminView => s !== null);
     applyStages(optimistic);
     setBusy(true);
     const res = await reorderStagesAction({ funnel, orderedIds });
@@ -63,18 +77,50 @@ export function EtapasScreen({ initialVenta, initialPostVenta }: Props) {
     applyStages(res.stages);
   }
 
-  async function confirmDelete() {
-    if (!deleteTarget) return;
+  // Paso 1 del borrado: pedir al servidor el plan (borrar/desactivar/bloqueado).
+  async function requestDelete(stage: StageAdminView) {
+    setDeleteFlow({ stage, loading: true, plan: null });
+    const res = await prepareStageDeletionAction({ id: stage.id });
+    if (!res.ok) {
+      setDeleteFlow(null);
+      setBanner({ tone: "error", text: res.message });
+      return;
+    }
+    setDeleteFlow({ stage, loading: false, plan: res.plan });
+  }
+
+  // Paso 2: confirmar. `confirmWord` solo aplica al borrado en duro de una
+  // etapa ligada a automatizaciones.
+  async function confirmDelete(confirmWord: string) {
+    if (!deleteFlow?.plan) return;
+    const target = deleteFlow.stage;
     setBusy(true);
-    const res = await deleteStageAction({ id: deleteTarget.id });
+    const res = await deleteStageAction({ id: target.id, confirm: confirmWord });
     setBusy(false);
-    setDeleteTarget(null);
+    if (!res.ok) {
+      setBanner({ tone: "error", text: res.message });
+      // Mantener el diálogo abierto si fue por falta de la palabra.
+      return;
+    }
+    setDeleteFlow(null);
+    applyStages(res.stages);
+    const text =
+      res.outcome === "deactivated"
+        ? "Etapa desactivada (archivada). Conserva su historial y ya no aparece en el pipeline."
+        : "Etapa eliminada.";
+    setBanner({ tone: "success", text });
+  }
+
+  async function handleReactivate(stage: StageAdminView) {
+    setBusy(true);
+    const res = await reactivateStageAction({ id: stage.id });
+    setBusy(false);
     if (!res.ok) {
       setBanner({ tone: "error", text: res.message });
       return;
     }
     applyStages(res.stages);
-    setBanner({ tone: "success", text: "Etapa eliminada." });
+    setBanner({ tone: "success", text: "Etapa reactivada. Vuelve a aparecer en el pipeline." });
   }
 
   return (
@@ -131,7 +177,8 @@ export function EtapasScreen({ initialVenta, initialPostVenta }: Props) {
         busy={busy}
         onReorder={handleReorder}
         onEdit={openEdit}
-        onDelete={setDeleteTarget}
+        onDelete={requestDelete}
+        onReactivate={handleReactivate}
       />
 
       <StageFormModal
@@ -146,11 +193,11 @@ export function EtapasScreen({ initialVenta, initialPostVenta }: Props) {
         }}
       />
 
-      {deleteTarget && (
-        <ConfirmDelete
-          stageName={deleteTarget.name}
+      {deleteFlow && (
+        <DeleteDialog
+          flow={deleteFlow}
           busy={busy}
-          onCancel={() => setDeleteTarget(null)}
+          onCancel={() => setDeleteFlow(null)}
           onConfirm={confirmDelete}
         />
       )}
@@ -182,17 +229,34 @@ function FunnelTab({
   );
 }
 
-function ConfirmDelete({
-  stageName,
+/**
+ * Diálogo de eliminación adaptativo (fix Bloque A). Renderiza según el
+ * plan resuelto en servidor:
+ *   - loading      → spinner mientras el servidor decide.
+ *   - "blocked"    → hay oportunidades vivas; mover primero (no borra).
+ *   - "deactivate" → tiene historial inmutable; se archiva (desactiva),
+ *                    NO se puede borrar en duro. Sin palabra "eliminar".
+ *   - "delete"     → borrado real; si la etapa está ligada a
+ *                    automatizaciones, exige teclear "eliminar".
+ */
+function DeleteDialog({
+  flow,
   busy,
   onCancel,
   onConfirm,
 }: {
-  stageName: string;
+  flow: DeleteFlow;
   busy: boolean;
   onCancel: () => void;
-  onConfirm: () => void;
+  onConfirm: (confirmWord: string) => void;
 }) {
+  const [word, setWord] = useState("");
+  const { stage, loading, plan } = flow;
+  const linked = plan?.automation.linked ?? false;
+  const needsWord = plan?.action === "delete" && linked;
+  const canConfirm = !busy && !loading && plan != null && plan.action !== "blocked" &&
+    (!needsWord || word.trim().toLowerCase() === "eliminar");
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center px-4 bg-gray-900/40 backdrop-blur-sm"
@@ -202,15 +266,86 @@ function ConfirmDelete({
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-sm w-full p-6"
+        className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full p-6"
       >
         <p className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-          Eliminar etapa
+          {plan?.action === "deactivate"
+            ? "Desactivar etapa"
+            : plan?.action === "blocked"
+              ? "No se puede eliminar"
+              : "Eliminar etapa"}
         </p>
-        <p className="text-sm text-gray-600 dark:text-gray-300 mt-2">
-          ¿Eliminar la etapa <span className="font-medium">{stageName}</span>? Esta
-          acción no se puede deshacer.
-        </p>
+
+        {loading || !plan ? (
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-3">Comprobando dependencias…</p>
+        ) : (
+          <div className="mt-2 space-y-3">
+            {plan.action === "blocked" && (
+              <p className="text-sm text-gray-600 dark:text-gray-300">
+                La etapa <span className="font-medium">{stage.name}</span> tiene{" "}
+                <span className="font-medium">{plan.opportunityCount}</span> oportunidad
+                {plan.opportunityCount === 1 ? "" : "es"} dentro. Muévelas a otra etapa antes de
+                eliminarla.
+              </p>
+            )}
+
+            {plan.action === "deactivate" && (
+              <>
+                <p className="text-sm text-gray-600 dark:text-gray-300">
+                  La etapa <span className="font-medium">{stage.name}</span> no se puede eliminar
+                  porque <span className="font-medium">tiene historial</span>: oportunidades pasaron
+                  por ella y ese registro es permanente (no se borra para conservar la trazabilidad).
+                </p>
+                <p className="text-sm text-gray-600 dark:text-gray-300">
+                  En su lugar se <span className="font-medium">desactivará</span>: desaparece del
+                  pipeline y deja de ser destino de movimientos, pero su historial se conserva y
+                  puedes reactivarla después.
+                </p>
+              </>
+            )}
+
+            {plan.action === "delete" && (
+              <p className="text-sm text-gray-600 dark:text-gray-300">
+                ¿Eliminar la etapa <span className="font-medium">{stage.name}</span>? No tiene
+                oportunidades ni historial. Esta acción no se puede deshacer.
+              </p>
+            )}
+
+            {/* Advertencia de automatización (deactivate + delete). */}
+            {plan.action !== "blocked" && linked && (
+              <div className="rounded-md bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-800 px-3 py-2">
+                <p className="text-xs font-semibold text-amber-800 dark:text-amber-300">
+                  ⚠ Hay automatizaciones ligadas a esta etapa. Se romperán:
+                </p>
+                <ul className="mt-1 list-disc list-inside space-y-0.5">
+                  {plan.automation.reasons.map((r, i) => (
+                    <li key={i} className="text-xs text-amber-800 dark:text-amber-300">
+                      {r}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {needsWord && (
+              <label className="block">
+                <span className="block text-xs font-medium text-gray-600 dark:text-gray-300 mb-1">
+                  Escribe <span className="font-mono font-semibold">eliminar</span> para confirmar
+                </span>
+                <input
+                  type="text"
+                  value={word}
+                  onChange={(e) => setWord(e.target.value)}
+                  disabled={busy}
+                  autoFocus
+                  autoComplete="off"
+                  className="w-full rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-700 text-sm px-2 py-1.5 text-gray-900 dark:text-gray-100"
+                />
+              </label>
+            )}
+          </div>
+        )}
+
         <div className="flex justify-end gap-2 mt-5">
           <button
             type="button"
@@ -218,16 +353,28 @@ function ConfirmDelete({
             disabled={busy}
             className="px-3 py-1.5 text-sm rounded-md border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50"
           >
-            Cancelar
+            {plan?.action === "blocked" ? "Entendido" : "Cancelar"}
           </button>
-          <button
-            type="button"
-            onClick={onConfirm}
-            disabled={busy}
-            className="px-3 py-1.5 text-sm rounded-md bg-red-600 text-white hover:bg-red-700 disabled:bg-red-300"
-          >
-            {busy ? "Eliminando..." : "Eliminar"}
-          </button>
+          {plan && plan.action !== "blocked" && (
+            <button
+              type="button"
+              onClick={() => onConfirm(word)}
+              disabled={!canConfirm}
+              className={`px-3 py-1.5 text-sm rounded-md text-white disabled:opacity-50 ${
+                plan.action === "deactivate"
+                  ? "bg-amber-600 hover:bg-amber-700 disabled:bg-amber-300"
+                  : "bg-red-600 hover:bg-red-700 disabled:bg-red-300"
+              }`}
+            >
+              {busy
+                ? plan.action === "deactivate"
+                  ? "Desactivando…"
+                  : "Eliminando…"
+                : plan.action === "deactivate"
+                  ? "Desactivar"
+                  : "Eliminar"}
+            </button>
+          )}
         </div>
       </div>
     </div>

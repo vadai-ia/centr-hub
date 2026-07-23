@@ -113,6 +113,27 @@ export async function countOpportunitiesForStage(stageId: UUID): Promise<number>
 }
 
 /**
+ * Cuenta las filas de `opportunity_stage_history` que APUNTAN a una
+ * etapa como destino (`to_stage_id`). Ese FK es `on delete restrict` y
+ * la tabla es inmutable (append-only, sin purga), así que cualquier
+ * etapa por la que ALGUNA vez pasó una oportunidad no se puede borrar
+ * en duro — aunque hoy no tenga oportunidades vivas dentro. Cuando el
+ * conteo es > 0 la etapa se DESACTIVA en vez de borrarse (preserva la
+ * trazabilidad). `from_stage_id` es `on delete set null`, no bloquea,
+ * por eso NO se cuenta aquí.
+ */
+export async function countStageHistoryReferences(stageId: UUID): Promise<number> {
+  const { supabase, organizationId } = getTenantScopedClient();
+  const { count, error } = await supabase
+    .from("opportunity_stage_history")
+    .select("id", { count: "exact", head: true })
+    .eq("organization_id", organizationId)
+    .eq("to_stage_id", stageId);
+  if (error) throw error;
+  return count ?? 0;
+}
+
+/**
  * Reordena las etapas de un funnel aplicando posiciones 1..N en el
  * orden recibido. Persiste cada UPDATE de forma individual (no hay
  * unique constraint sobre `position`, así que no hay riesgo de
