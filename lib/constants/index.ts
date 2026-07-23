@@ -143,6 +143,30 @@ export const HIDE_CLOSED_DAYS_MIN = 0 as const;
 export const HIDE_CLOSED_DAYS_MAX = 365 as const;
 
 /**
+ * Piso de visibilidad del pipeline (cutoff de arranque operativo). El kanban
+ * muestra SOLO oportunidades con `effective_created_at >= este día` O que
+ * sigan trabajándose (`last_modified_at >= este día` por una fuente NO
+ * automática). Vive en `organizations.config.pipeline.min_effective_date`
+ * (formato 'YYYY-MM-DD', interpretado como inicio de día en CDMX); este
+ * default aplica cuando la org no lo sobreescribe. Es SOLO visualización del
+ * kanban — dashboard/búsqueda/KPIs intactos; nada se borra ni se archiva.
+ */
+export const DEFAULT_PIPELINE_MIN_DATE = "2026-06-01" as const;
+
+/**
+ * Fuentes de `last_modified_at` que NO cuentan como "sigue trabajándose"
+ * para el piso de visibilidad: son escrituras internas sintéticas (cron de
+ * transiciones de Post-venta, trigger F1→F2, seeds/backfill). Un toque de
+ * estas fuentes sobre una opp vieja NO la resucita en el kanban. Las fuentes
+ * humanas ('platform') y externas reales ('shopify'/'whaapy') sí la conservan.
+ */
+export const PIPELINE_FLOOR_AUTOMATED_SOURCES = [
+  "automation",
+  "trigger_f1_f2",
+  "system",
+] as const;
+
+/**
  * `CLOSED_LIST_RETENTION_DAYS` (M4v2) — segunda barrera de visualización
  * por ENCIMA del auto-ocultar. Una oportunidad cerrada (Ganada/Perdida/
  * Caso cerrado) deja de listarse en "Ver cerradas" cuando cumple este

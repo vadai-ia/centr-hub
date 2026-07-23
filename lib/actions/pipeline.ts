@@ -29,6 +29,7 @@ import {
   computeClosedListRetentionCutoffIso,
   partitionClosedStages,
   readHideClosedDays,
+  readPipelineMinDateIso,
   sanitizeHideClosedDays,
 } from "@/lib/services/pipeline-visibility";
 import { resolvePostventaStages } from "@/lib/services/dashboard-stages";
@@ -236,6 +237,7 @@ export async function loadKanbanPageAction(
       closedFilter,
       resolvedScope: input.resolvedScope,
       resolvedSinceIso,
+      minEffectiveIso: readPipelineMinDateIso(org?.config ?? null),
     });
     const hasMore = items.length > PIPELINE_PAGE_SIZE;
     return {
@@ -276,7 +278,15 @@ export async function fetchKanbanOpportunityAction(
   }
   const orgId = session.data.activeOrg.id;
   return withTenantContext(orgId, async () => {
-    const opp = await getKanbanOpportunityById(parsed.data.opportunityId);
+    // Piso de visibilidad (cutoff de arranque): si la opp que cambió por
+    // realtime es previa al corte y ya no se trabaja, `getKanbanOpportunityById`
+    // devuelve null → el board la saca (no la inyecta).
+    const org = await getOrganizationById(orgId);
+    const minEffectiveIso = readPipelineMinDateIso(org?.config ?? null);
+    const opp = await getKanbanOpportunityById(
+      parsed.data.opportunityId,
+      minEffectiveIso,
+    );
     return { ok: true, opportunity: opp };
   }, { source: "user_session" });
 }
@@ -497,6 +507,7 @@ export async function loadInitialPipelineState(opts: {
     const retentionCutoffIso = computeClosedListRetentionCutoffIso();
     const resolvedSinceIso =
       resolvedScope === "resolved" ? retentionCutoffIso : null;
+    const minEffectiveIso = readPipelineMinDateIso(org?.config ?? null);
     const { wonStageIds, lostStageIds } = partitionClosedStages(activeStages);
 
     const [countResult, pageResults] = await Promise.all([
@@ -510,6 +521,7 @@ export async function loadInitialPipelineState(opts: {
         closedHide: { cutoffIso, retentionCutoffIso, wonStageIds, lostStageIds },
         resolvedScope,
         resolvedSinceIso,
+        minEffectiveIso,
       }),
       Promise.all(
         activeStages.map(async (stage) => {
@@ -525,6 +537,7 @@ export async function loadInitialPipelineState(opts: {
             closedFilter: closedFilterForStage(stage, cutoffIso),
             resolvedScope,
             resolvedSinceIso,
+            minEffectiveIso,
           });
           return { stageId: stage.id, items };
         }),

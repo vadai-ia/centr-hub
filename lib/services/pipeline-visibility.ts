@@ -3,6 +3,7 @@ import { DateTime } from "luxon";
 import {
   CLOSED_LIST_RETENTION_DAYS,
   DEFAULT_HIDE_CLOSED_AFTER_DAYS,
+  DEFAULT_PIPELINE_MIN_DATE,
   HIDE_CLOSED_DAYS_MAX,
   HIDE_CLOSED_DAYS_MIN,
   TIMEZONE,
@@ -68,6 +69,33 @@ export function sanitizeHideClosedDays(value: number): number {
 export function computeClosedCutoffIso(days: number): string {
   const cutoff = DateTime.now().setZone(TIMEZONE).minus({ days });
   return cutoff.toUTC().toISO() ?? new Date().toISOString();
+}
+
+/**
+ * Instante de corte (UTC ISO) del PISO de visibilidad del pipeline. Lee
+ * `organizations.config.pipeline.min_effective_date` ('YYYY-MM-DD') y lo
+ * interpreta como inicio de día en CDMX (CLAUDE.md "Timezone"). Fallback al
+ * default (`DEFAULT_PIPELINE_MIN_DATE`) si la clave falta o es inválida. El
+ * piso se aplica SIEMPRE (no depende de filtros del usuario) en el data layer
+ * del kanban — es visibility-only.
+ */
+export function readPipelineMinDateIso(config: Json | null | undefined): string {
+  let raw: unknown;
+  if (config && typeof config === "object" && !Array.isArray(config)) {
+    const pipeline = (config as Record<string, unknown>).pipeline;
+    if (pipeline && typeof pipeline === "object" && !Array.isArray(pipeline)) {
+      raw = (pipeline as Record<string, unknown>).min_effective_date;
+    }
+  }
+  const dateStr =
+    typeof raw === "string" && raw.trim().length > 0
+      ? raw.trim()
+      : DEFAULT_PIPELINE_MIN_DATE;
+  const dt = DateTime.fromISO(dateStr, { zone: TIMEZONE }).startOf("day");
+  const valid = dt.isValid
+    ? dt
+    : DateTime.fromISO(DEFAULT_PIPELINE_MIN_DATE, { zone: TIMEZONE }).startOf("day");
+  return valid.toUTC().toISO() ?? new Date(DEFAULT_PIPELINE_MIN_DATE).toISOString();
 }
 
 /**

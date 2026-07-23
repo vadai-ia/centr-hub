@@ -1,5 +1,6 @@
 import "server-only";
 import { getTenantScopedClient } from "@/lib/db/client";
+import { PIPELINE_FLOOR_AUTOMATED_SOURCES } from "@/lib/constants";
 import type {
   Funnel,
   OpportunityLineItemRow,
@@ -9,6 +10,22 @@ import type {
   Database,
   UUID,
 } from "@/lib/types/database";
+
+/**
+ * Piso de visibilidad del pipeline (cutoff de arranque operativo). Filtro
+ * PostgREST `or`: una opp es visible en el kanban si su fecha REAL de
+ * creación alcanza el corte (`effective_created_at >= minIso`) O si sigue
+ * trabajándose (`last_modified_at >= minIso` por una fuente NO automática).
+ * Se usa `neq` por cada fuente automática (robusto en el parser de `or`).
+ * Solo visualización — no toca dashboard/búsqueda/KPIs. Ver ERRORES.md
+ * "Piso de visibilidad del pipeline".
+ */
+function pipelineVisibilityFloorOr(minIso: string): string {
+  const notAuto = PIPELINE_FLOOR_AUTOMATED_SOURCES.map(
+    (s) => `last_modified_source.neq.${s}`,
+  ).join(",");
+  return `effective_created_at.gte.${minIso},and(last_modified_at.gte.${minIso},${notAuto})`;
+}
 
 type OppInsert = Database["public"]["Tables"]["opportunities"]["Insert"];
 type OppUpdate = Database["public"]["Tables"]["opportunities"]["Update"];
@@ -367,8 +384,12 @@ const KANBAN_OPPORTUNITY_SELECT = `
  *  - Para admin sin filtro pasar `assignedAdvisorId = undefined`.
  *
  * Filtros adicionales (lote de polish M6 + correcciones ronda 2):
- *  - `dateFrom`/`dateTo` filtran por `created_at` (rango inclusivo) —
- *    la fecha que el usuario percibe como "cuándo se creó la opp".
+ *  - `dateFrom`/`dateTo` filtran por `effective_created_at` (rango
+ *    inclusivo) = COALESCE(shopify_created_at, created_at) — la fecha REAL
+ *    de creación (fecha del Draft en Shopify para Cotizaciones; created_at
+ *    para opps nacidas en plataforma). Alineado con el dashboard (0025):
+ *    las opps backfilleadas (M11) ya NO caen en el periodo de importación.
+ *    Indexado por `opportunities_org_effective_created_at_idx`.
  *  - `query` es búsqueda parcial sobre display_reference + contact
  *    (name/phone/email). PostgREST no permite `.or()` mezclando parent
  *    y embedded en un solo predicado, así que pre-resolvemos los
@@ -405,6 +426,10 @@ export async function listKanbanOpportunities(opts: {
    *  resolvedSinceIso` (deja de listar los archivados hace >30 días). Sin
    *  efecto en "active". */
   resolvedSinceIso?: string | null;
+  /** Piso de visibilidad (cutoff de arranque). Si se pasa, oculta las opps
+   *  previas al corte que ya no se trabajan (visibility-only). Incondicional
+   *  respecto a `dateFrom`/`dateTo` — se aplica siempre. */
+  minEffectiveIso?: string;
 }): Promise<KanbanOpportunity[]> {
   const { supabase, organizationId } = getTenantScopedClient();
 
@@ -445,8 +470,14 @@ export async function listKanbanOpportunities(opts: {
       query = query.eq("assigned_advisor_id", opts.assignedAdvisorId);
     }
   }
-  if (opts.dateFrom) query = query.gte("created_at", opts.dateFrom);
-  if (opts.dateTo) query = query.lte("created_at", opts.dateTo);
+  if (opts.dateFrom) query = query.gte("effective_created_at", opts.dateFrom);
+  if (opts.dateTo) query = query.lte("effective_created_at", opts.dateTo);
+
+  // Piso de visibilidad (cutoff de arranque): incondicional, se AND-ea con
+  // el filtro de fecha del usuario y con el resto de `.or()`.
+  if (opts.minEffectiveIso) {
+    query = query.or(pipelineVisibilityFloorOr(opts.minEffectiveIso));
+  }
 
   // Auto-ocultar cerradas: muestra solo las cerradas dentro de la
   // ventana (o con fecha NULL). Es un `.or()` independiente → se
@@ -498,9 +529,10 @@ export async function listKanbanOpportunities(opts: {
 export async function countKanbanOpportunitiesByStage(opts: {
   funnel: Funnel;
   assignedAdvisorId?: UUID | null;
-  /** ISO date inclusive. Filtra por `created_at >= dateFrom`. */
+  /** ISO date inclusive. Filtra por `effective_created_at >= dateFrom`
+   *  (fecha real de Shopify; alineado con el dashboard y con la lista). */
   dateFrom?: string;
-  /** ISO date inclusive. Filtra por `created_at <= dateTo`. */
+  /** ISO date inclusive. Filtra por `effective_created_at <= dateTo`. */
   dateTo?: string;
   query?: string;
   /** Pre-resolved contact_ids — caller suele compartirlos con
@@ -529,6 +561,9 @@ export async function countKanbanOpportunitiesByStage(opts: {
    *  `resolvedScope` es "resolved", cuenta solo `resolved_at >=
    *  resolvedSinceIso`. Mantiene el conteo alineado con la lista. */
   resolvedSinceIso?: string | null;
+  /** Piso de visibilidad (cutoff de arranque). Mismo criterio y semántica
+   *  que en `listKanbanOpportunities` — mantiene conteo y lista alineados. */
+  minEffectiveIso?: string;
 }): Promise<{ counts: Record<UUID, number>; hiddenCounts: Record<UUID, number> }> {
   const { supabase, organizationId } = getTenantScopedClient();
 
@@ -566,8 +601,13 @@ export async function countKanbanOpportunitiesByStage(opts: {
       query = query.eq("assigned_advisor_id", opts.assignedAdvisorId);
     }
   }
-  if (opts.dateFrom) query = query.gte("created_at", opts.dateFrom);
-  if (opts.dateTo) query = query.lte("created_at", opts.dateTo);
+  if (opts.dateFrom) query = query.gte("effective_created_at", opts.dateFrom);
+  if (opts.dateTo) query = query.lte("effective_created_at", opts.dateTo);
+
+  // Piso de visibilidad (cutoff de arranque) — alineado con la lista.
+  if (opts.minEffectiveIso) {
+    query = query.or(pipelineVisibilityFloorOr(opts.minEffectiveIso));
+  }
 
   if (hasQuery) {
     const idsList = (contactIds ?? []).slice(0, 5000);
@@ -795,14 +835,20 @@ export async function searchOpportunitiesAnyState(opts: {
  */
 export async function getKanbanOpportunityById(
   id: UUID,
+  minEffectiveIso?: string,
 ): Promise<KanbanOpportunity | null> {
   const { supabase, organizationId } = getTenantScopedClient();
-  const { data, error } = await supabase
+  let query = supabase
     .from("opportunities")
     .select(KANBAN_OPPORTUNITY_SELECT)
     .eq("id", id)
-    .eq("organization_id", organizationId)
-    .maybeSingle();
+    .eq("organization_id", organizationId);
+  // Piso de visibilidad (cutoff de arranque): si la opp no lo pasa, devuelve
+  // null → el refresh de realtime la SACA del tablero (no la inyecta).
+  if (minEffectiveIso) {
+    query = query.or(pipelineVisibilityFloorOr(minEffectiveIso));
+  }
+  const { data, error } = await query.maybeSingle();
   if (error) throw error;
   return (data ?? null) as unknown as KanbanOpportunity | null;
 }
