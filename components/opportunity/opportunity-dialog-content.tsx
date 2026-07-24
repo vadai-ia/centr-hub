@@ -8,6 +8,7 @@ import { OpportunityLineItems } from "./opportunity-line-items";
 import { OpportunityLossInfo } from "./opportunity-loss-info";
 import { OpportunityTimeline } from "./opportunity-timeline";
 import { OpportunityTasks } from "./opportunity-tasks";
+import { OutboundBadge } from "@/components/outbound/outbound-badge";
 
 interface Props {
   bundle: OpportunityDialogBundle;
@@ -17,6 +18,7 @@ interface Props {
   onReassign?: () => void;
   onCreateInShopify?: () => void;
   onResolveCase?: () => void;
+  onHandoff?: () => void;
   onTasksChanged?: () => void;
 }
 
@@ -39,6 +41,7 @@ export function OpportunityDialogContent({
   onReassign,
   onCreateInShopify,
   onResolveCase,
+  onHandoff,
   onTasksChanged,
 }: Props) {
   const { opportunity, stage, contact, lineItems, lossReason } = bundle.detail;
@@ -46,6 +49,11 @@ export function OpportunityDialogContent({
   const totalText = formatAmount(amount.value, opportunity.currency);
   const subtotalText = formatAmount(bundle.lineItemsSubtotal, opportunity.currency);
   const advisor = resolveAdvisor(opportunity.assigned_advisor_id, bundle.advisors);
+  // Conflicto de asesor por tag de Shopify (0043): el tag nombró a otro pero
+  // se conservó el asesor de la entrega. Se resuelve el nombre para advertir.
+  const tagConflictAdvisor = opportunity.overridden_tag_advisor_id
+    ? resolveAdvisor(opportunity.overridden_tag_advisor_id, bundle.advisors)
+    : null;
 
   const handleContactClick = useCallback(() => {
     onClose();
@@ -95,6 +103,7 @@ export function OpportunityDialogContent({
               <SystemBadge kind="shopify" active={contact.shopify_customer_id !== null} />
               <SystemBadge kind="whaapy" active={contact.whaapy_contact_id !== null} />
               <ContactTypeBadge isCustomer={contact.contactType === "cliente"} />
+              {opportunity.is_outbound && <OutboundBadge />}
             </div>
             <div className="mt-3 flex items-center gap-4 text-xs text-gray-500 dark:text-gray-400 flex-wrap">
               <span className="flex items-center gap-1.5">
@@ -160,6 +169,17 @@ export function OpportunityDialogContent({
           </div>
         </div>
       </header>
+
+      {tagConflictAdvisor && !tagConflictAdvisor.isUnassigned && (
+        <div className="rounded-lg border border-amber-200 dark:border-amber-500/30 bg-amber-50/70 dark:bg-amber-500/5 p-3">
+          <p className="text-xs text-amber-800 dark:text-amber-300">
+            ⚠ Shopify asignó a <strong>{tagConflictAdvisor.fullName}</strong> por su tag, pero se
+            mantuvo el asesor de la entrega{" "}
+            {advisor.isUnassigned ? "" : <strong>({advisor.fullName})</strong>}. Puedes reasignar
+            manualmente si corresponde.
+          </p>
+        </div>
+      )}
 
       {stage.is_lost && (
         <OpportunityLossInfo opportunity={opportunity} lossReason={lossReason} />
@@ -231,6 +251,15 @@ export function OpportunityDialogContent({
             className="px-3 py-1.5 text-sm font-medium rounded-md bg-amber-600 text-white hover:bg-amber-700 transition-colors"
           >
             Marcar caso como resuelto
+          </button>
+        )}
+        {bundle.canHandoffOutbound && (
+          <button
+            type="button"
+            onClick={onHandoff}
+            className="px-3 py-1.5 text-sm font-medium rounded-md bg-cyan-600 text-white hover:bg-cyan-700 transition-colors"
+          >
+            Entregar a vendedor
           </button>
         )}
         <span className="flex-1" />

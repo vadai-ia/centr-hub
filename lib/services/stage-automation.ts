@@ -139,6 +139,19 @@ export function computeStageAutomation(
         "Sumidero del motor de Post-venta (cancelaciones/reembolsos) y destino de reaperturas.",
       );
     }
+  } else if (stage.funnel === "outbound") {
+    // La ÚLTIMA etapa de Outbound (por posición) es la etapa de ENTREGA: desde
+    // ahí el SDR entrega la oportunidad a un vendedor (flip a Venta, Fase 3).
+    // Resuelta por posición (rename/reorder-safe), NUNCA por nombre.
+    const byPositionAsc = [...funnelStages].sort((a, b) => a.position - b.position);
+    const isLast =
+      byPositionAsc.length > 0 &&
+      byPositionAsc[byPositionAsc.length - 1]?.id === stage.id;
+    if (isLast) {
+      reasons.push(
+        "Desde aquí se entrega la oportunidad a un vendedor (pasa al Funnel Venta).",
+      );
+    }
   }
 
   // (C) Reglas de automatización activas que la referencian por nombre.

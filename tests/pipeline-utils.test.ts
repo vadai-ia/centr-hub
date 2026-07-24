@@ -38,6 +38,7 @@ function makeOpp(overrides: Partial<KanbanOpportunity> = {}): KanbanOpportunity 
     resolution_note: null,
     reopened_at: null,
     is_outbound: false,
+    overridden_tag_advisor_id: null,
     contact: {
       id: "contact-1",
       full_name: "Ana Pérez",

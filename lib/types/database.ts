@@ -244,6 +244,10 @@ export interface OpportunityRow {
   // crear la opp (birth-stamping) y al convertir el contacto (solo opps no
   // terminales). El dashboard la usa para el split outbound/inbound.
   is_outbound: boolean;
+  // Conflicto de asesor por tag de Shopify (0043): un tag (draft/orden) intentó
+  // asignar ESTE asesor pero se conservó el de la entrega Outbound (handoff
+  // gana). NULL = sin conflicto. La reasignación manual lo limpia. Informativo.
+  overridden_tag_advisor_id: UUID | null;
 }
 
 export interface OpportunityLineItemRow {
@@ -563,6 +567,7 @@ export interface Database {
           | "lead_source"
           | "inbound_webhook_source_id"
           | "is_outbound"
+          | "overridden_tag_advisor_id"
         > &
           Partial<
             Pick<
@@ -574,6 +579,7 @@ export interface Database {
               | "lead_source"
               | "inbound_webhook_source_id"
               | "is_outbound"
+              | "overridden_tag_advisor_id"
             >
           >;
         Update: Omit<Updatable<OpportunityRow>, "effective_created_at">;

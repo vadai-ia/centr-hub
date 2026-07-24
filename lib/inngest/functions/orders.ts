@@ -35,6 +35,7 @@ import {
   applyPostventaTransition,
   isPostventaEngineEnabled,
 } from "@/lib/services/postventa-transition";
+import { flagOrderTagConflictIfHandoffKept } from "@/lib/services/outbound-handoff";
 import { recordAuditEvent } from "@/lib/db/operational";
 import type { Json, OrderRow, UUID } from "@/lib/types/database";
 
@@ -378,6 +379,17 @@ function makeOrderWorker(args: {
             parentOpportunityId: ventaOpportunityId,
             source: args.topic,
           });
+          // Fase 3: si la opp es outbound y su asesor de ENTREGA se conservó
+          // (0023 solo rellena NULL) frente a un tag de orden distinto, marca
+          // el conflicto para advertir (no cambia el asesor). Non-fatal.
+          try {
+            await flagOrderTagConflictIfHandoffKept({
+              ventaOpportunityId,
+              orderTagAdvisorId: order.assigned_advisor_id,
+            });
+          } catch {
+            // best-effort: la advertencia no debe romper la ingesta del pedido.
+          }
         }
 
         // Motor de transiciones de Post-venta (M3v2): mueve la hija de

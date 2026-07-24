@@ -128,8 +128,8 @@ describe("computeStageAutomation — motor Post-venta", () => {
 });
 
 describe("computeStageAutomation — funnel Outbound NO hereda Post-venta", () => {
-  it("ninguna de las 3 etapas Outbound se marca ligada (Fase 2)", () => {
-    for (const s of OUTBOUND) {
+  it("las etapas NO finales de Outbound no se marcan ligadas (no heredan Post-venta)", () => {
+    for (const s of [O_CONTACTADO, O_REVISION]) {
       const r = computeStageAutomation(s, OUTBOUND);
       expect(r.linked).toBe(false);
       expect(r.reasons).toEqual([]);
@@ -150,6 +150,18 @@ describe("computeStageAutomation — funnel Outbound NO hereda Post-venta", () =
     const r = computeStageAutomation(O_CONTACTADO, OUTBOUND);
     expect(r.reasons.join(" ")).not.toMatch(/F1→F2/);
     expect(r.linked).toBe(false);
+  });
+
+  it("la ÚLTIMA etapa de Outbound SÍ se marca: es la etapa de entrega al vendedor (F3)", () => {
+    const r = computeStageAutomation(O_CALIF, OUTBOUND);
+    expect(r.linked).toBe(true);
+    expect(r.reasons.join(" ")).toMatch(/se entrega la oportunidad a un vendedor/i);
+  });
+
+  it("la etapa de entrega se resuelve por POSICIÓN (rename-safe), no por nombre", () => {
+    const renamed = stage("o-3b", "Nombre arbitrario", 3, "outbound");
+    const list = [O_CONTACTADO, O_REVISION, renamed];
+    expect(computeStageAutomation(renamed, list).linked).toBe(true);
   });
 
   it("el fallback posicional del Post-venta SIGUE intacto (no lo rompió el scoping por funnel)", () => {

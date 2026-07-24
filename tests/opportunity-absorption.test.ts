@@ -29,6 +29,7 @@ const ORG = "org-1";
 const CONTACT = "contact-1";
 const LEAD_NUEVO_STAGE = "stage-lead-nuevo";
 const CONTACTADO_STAGE = "stage-contactado";
+const CALIFICADO_STAGE = "stage-calificado";
 const COTIZACION_STAGE = "stage-cotizacion";
 
 function seedStages() {
@@ -54,6 +55,16 @@ function seedStages() {
       position: 2,
     },
     {
+      id: CALIFICADO_STAGE,
+      organization_id: ORG,
+      funnel: "venta",
+      name: "Contacto calificado",
+      is_initial: false,
+      is_won: false,
+      is_lost: false,
+      position: 3,
+    },
+    {
       id: COTIZACION_STAGE,
       organization_id: ORG,
       funnel: "venta",
@@ -72,6 +83,8 @@ function seedOpp(opts: {
   contactId?: string;
   cancelledAt?: string | null;
   draftOrderId?: string | null;
+  isOutbound?: boolean;
+  assignedAdvisorId?: string | null;
 }) {
   const row = {
     id: opts.id,
@@ -79,7 +92,9 @@ function seedOpp(opts: {
     funnel: "venta",
     stage_id: opts.stageId,
     contact_id: opts.contactId ?? CONTACT,
-    assigned_advisor_id: null,
+    assigned_advisor_id: opts.assignedAdvisorId ?? null,
+    is_outbound: opts.isOutbound ?? false,
+    overridden_tag_advisor_id: null,
     parent_opportunity_id: null,
     shopify_draft_order_id: opts.draftOrderId ?? null,
     shopify_order_id: null,
@@ -245,6 +260,79 @@ describe("absorbInitialStageOpportunities", () => {
 
     const after = fake.getTable("opportunities").find((o) => o.id === withDraft.id)!;
     expect(after.cancelled_at).toBeNull();
+  });
+
+  it("handoff: el asesor de la entrega GANA sobre el tag del draft + marca el conflicto (F3)", async () => {
+    const HANDOFF_ADV = "adv-handoff";
+    const TAG_ADV = "adv-tag";
+    // Opp ENTREGADA desde Outbound: is_outbound + asesor de la entrega, en
+    // "Contacto calificado" (pos 3, sin draft).
+    const handedOff = seedOpp({
+      id: "opp-handed-off",
+      stageId: CALIFICADO_STAGE,
+      isOutbound: true,
+      assignedAdvisorId: HANDOFF_ADV,
+    });
+    // Cotización con asesor DISTINTO (del tag del draft).
+    const cot = seedOpp({
+      id: "opp-cot",
+      stageId: COTIZACION_STAGE,
+      isOutbound: true,
+      assignedAdvisorId: TAG_ADV,
+    });
+
+    await withTenantContext(ORG, async () => {
+      const result = await absorbInitialStageOpportunities({
+        contactId: CONTACT,
+        absorbingOpportunityId: cot.id,
+        trigger: "draft_orders_create",
+      });
+      expect(result.absorbedOpportunityIds).toEqual([handedOff.id]);
+    });
+
+    const opps = fake.getTable("opportunities");
+    const updatedCot = opps.find((o) => o.id === cot.id)!;
+    // El asesor de la entrega gana; el tag queda registrado para advertir.
+    expect(updatedCot.assigned_advisor_id).toBe(HANDOFF_ADV);
+    expect(updatedCot.overridden_tag_advisor_id).toBe(TAG_ADV);
+    // La opp entregada se absorbe (cancela), no se pierde.
+    expect(opps.find((o) => o.id === handedOff.id)!.cancelled_at).toBeTruthy();
+    // Audit del conflicto.
+    const audit = fake.getTable("audit_log");
+    expect(
+      audit.some((a) => a.event_type === "handoff_advisor_kept_over_shopify_tag"),
+    ).toBe(true);
+  });
+
+  it("handoff: la Cotización SIN tag adopta el asesor de la entrega, sin conflicto (F3)", async () => {
+    const HANDOFF_ADV = "adv-handoff";
+    const handedOff = seedOpp({
+      id: "opp-handed-off",
+      stageId: CALIFICADO_STAGE,
+      isOutbound: true,
+      assignedAdvisorId: HANDOFF_ADV,
+    });
+    // Cotización sin asesor (draft sin tag — el caso común).
+    const cot = seedOpp({ id: "opp-cot", stageId: COTIZACION_STAGE, isOutbound: true });
+
+    await withTenantContext(ORG, async () => {
+      await absorbInitialStageOpportunities({
+        contactId: CONTACT,
+        absorbingOpportunityId: cot.id,
+        trigger: "draft_orders_create",
+      });
+    });
+
+    const updatedCot = fake.getTable("opportunities").find((o) => o.id === cot.id)!;
+    expect(updatedCot.assigned_advisor_id).toBe(HANDOFF_ADV);
+    // Adopción sin override → sin conflicto ni advertencia.
+    expect(updatedCot.overridden_tag_advisor_id).toBeNull();
+    const audit = fake.getTable("audit_log");
+    expect(
+      audit.some((a) => a.event_type === "handoff_advisor_kept_over_shopify_tag"),
+    ).toBe(false);
+    // handedOff.id referenced to keep the fixture meaningful.
+    expect(handedOff.id).toBe("opp-handed-off");
   });
 
   it("nunca cancela la opp absorbente aunque estuviera en etapa inicial (defensa edge)", async () => {

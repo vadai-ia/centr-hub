@@ -12,6 +12,7 @@ import {
   type TimelineEvent,
 } from "@/lib/services/timeline";
 import { getOpportunityById } from "@/lib/db/opportunities";
+import { listPipelineStages } from "@/lib/db/pipeline";
 import { getMembership, listActiveRealVendors } from "@/lib/db/users";
 import {
   createTask,
@@ -76,6 +77,9 @@ export interface OpportunityDialogBundle {
   /** Post-venta en "Caso problemático" + no resuelto + (asignado o admin):
    *  habilita "Marcar caso como resuelto" (M3v2 — cierre de caso). */
   canResolveCase: boolean;
+  /** Outbound en la ÚLTIMA etapa + (admin/SDR): habilita "Entregar a
+   *  vendedor" (handoff Outbound→Venta, Fase 3). */
+  canHandoffOutbound: boolean;
   /** Si el caso ya está resuelto, su historia de cierre (para mostrarla en
    *  el detalle aunque esté archivado — sigue consultable). NULL si abierto. */
   resolution: {
@@ -229,6 +233,21 @@ export async function loadOpportunityDetailForDialog(
       };
     }
 
+    // Handoff Outbound→Venta (Fase 3): habilitado para admin/SDR cuando la opp
+    // de Outbound está en su ÚLTIMA etapa (por posición) y no está cancelada.
+    let canHandoffOutbound = false;
+    if (
+      isAdmin &&
+      detail.opportunity.funnel === "outbound" &&
+      detail.opportunity.cancelled_at === null
+    ) {
+      const obStages = (await listPipelineStages("outbound"))
+        .filter((s) => s.is_active)
+        .sort((a, b) => a.position - b.position);
+      const last = obStages[obStages.length - 1];
+      canHandoffOutbound = !!last && detail.opportunity.stage_id === last.id;
+    }
+
     const taskItems: OpportunityTaskItem[] = tasks.map((t) => ({
       id: t.id,
       title: t.title,
@@ -261,6 +280,7 @@ export async function loadOpportunityDetailForDialog(
           detail.contact.shopify_customer_id === null &&
           !!detail.contact.phone,
         canResolveCase,
+        canHandoffOutbound,
         resolution,
         advisors: vendors.map((v) => ({
           membershipId: v.id,

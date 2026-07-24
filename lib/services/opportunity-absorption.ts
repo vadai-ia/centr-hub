@@ -4,6 +4,7 @@ import {
   cancelOpportunity,
   getOpportunityById,
   listOpportunities,
+  updateOpportunity,
 } from "@/lib/db/opportunities";
 import { recordAuditEvent } from "@/lib/db/operational";
 import type { Json, UUID } from "@/lib/types/database";
@@ -121,6 +122,49 @@ export async function absorbInitialStageOpportunities(
   });
   if (candidates.length === 0) {
     return { absorbedOpportunityIds: [] };
+  }
+
+  // Handoff advisor gana (Fase 3): si entre los absorbidos hay una opp
+  // ENTREGADA desde Outbound (is_outbound + con asesor), el asesor de la
+  // ENTREGA gana sobre el tag del draft en la Cotización absorbente. Se toma
+  // el candidato outbound-asignado más AVANZADO (la opp entregada vive en
+  // "Contacto calificado", más avanzada que un Lead nuevo). Si el draft trajo
+  // un asesor DISTINTO, se conserva el de la entrega y se marca el conflicto
+  // para advertir (assignment sigue editable manualmente).
+  const handoffOpp = candidates
+    .filter((o) => o.is_outbound && o.assigned_advisor_id)
+    .sort(
+      (a, b) =>
+        (positionByStage.get(b.stage_id) ?? 0) - (positionByStage.get(a.stage_id) ?? 0),
+    )[0];
+  if (handoffOpp?.assigned_advisor_id && absorbing) {
+    const handoffAdvisor = handoffOpp.assigned_advisor_id;
+    const tagAdvisor = absorbing.assigned_advisor_id;
+    if (handoffAdvisor !== tagAdvisor) {
+      await updateOpportunity(absorbing.id, {
+        assigned_advisor_id: handoffAdvisor,
+        // NULL si el draft no traía tag → adopción sin conflicto real; el id
+        // del tag si hubo override (alimenta la advertencia en la UI).
+        overridden_tag_advisor_id: tagAdvisor,
+        last_modified_at: new Date().toISOString(),
+        last_modified_source: "platform",
+      });
+      if (tagAdvisor) {
+        await recordAuditEvent({
+          actorUserId: null,
+          eventType: "handoff_advisor_kept_over_shopify_tag",
+          entityType: "opportunity",
+          entityId: absorbing.id,
+          payload: {
+            absorbing_opportunity_id: absorbing.id,
+            handoff_opportunity_id: handoffOpp.id,
+            handoff_advisor_id: handoffAdvisor,
+            shopify_tag_advisor_id: tagAdvisor,
+            contact_id: input.contactId,
+          } as Json,
+        });
+      }
+    }
   }
 
   const absorbed: UUID[] = [];

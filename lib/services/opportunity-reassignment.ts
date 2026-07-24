@@ -66,6 +66,9 @@ export async function reassignOpportunityAdvisor(input: {
   try {
     await updateOpportunity(input.opportunityId, {
       assigned_advisor_id: input.newMembershipId,
+      // Reasignar manualmente resuelve cualquier conflicto de tag de Shopify
+      // (handoff vs tag, 0043): el humano decidió → se limpia la advertencia.
+      overridden_tag_advisor_id: null,
       last_modified_at: nowIso,
       last_modified_source: "platform",
     });
@@ -95,6 +98,7 @@ export async function reassignOpportunityAdvisor(input: {
     try {
       await updateOpportunity(input.opportunityId, {
         assigned_advisor_id: snapshot.assigned_advisor_id,
+        overridden_tag_advisor_id: snapshot.overridden_tag_advisor_id,
         last_modified_at: snapshot.last_modified_at,
         last_modified_source: snapshot.last_modified_source,
       });

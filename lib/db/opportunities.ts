@@ -338,6 +338,10 @@ export interface KanbanOpportunity {
   reopened_at: string | null;
   /** Marca outbound denormalizada (0040) — badge visible a todos los roles. */
   is_outbound: boolean;
+  /** Conflicto de asesor por tag de Shopify (0043) — alimenta la advertencia
+   *  "Shopify asignó otro asesor; se mantuvo el de la entrega". NULL = sin
+   *  conflicto. */
+  overridden_tag_advisor_id: UUID | null;
   contact: KanbanContactEmbed | null;
 }
 
@@ -363,6 +367,7 @@ const KANBAN_OPPORTUNITY_SELECT = `
   resolution_note,
   reopened_at,
   is_outbound,
+  overridden_tag_advisor_id,
   contact:contacts!inner (
     id,
     full_name,

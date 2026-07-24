@@ -118,6 +118,14 @@ export function KanbanCard({
             <TasksBadge count={pendingTasksCount} />
           )}
           {opp.is_outbound && <OutboundBadge />}
+          {opp.overridden_tag_advisor_id && (
+            <span
+              title="Shopify asignó otro asesor por su tag; se mantuvo el asesor de la entrega. Abre la oportunidad para ver el detalle."
+              className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded font-medium flex-shrink-0 bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300"
+            >
+              ⚠ Asesor
+            </span>
+          )}
           <ContactTypeBadge isCustomer={isCustomer} />
         </div>
       </div>

@@ -14,6 +14,7 @@ import { emptyStructuredAddress } from "@/lib/contacts/address";
 import { AddNoteDialog } from "./add-note-dialog";
 import { CreateTaskDialog } from "./create-task-dialog";
 import { ResolveCaseDialog } from "./resolve-case-dialog";
+import { HandoffDialog } from "./handoff-dialog";
 import { OpportunityDialogContent } from "./opportunity-dialog-content";
 
 interface Props {
@@ -53,6 +54,7 @@ export function OpportunityDialog({ paramName = "opp" }: Props) {
   const [noteOpen, setNoteOpen] = useState(false);
   const [taskOpen, setTaskOpen] = useState(false);
   const [resolveOpen, setResolveOpen] = useState(false);
+  const [handoffOpen, setHandoffOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const requestSeq = useRef(0);
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -178,6 +180,7 @@ export function OpportunityDialog({ paramName = "opp" }: Props) {
             onReassign={() => setReassignOpen(true)}
             onCreateInShopify={() => setShopifyDialogOpen(true)}
             onResolveCase={() => setResolveOpen(true)}
+            onHandoff={() => setHandoffOpen(true)}
             onTasksChanged={() => {
               if (oppId) {
                 void loadOpportunityDetailForDialog({ opportunityId: oppId }).then((res) => {
@@ -258,6 +261,22 @@ export function OpportunityDialog({ paramName = "opp" }: Props) {
           setTimeout(() => setToast(null), 3500);
           // El caso resuelto sale del pipeline activo → cerrar el popup y
           // refrescar el tablero detrás (la card desaparece de la vista activa).
+          closeDialog();
+          router.refresh();
+        }}
+      />
+
+      <HandoffDialog
+        open={handoffOpen}
+        opportunityId={bundle?.detail.opportunity.id ?? null}
+        advisors={bundle?.advisors ?? []}
+        onCancel={() => setHandoffOpen(false)}
+        onSuccess={(msg) => {
+          setHandoffOpen(false);
+          setToast(msg);
+          setTimeout(() => setToast(null), 3500);
+          // La opp salió de Outbound (pasó a Venta) → cerrar el popup y
+          // refrescar el tablero detrás (la card desaparece del Outbound).
           closeDialog();
           router.refresh();
         }}
