@@ -53,6 +53,14 @@ const P_ENTREGADO = stage("p-4", "Entregado", 4, "post_venta");
 const P_PROBLEMA = stage("p-5", "Caso problemático", 5, "post_venta");
 const POSTVENTA = [P_COTIZ_COMPL, P_PAGO, P_ENVIO, P_ENTREGADO, P_PROBLEMA];
 
+// Funnel Outbound (Fase 1). Sus 3 etapas comparten POSICIÓN con las zonas del
+// motor Post-venta, pero NO deben heredar su automatización (bug del fallback
+// posicional cruzando funnels).
+const O_CONTACTADO = stage("o-1", "Cliente contactado", 1, "outbound", { is_initial: true });
+const O_REVISION = stage("o-2", "Revisión agendada", 2, "outbound");
+const O_CALIF = stage("o-3", "Cliente calificado", 3, "outbound");
+const OUTBOUND = [O_CONTACTADO, O_REVISION, O_CALIF];
+
 describe("computeStageAutomation — flags estructurales", () => {
   it("marca is_initial de venta (auto-creación C2)", () => {
     const r = computeStageAutomation(V_LEAD, VENTA);
@@ -116,6 +124,38 @@ describe("computeStageAutomation — motor Post-venta", () => {
     const r = computeStageAutomation(P_PROBLEMA, POSTVENTA);
     expect(r.linked).toBe(true);
     expect(r.reasons.join(" ")).toMatch(/Sumidero/i);
+  });
+});
+
+describe("computeStageAutomation — funnel Outbound NO hereda Post-venta", () => {
+  it("ninguna de las 3 etapas Outbound se marca ligada (Fase 2)", () => {
+    for (const s of OUTBOUND) {
+      const r = computeStageAutomation(s, OUTBOUND);
+      expect(r.linked).toBe(false);
+      expect(r.reasons).toEqual([]);
+    }
+  });
+
+  it("'Revisión agendada' (pos 2) NO hereda la zona 'Pago confirmado' del motor Post-venta", () => {
+    const r = computeStageAutomation(O_REVISION, OUTBOUND);
+    expect(r.reasons.join(" ")).not.toMatch(/motor automático de Post-venta/i);
+  });
+
+  it("'Cliente calificado' (última) NO hereda el sumidero de cancelaciones/reembolsos", () => {
+    const r = computeStageAutomation(O_CALIF, OUTBOUND);
+    expect(r.reasons.join(" ")).not.toMatch(/Sumidero/i);
+  });
+
+  it("'Cliente contactado' (is_initial de Outbound) NO hereda el destino F1→F2 del Post-venta", () => {
+    const r = computeStageAutomation(O_CONTACTADO, OUTBOUND);
+    expect(r.reasons.join(" ")).not.toMatch(/F1→F2/);
+    expect(r.linked).toBe(false);
+  });
+
+  it("el fallback posicional del Post-venta SIGUE intacto (no lo rompió el scoping por funnel)", () => {
+    const renamed = stage("p-2b", "Nombre arbitrario", 2, "post_venta");
+    const list = [P_COTIZ_COMPL, renamed, P_ENVIO, P_ENTREGADO, P_PROBLEMA];
+    expect(computeStageAutomation(renamed, list).linked).toBe(true);
   });
 });
 

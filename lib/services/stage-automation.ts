@@ -84,11 +84,16 @@ export function computeStageAutomation(
 
   // (A) Flags estructurales.
   if (stage.is_initial) {
-    reasons.push(
-      stage.funnel === "venta"
-        ? "Recibe la auto-creación de oportunidades nuevas (Lead nuevo / C2)."
-        : "Es el destino de la oportunidad de Post-venta que crea el cierre de venta (F1→F2).",
-    );
+    // El significado de "etapa inicial" es POR FUNNEL — NO asumir que todo lo
+    // no-venta es Post-venta (Outbound también tiene su etapa inicial).
+    if (stage.funnel === "venta") {
+      reasons.push("Recibe la auto-creación de oportunidades nuevas (Lead nuevo / C2).");
+    } else if (stage.funnel === "post_venta") {
+      reasons.push("Es el destino de la oportunidad de Post-venta que crea el cierre de venta (F1→F2).");
+    }
+    // Outbound: la etapa inicial recibe altas manuales del SDR, pero se resuelve
+    // por el flag is_initial (no por nombre) y el invariante "una inicial por
+    // funnel" ya la protege — sin fragilidad por nombre → no se marca ligada.
   }
   if (stage.is_won) {
     reasons.push(
@@ -110,8 +115,11 @@ export function computeStageAutomation(
     if (name === normalizeName(VENTA_AUTOMATION_STAGE_NAMES.calificado)) {
       reasons.push('Frontera "calificado" que usa el dashboard para sus métricas.');
     }
-  } else {
+  } else if (stage.funnel === "post_venta") {
     // Post-venta: motor automático por nombre O por posición 1..4.
+    // IMPORTANTE: el fallback POSICIONAL vive DENTRO de esta rama por funnel —
+    // nunca cruza funnels. Un stage de Outbound en la posición N NO hereda la
+    // zona N del Post-venta (bug: antes el `else` capturaba todo lo no-venta).
     const byPositionAsc = [...funnelStages].sort((a, b) => a.position - b.position);
     const posIndex = byPositionAsc.findIndex((s) => s.id === stage.id);
     const isZoneByName = POSTVENTA_ENGINE_ZONE_NAMES.some(
