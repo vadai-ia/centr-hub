@@ -191,6 +191,8 @@ export interface ContactListRow {
   shopify_customer_id: string | null;
   whaapy_contact_id: string | null;
   contactType: "lead" | "cliente";
+  /** Marca outbound (0040) — badge visible a TODOS los roles. */
+  is_outbound: boolean;
   assigned_advisor_id: UUID | null;
   last_modified_at: ISODateString;
   last_whaapy_activity_at: ISODateString | null;
@@ -378,7 +380,7 @@ export async function searchContactsForList(
     .from("contacts")
     .select(
       "id, full_name, email, phone, shopify_customer_id, whaapy_contact_id, " +
-      "assigned_advisor_id, last_modified_at, last_whaapy_activity_at, " +
+      "is_outbound, assigned_advisor_id, last_modified_at, last_whaapy_activity_at, " +
       "missing_phone, deleted_in_shopify, deleted_in_whaapy, anonymized_at",
     )
     .eq("organization_id", organizationId)

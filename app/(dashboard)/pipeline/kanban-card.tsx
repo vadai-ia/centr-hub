@@ -4,6 +4,7 @@ import { CSS } from "@dnd-kit/utilities";
 import type { KanbanOpportunity } from "@/lib/db/opportunities";
 import type { AdvisorOption } from "@/lib/types/pipeline";
 import type { UUID } from "@/lib/types/database";
+import { OutboundBadge } from "@/components/outbound/outbound-badge";
 import {
   contactDisplayName,
   contactIsCustomer,
@@ -116,6 +117,7 @@ export function KanbanCard({
           {pendingTasksCount !== undefined && pendingTasksCount > 0 && (
             <TasksBadge count={pendingTasksCount} />
           )}
+          {opp.is_outbound && <OutboundBadge />}
           <ContactTypeBadge isCustomer={isCustomer} />
         </div>
       </div>

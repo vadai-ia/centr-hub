@@ -140,6 +140,10 @@ export class FakeSupabase {
         state.filters.push({ field, op: "eq", value });
         return builder;
       },
+      is(field: string, value: unknown) {
+        state.filters.push({ field, op: "is", value });
+        return builder;
+      },
       select(_cols?: string) {
         return builder;
       },

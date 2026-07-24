@@ -10,6 +10,7 @@ import {
   resolveAdvisor,
   systemIndicators,
 } from "../utils";
+import { OutboundBadge } from "@/components/outbound/outbound-badge";
 
 interface Props {
   detail: ContactDetail;
@@ -93,6 +94,7 @@ export function ContactHeader({
             <SystemBadge kind="shopify" active={indicators.inShopify} />
             <SystemBadge kind="whaapy" active={indicators.inWhaapy} />
             <ContactTypeBadge isCustomer={contactType === "cliente"} />
+            {contact.is_outbound && <OutboundBadge />}
             {contact.missing_phone && (
               <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">
                 Sin teléfono

@@ -25,10 +25,11 @@ import {
   listOrgAdminUserIds,
 } from "@/lib/db/operational";
 import { recordWhaapySyncIntent } from "@/lib/inngest/functions/customers";
+import { setContactOutbound } from "@/lib/services/outbound-mark";
 import { structuredAddressToJson } from "@/lib/contacts/address";
 import type { StructuredAddress } from "@/lib/contacts/address";
 import { DEFAULT_CURRENCY } from "@/lib/constants";
-import type { ContactRow, Json, UUID } from "@/lib/types/database";
+import type { ContactRow, Funnel, Json, UUID } from "@/lib/types/database";
 
 /**
  * Camino CANÓNICO de creación de leads (Track 1).
@@ -86,6 +87,13 @@ export interface CreateLeadInput {
   inboundWebhookSourceId?: UUID | null;
   /** Usuario que crea (manual). NULL para webhook (server-to-server). */
   actorUserId?: UUID | null;
+  /**
+   * Funnel donde nace el lead. Default "venta". "outbound" (Fase 2) lo crea
+   * en el funnel Outbound del SDR, MARCA el contacto como outbound y propaga
+   * la marca a sus opps no terminales. Como el SDR no es asesor asignable, la
+   * opp Outbound nace sin asignar (el caller pasa assignment explícito null).
+   */
+  channel?: "venta" | "outbound";
 }
 
 export interface CreateLeadResult {
@@ -101,6 +109,9 @@ export interface CreateLeadResult {
 
 export async function createLead(input: CreateLeadInput): Promise<CreateLeadResult> {
   const organizationId = getCurrentOrganizationId();
+  // Funnel donde nace el lead (Fase 2). "outbound" cambia la etapa inicial,
+  // el guard de opp activa, el funnel de la opp y marca el contacto outbound.
+  const leadFunnel: Funnel = input.channel === "outbound" ? "outbound" : "venta";
 
   // 1. Validación de invariantes (nombre + teléfono obligatorios; el
   //    teléfono debe normalizar a E.164 — Whaapy lo exige). Los callers
@@ -185,29 +196,44 @@ export async function createLead(input: CreateLeadInput): Promise<CreateLeadResu
     });
   }
 
-  // 4. Oportunidad "Lead nuevo" — guard R12: respeta una opp activa existente.
+  // 3.5 Canal Outbound: marcar el contacto como outbound y propagar a sus
+  //     opps NO terminales ANTES de crear la opp, para que el birth-stamping
+  //     de la opp nueva la lea true. Idempotente si ya estaba marcado (un
+  //     contacto existente que el SDR vuelve a meter a Outbound).
+  if (leadFunnel === "outbound") {
+    contact = await setContactOutbound({
+      contactId: contact.id,
+      value: true,
+      actorUserId: input.actorUserId ?? null,
+    });
+  }
+
+  // 4. Oportunidad inicial — guard R12: respeta una opp activa existente en
+  //    el MISMO funnel (un contacto puede tener opp de Venta y de Outbound).
   let opportunityId: UUID | null = null;
   let opportunityCreated = false;
   let skipReason: CreateLeadResult["skipReason"];
 
-  const initialStage = await getInitialStage("venta");
+  const initialStage = await getInitialStage(leadFunnel);
   if (!initialStage) {
     skipReason = "no_initial_stage";
   } else {
     const activeOpps = await listOpportunities({
-      funnel: "venta",
+      funnel: leadFunnel,
       contactId: contact.id,
     });
     const blocking = activeOpps.find((opp) => isBlockingOpportunity(opp));
     if (blocking) {
-      // Respeta dónde está: no se crea Lead nuevo duplicado.
+      // Respeta dónde está: no se crea opp duplicada en este funnel.
       skipReason = "active_opportunity_exists";
     } else {
       const opp = await createOpportunity({
-        funnel: "venta",
+        funnel: leadFunnel,
         stage_id: initialStage.id,
         contact_id: contact.id,
-        assigned_advisor_id: effectiveAdvisorId,
+        // Outbound nace SIN asignar: el SDR no es asesor y el vendedor se
+        // elige en el handoff (Fase 3), aunque el contacto ya tuviera asesor.
+        assigned_advisor_id: leadFunnel === "outbound" ? null : effectiveAdvisorId,
         // Marca outbound denormalizada del contacto (0040 — birth-stamping).
         is_outbound: contact.is_outbound,
         parent_opportunity_id: null,

@@ -22,6 +22,7 @@ function row(overrides: Partial<ContactListRow> = {}): ContactListRow {
     shopify_customer_id: null,
     whaapy_contact_id: null,
     contactType: "lead",
+    is_outbound: false,
     assigned_advisor_id: null,
     last_modified_at: "2026-05-01T10:00:00.000Z",
     last_whaapy_activity_at: null,

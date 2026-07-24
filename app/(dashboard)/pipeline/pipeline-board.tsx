@@ -35,6 +35,7 @@ import { KanbanCard } from "./kanban-card";
 import { KanbanColumn } from "./kanban-column";
 import { LossReasonModal } from "./loss-reason-modal";
 import { PipelineToolbar } from "./pipeline-toolbar";
+import { CreateLeadButton } from "@/components/leads/create-lead-dialog";
 import { PipelineToastStack } from "./pipeline-toast";
 import { useToastStack } from "./use-toast-stack";
 import { usePipelineRealtime, type RealtimeStatus } from "./use-pipeline-realtime";
@@ -590,6 +591,15 @@ export function PipelineBoard({
         resolvedView={resolvedView}
         onResolvedViewToggle={changeResolvedView}
       />
+
+      {/* Alta manual de lead en Outbound (solo funnel Outbound, que ya
+          está gateado a admin/SDR). Dedup por identidad: convierte a un
+          contacto inbound existente si el teléfono coincide. */}
+      {funnel === "outbound" && canSeeAll && (
+        <div className="flex justify-end mb-2">
+          <CreateLeadButton outbound />
+        </div>
+      )}
 
       <PipelineFiltersBar
         filters={filters}

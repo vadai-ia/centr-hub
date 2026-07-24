@@ -336,6 +336,8 @@ export interface KanbanOpportunity {
   resolved_by_user_id: UUID | null;
   resolution_note: string | null;
   reopened_at: string | null;
+  /** Marca outbound denormalizada (0040) — badge visible a todos los roles. */
+  is_outbound: boolean;
   contact: KanbanContactEmbed | null;
 }
 
@@ -360,6 +362,7 @@ const KANBAN_OPPORTUNITY_SELECT = `
   resolved_by_user_id,
   resolution_note,
   reopened_at,
+  is_outbound,
   contact:contacts!inner (
     id,
     full_name,

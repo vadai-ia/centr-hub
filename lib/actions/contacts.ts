@@ -1,7 +1,7 @@
 "use server";
 import { z } from "zod";
 import { getSession } from "@/lib/auth/session";
-import { canSeeAllData, type RoleCapabilities } from "@/lib/auth/capabilities";
+import { canSeeAllData, canAccessAdminPanel, type RoleCapabilities } from "@/lib/auth/capabilities";
 import { withTenantContext } from "@/lib/tenant/context";
 import {
   getContactById,
@@ -320,6 +320,10 @@ export interface ContactDetailBundle {
   canEdit: boolean;
   /** True si el caller puede ver el botón "Reasignar asesor". */
   canReassign: boolean;
+  /** True si el caller puede meter el contacto a Outbound (admin/SDR). */
+  canManageOutbound: boolean;
+  /** True si el caller puede QUITAR la marca outbound (corrección admin). */
+  canUnsetOutbound: boolean;
 }
 
 export type LoadContactDetailResult =
@@ -410,6 +414,8 @@ export async function loadContactDetail(opts: {
         selfMembershipId: membership?.id ?? null,
         canEdit: isAdmin || detail.contact.assigned_advisor_id === membership?.id,
         canReassign: isAdmin,
+        canManageOutbound: isAdmin, // canSeeAll (admin/SDR)
+        canUnsetOutbound: canAccessAdminPanel(session.data.activeRole),
         advisors: vendors.map((v) => ({
           membershipId: v.id,
           userId: v.user_id,

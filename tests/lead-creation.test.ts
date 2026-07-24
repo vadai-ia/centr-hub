@@ -39,12 +39,14 @@ import { recordWhaapySyncIntent } from "@/lib/inngest/functions/customers";
 
 const ORG = "org-1";
 const INITIAL_STAGE = "stage-lead-nuevo";
+const OUTBOUND_STAGE = "stage-cliente-contactado";
 const ADV = "adv-1";
 const PHONE = "+525512345678";
 
 function seedStages() {
   fake.setTable("pipeline_stages", [
     { id: INITIAL_STAGE, organization_id: ORG, funnel: "venta", name: "Lead nuevo", is_initial: true },
+    { id: OUTBOUND_STAGE, organization_id: ORG, funnel: "outbound", name: "Cliente contactado", is_initial: true },
   ]);
 }
 
@@ -307,5 +309,99 @@ describe("createLead — casos de validación", () => {
         }),
       ),
     ).rejects.toMatchObject({ code: "advisor_not_eligible" });
+  });
+});
+
+describe("createLead — canal Outbound (Fase 2)", () => {
+  it("contacto NUEVO: marca outbound + opp en funnel outbound SIN asignar", async () => {
+    vi.mocked(matchLeadIdentity).mockResolvedValue({
+      recommendation: "create_new",
+      match: null,
+      normalizedPhone: PHONE,
+      normalizedEmail: null,
+    });
+
+    const res = await withTenantContext(ORG, () =>
+      createLead({
+        fullName: "Prospecto SDR",
+        phone: PHONE,
+        assignment: { mode: "explicit", advisorId: null },
+        source: "manual",
+        actorUserId: "sdr-1",
+        channel: "outbound",
+      }),
+    );
+
+    expect(res.opportunityCreated).toBe(true);
+    const opps = fake.getTable("opportunities");
+    expect(opps).toHaveLength(1);
+    expect(opps[0].funnel).toBe("outbound");
+    expect(opps[0].stage_id).toBe(OUTBOUND_STAGE);
+    expect(opps[0].is_outbound).toBe(true);
+    // El SDR no es asignable: la opp Outbound nace sin asesor.
+    expect(opps[0].assigned_advisor_id).toBeNull();
+
+    const contact = fake.getTable("contacts").find((c) => c.id === res.contactId);
+    expect(contact?.is_outbound).toBe(true);
+    const audit = fake.getTable("audit_log");
+    expect(audit.some((a) => a.event_type === "contact_marked_outbound")).toBe(true);
+  });
+
+  it("contacto INBOUND existente: convierte y propaga SOLO a opps no terminales", async () => {
+    const ex = existingContact({ id: "ex-2", assigned_advisor_id: ADV });
+    fake.setTable("contacts", [{ ...ex }]);
+    fake.setTable("opportunities", [
+      {
+        id: "opp-venta-activa",
+        organization_id: ORG,
+        funnel: "venta",
+        contact_id: "ex-2",
+        stage_id: INITIAL_STAGE,
+        is_outbound: false,
+        won_at: null,
+        lost_at: null,
+        cancelled_at: null,
+        assigned_advisor_id: ADV,
+      },
+      {
+        id: "opp-venta-ganada",
+        organization_id: ORG,
+        funnel: "venta",
+        contact_id: "ex-2",
+        stage_id: "won",
+        is_outbound: false,
+        won_at: "2026-01-01T00:00:00Z",
+        lost_at: null,
+        cancelled_at: null,
+        assigned_advisor_id: ADV,
+      },
+    ]);
+    vi.mocked(matchLeadIdentity).mockResolvedValue({
+      recommendation: "link_existing",
+      match: ex,
+      normalizedPhone: PHONE,
+      normalizedEmail: null,
+    });
+
+    await withTenantContext(ORG, () =>
+      createLead({
+        fullName: "Existente",
+        phone: PHONE,
+        assignment: { mode: "explicit", advisorId: null },
+        source: "manual",
+        actorUserId: "sdr-1",
+        channel: "outbound",
+      }),
+    );
+
+    const opps = fake.getTable("opportunities");
+    // No terminal → hereda la marca; ganada → conserva su categoría (solo
+    // activas y futuras).
+    expect(opps.find((o) => o.id === "opp-venta-activa")?.is_outbound).toBe(true);
+    expect(opps.find((o) => o.id === "opp-venta-ganada")?.is_outbound).toBe(false);
+    // Contacto marcado outbound.
+    expect(fake.getTable("contacts").find((c) => c.id === "ex-2")?.is_outbound).toBe(true);
+    // Y nace una opp nueva en Outbound (el contacto no tenía opp Outbound activa).
+    expect(opps.some((o) => o.funnel === "outbound" && o.is_outbound === true)).toBe(true);
   });
 });

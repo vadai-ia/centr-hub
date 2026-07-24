@@ -180,6 +180,11 @@ export async function loadKanbanPageAction(
   // Sustituye al viejo isAdmin por dato-scope (0039).
   const isAdmin = canSeeAllData(session.data.activeRole);
 
+  // Gate del funnel Outbound: solo roles con data_scope='all'.
+  if (input.funnel === "outbound" && !isAdmin) {
+    return { ok: false, reason: "forbidden_funnel", message: "No tienes acceso a este funnel." };
+  }
+
   // Defensa multi-tenant + role: si el caller es vendedor, ignorar
   // `assignedAdvisorId` explícito y forzar al membership del usuario.
   return withTenantContext(orgId, async () => {
@@ -400,6 +405,13 @@ export async function reopenOpportunityAction(
  */
 export async function setActiveFunnelPreference(funnel: Funnel): Promise<void> {
   if (!FUNNELS.includes(funnel)) return;
+  // El funnel Outbound solo es visible/seleccionable por roles con
+  // data_scope='all' (admin/superadmin/SDR). Un vendedor no lo persiste
+  // (defensa: aunque la UI no le muestre la pestaña).
+  if (funnel === "outbound") {
+    const session = await getSession();
+    if (session.status !== "ok" || !canSeeAllData(session.data.activeRole)) return;
+  }
   cookies().set(PIPELINE_FUNNEL_COOKIE, funnel, {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
@@ -457,6 +469,12 @@ export async function loadInitialPipelineState(opts: {
   // "Sees all data" (admin/superadmin/SDR) vs "own only" (vendedor).
   // Sustituye al viejo isAdmin por dato-scope (0039).
   const isAdmin = canSeeAllData(session.data.activeRole);
+
+  // Gate del funnel Outbound: solo roles con data_scope='all'. Defensa de
+  // capa de datos — la UI ya oculta la pestaña a vendedores.
+  if (opts.funnel === "outbound" && !isAdmin) {
+    return { ok: false, reason: "forbidden_funnel" };
+  }
 
   return withTenantContext(orgId, async () => {
     let effectiveAdvisorId: UUID | null | undefined;

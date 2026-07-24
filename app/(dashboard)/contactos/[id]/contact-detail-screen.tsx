@@ -10,6 +10,7 @@ import {
 import { ReassignAdvisorDialog } from "@/components/contacts/reassign-advisor-dialog";
 import { parseStoredAddress } from "@/lib/contacts/address";
 import { ContactHeader } from "./contact-header";
+import { OutboundContactActions } from "@/components/outbound/outbound-contact-actions";
 import { ContactIndicators } from "./contact-indicators";
 import { ContactOpportunities } from "./contact-opportunities";
 import { ContactTimeline } from "./contact-timeline";
@@ -70,6 +71,13 @@ export function ContactDetailScreen({ bundle }: Props) {
         }}
         onReassign={() => setReassignOpen(true)}
         onCreateInShopify={() => setShopifyDialogOpen(true)}
+      />
+
+      <OutboundContactActions
+        contactId={bundle.detail.contact.id}
+        isOutbound={bundle.detail.contact.is_outbound}
+        canManage={bundle.canManageOutbound}
+        canUnset={bundle.canUnsetOutbound}
       />
 
       <ContactIndicators indicators={bundle.detail.indicators} />

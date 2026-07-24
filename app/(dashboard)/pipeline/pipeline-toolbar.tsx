@@ -94,6 +94,16 @@ export function PipelineToolbar({
         aria-label="Funnel activo"
         className="inline-flex rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-0.5"
       >
+        {/* Outbound: solo roles con data_scope='all' (admin/superadmin/SDR).
+            Los vendedores nunca ven esta pestaña. */}
+        {canSeeAll && (
+          <FunnelTab
+            label="Outbound"
+            isActive={funnel === "outbound"}
+            onClick={() => selectFunnel("outbound")}
+            disabled={isPending && funnel !== "outbound"}
+          />
+        )}
         <FunnelTab
           label="Venta"
           isActive={funnel === "venta"}

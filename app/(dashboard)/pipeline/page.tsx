@@ -30,10 +30,14 @@ export default async function PipelinePage() {
 
   const isAdmin = canSeeAllData(session.data.activeRole);
 
-  const [funnel, unassignedRaw] = await Promise.all([
+  const [rawFunnel, unassignedRaw] = await Promise.all([
     readFunnelPreference(),
     readUnassignedFilterPreference(),
   ]);
+  // El funnel Outbound solo es visible para roles con data_scope='all'. Si
+  // un vendedor tuviera una cookie 'outbound' (heredada al cambiar de rol),
+  // se coacciona a 'venta' para no aterrizar en la pantalla de error.
+  const funnel = rawFunnel === "outbound" && !isAdmin ? "venta" : rawFunnel;
   const unassignedFilter = isAdmin && unassignedRaw;
 
   const initial = await loadInitialPipelineState({ funnel, unassignedFilter });

@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import {
   loadLeadFormData,
   createManualLeadAction,
+  createOutboundLeadAction,
   type LeadAdvisorOption,
 } from "@/lib/actions/leads";
 
@@ -12,8 +13,13 @@ import {
  * cualquier usuario autenticado. Nombre y teléfono obligatorios; email y
  * dirección opcionales; se elige el asesor. Reusa `createManualLeadAction`
  * (camino canónico). Se puede montar en cualquier header (Contactos).
+ *
+ * `outbound` (Fase 2): variante para el pipeline Outbound (solo admin/SDR).
+ * Sin selección de asesor (el SDR no es asignable — se elige en el handoff);
+ * marca el contacto como outbound y lo crea en el funnel Outbound. Dedup por
+ * identidad: si el contacto ya existía (inbound), lo enlaza y lo convierte.
  */
-export function CreateLeadButton() {
+export function CreateLeadButton({ outbound = false }: { outbound?: boolean }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [advisors, setAdvisors] = useState<LeadAdvisorOption[]>([]);
@@ -31,7 +37,7 @@ export function CreateLeadButton() {
   const [success, setSuccess] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || outbound) return; // Outbound no elige asesor.
     setLoadingAdvisors(true);
     loadLeadFormData().then((res) => {
       setLoadingAdvisors(false);
@@ -76,13 +82,20 @@ export function CreateLeadButton() {
             country: addr.country.trim() || undefined,
           }
         : null;
-    const res = await createManualLeadAction({
-      name: name.trim(),
-      phone: phone.trim(),
-      email: email.trim() || null,
-      advisorId: advisorId || null,
-      address,
-    });
+    const res = outbound
+      ? await createOutboundLeadAction({
+          name: name.trim(),
+          phone: phone.trim(),
+          email: email.trim() || null,
+          address,
+        })
+      : await createManualLeadAction({
+          name: name.trim(),
+          phone: phone.trim(),
+          email: email.trim() || null,
+          advisorId: advisorId || null,
+          address,
+        });
     setSubmitting(false);
     if (!res.ok) {
       setError(res.message);
@@ -115,7 +128,7 @@ export function CreateLeadButton() {
             className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full p-6 max-h-[90vh] overflow-y-auto"
           >
             <p id="create-lead-title" className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-              Nuevo lead
+              {outbound ? "Nuevo lead — Outbound" : "Nuevo lead"}
             </p>
 
             {success ? (
@@ -182,24 +195,26 @@ export function CreateLeadButton() {
                   />
                 </label>
 
-                <label className="block">
-                  <span className="block text-xs font-medium text-gray-600 dark:text-gray-300 mb-1">Asesor</span>
-                  <select
-                    value={advisorId}
-                    onChange={(e) => setAdvisorId(e.target.value)}
-                    disabled={submitting || loadingAdvisors}
-                    className="w-full rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-700 text-sm px-2 py-1.5 text-gray-900 dark:text-gray-100"
-                  >
-                    <option value="">
-                      {loadingAdvisors ? "Cargando..." : advisors.length ? "Sin asignar" : "No hay vendedores"}
-                    </option>
-                    {advisors.map((a) => (
-                      <option key={a.id} value={a.id}>
-                        {a.name}
+                {!outbound && (
+                  <label className="block">
+                    <span className="block text-xs font-medium text-gray-600 dark:text-gray-300 mb-1">Asesor</span>
+                    <select
+                      value={advisorId}
+                      onChange={(e) => setAdvisorId(e.target.value)}
+                      disabled={submitting || loadingAdvisors}
+                      className="w-full rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-700 text-sm px-2 py-1.5 text-gray-900 dark:text-gray-100"
+                    >
+                      <option value="">
+                        {loadingAdvisors ? "Cargando..." : advisors.length ? "Sin asignar" : "No hay vendedores"}
                       </option>
-                    ))}
-                  </select>
-                </label>
+                      {advisors.map((a) => (
+                        <option key={a.id} value={a.id}>
+                          {a.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
 
                 {!showAddress ? (
                   <button

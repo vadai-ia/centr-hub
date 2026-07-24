@@ -10,6 +10,7 @@ import {
   resolveAdvisor,
   systemIndicators,
 } from "./utils";
+import { OutboundBadge } from "@/components/outbound/outbound-badge";
 
 interface Props {
   row: ContactListRow;
@@ -97,6 +98,7 @@ export function ContactRow({ row, advisors, derivedAdvisor }: Props) {
       {/* Columna 2: badges de tipo (fija) */}
       <div className="hidden md:flex items-center gap-1 justify-start">
         <ContactTypeBadge isCustomer={isCustomer} />
+        {row.is_outbound && <OutboundBadge />}
       </div>
 
       {/* Columna 3: presencia en sistemas externos (fija) */}
