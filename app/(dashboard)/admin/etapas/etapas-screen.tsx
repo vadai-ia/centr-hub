@@ -12,6 +12,7 @@ import { StageList } from "./stage-list";
 import { StageFormModal } from "./stage-form-modal";
 
 interface Props {
+  initialOutbound: StageAdminView[];
   initialVenta: StageAdminView[];
   initialPostVenta: StageAdminView[];
 }
@@ -33,10 +34,15 @@ interface DeleteFlow {
  * explica. Una etapa ligada a automatizaciones exige teclear "eliminar"
  * para el borrado en duro. Las validaciones se revalidan en backend.
  */
-export function EtapasScreen({ initialVenta, initialPostVenta }: Props) {
+export function EtapasScreen({ initialOutbound, initialVenta, initialPostVenta }: Props) {
   const [funnel, setFunnel] = useState<Funnel>("venta");
-  const [venta, setVenta] = useState(initialVenta);
-  const [postVenta, setPostVenta] = useState(initialPostVenta);
+  // Estado por funnel — un record en vez de ternarios binarios, para
+  // soportar los tres funnels (Outbound/Venta/Post-venta) uniformemente.
+  const [byFunnel, setByFunnel] = useState<Record<Funnel, StageAdminView[]>>({
+    outbound: initialOutbound,
+    venta: initialVenta,
+    post_venta: initialPostVenta,
+  });
   const [busy, setBusy] = useState(false);
   const [banner, setBanner] = useState<{ tone: "error" | "success"; text: string } | null>(null);
 
@@ -44,9 +50,9 @@ export function EtapasScreen({ initialVenta, initialPostVenta }: Props) {
   const [editing, setEditing] = useState<StageAdminView | null>(null);
   const [deleteFlow, setDeleteFlow] = useState<DeleteFlow | null>(null);
 
-  const stages = funnel === "venta" ? venta : postVenta;
+  const stages = byFunnel[funnel];
   const applyStages = (next: StageAdminView[]) =>
-    funnel === "venta" ? setVenta(next) : setPostVenta(next);
+    setByFunnel((prev) => ({ ...prev, [funnel]: next }));
 
   function openCreate() {
     setEditing(null);
@@ -144,6 +150,9 @@ export function EtapasScreen({ initialVenta, initialPostVenta }: Props) {
       </header>
 
       <div className="inline-flex rounded-lg border border-gray-200 dark:border-gray-700 p-0.5 mb-4">
+        <FunnelTab active={funnel === "outbound"} onClick={() => setFunnel("outbound")}>
+          Funnel Outbound
+        </FunnelTab>
         <FunnelTab active={funnel === "venta"} onClick={() => setFunnel("venta")}>
           Funnel Venta
         </FunnelTab>

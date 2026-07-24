@@ -5,6 +5,7 @@ import {
   updateStageAction,
 } from "@/lib/actions/admin-stages";
 import type { Funnel } from "@/lib/types/database";
+import { FUNNEL_LABELS } from "@/lib/constants";
 import type { StageActionResult, StageAdminView } from "@/lib/types/admin";
 
 interface Props {
@@ -122,7 +123,7 @@ export function StageFormModal({ open, funnel, stage, onClose, onSaved }: Props)
           {isEdit ? "Editar etapa" : "Nueva etapa"}
         </p>
         <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-          {funnel === "venta" ? "Funnel Venta" : "Funnel Post-venta"}
+          {FUNNEL_LABELS[funnel]}
         </p>
 
         {isEdit && stage?.automation.linked && (

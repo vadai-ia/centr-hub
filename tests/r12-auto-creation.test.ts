@@ -39,6 +39,7 @@ function makeContact(overrides: Partial<ContactRow> = {}): ContactRow {
     deleted_in_whaapy: false,
     anonymized_at: null,
     last_whaapy_activity_at: null,
+    is_outbound: false,
     created_at: "2026-04-01T00:00:00Z",
     updated_at: "2026-05-01T00:00:00Z",
     ...overrides,

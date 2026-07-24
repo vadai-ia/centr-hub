@@ -208,6 +208,8 @@ export async function createLead(input: CreateLeadInput): Promise<CreateLeadResu
         stage_id: initialStage.id,
         contact_id: contact.id,
         assigned_advisor_id: effectiveAdvisorId,
+        // Marca outbound denormalizada del contacto (0040 — birth-stamping).
+        is_outbound: contact.is_outbound,
         parent_opportunity_id: null,
         shopify_draft_order_id: null,
         shopify_order_id: null,

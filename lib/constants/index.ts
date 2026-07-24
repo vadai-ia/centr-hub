@@ -6,8 +6,18 @@
 
 export const TIMEZONE = "America/Mexico_City" as const;
 
-export const FUNNELS = ["venta", "post_venta"] as const;
+// Orden lógico del pipeline: Outbound (SDR) → Venta → Post-venta. El
+// dominio vive aquí como fuente ÚNICA (runtime + tipo); `lib/types/database`
+// re-exporta el tipo `Funnel` para no duplicar la definición.
+export const FUNNELS = ["outbound", "venta", "post_venta"] as const;
 export type Funnel = (typeof FUNNELS)[number];
+
+/** Etiquetas visibles (español) de cada funnel — fuente única para UI. */
+export const FUNNEL_LABELS: Record<Funnel, string> = {
+  outbound: "Funnel Outbound",
+  venta: "Funnel Venta",
+  post_venta: "Funnel Post-venta",
+};
 
 export const ROLES = ["superadmin", "admin", "vendedor"] as const;
 export type Role = (typeof ROLES)[number];

@@ -25,7 +25,12 @@ interface Props {
   stages: PipelineStageRow[];
 }
 
-const FUNNEL_LABEL: Record<Funnel, string> = {
+// La admin de Reglas gestiona SOLO Venta y Post-venta (Outbound no tiene
+// automatizaciones sembradas en Fase 1). Se tipa a ese subconjunto para no
+// arrastrar 'outbound' a las estructuras de este screen.
+type RuleFunnel = Extract<Funnel, "venta" | "post_venta">;
+
+const FUNNEL_LABEL: Record<RuleFunnel, string> = {
   venta: "Funnel Venta",
   post_venta: "Funnel Post-venta",
 };
@@ -126,7 +131,7 @@ export function ReglasScreen({ initialRules, stages }: Props) {
         </div>
       )}
 
-      {(["venta", "post_venta"] as Funnel[]).map((funnel) => (
+      {(["venta", "post_venta"] as RuleFunnel[]).map((funnel) => (
         <section key={funnel} className="mb-8">
           <h2 className="mb-3 flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">
             <span className="h-3.5 w-1 rounded-full bg-gradient-to-b from-indigo-400 to-violet-500" />

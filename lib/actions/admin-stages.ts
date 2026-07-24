@@ -411,16 +411,17 @@ export async function reorderStagesAction(raw: unknown): Promise<StageActionResu
  * funnel. Usada por el Server Component de la página.
  */
 export async function loadAdminStages(): Promise<
-  | { ok: true; venta: StageAdminView[]; postVenta: StageAdminView[] }
+  | { ok: true; outbound: StageAdminView[]; venta: StageAdminView[]; postVenta: StageAdminView[] }
   | { ok: false; message: string }
 > {
   const admin = await resolveAdmin();
   if (!admin.ok) return admin;
   return withTenantContext(admin.ctx.orgId, async () => {
-    const [venta, postVenta] = await Promise.all([
+    const [outbound, venta, postVenta] = await Promise.all([
+      enrichStages("outbound"),
       enrichStages("venta"),
       enrichStages("post_venta"),
     ]);
-    return { ok: true, venta, postVenta };
+    return { ok: true, outbound, venta, postVenta };
   }, { source: "user_session" });
 }

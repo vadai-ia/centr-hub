@@ -114,6 +114,8 @@ export async function evaluateAndCreateC2Opportunity(
     stage_id: initialStage.id,
     contact_id: input.contact.id,
     assigned_advisor_id: input.contact.assigned_advisor_id ?? null,
+    // Marca outbound denormalizada del contacto (0040 — birth-stamping).
+    is_outbound: input.contact.is_outbound,
     parent_opportunity_id: null,
     shopify_draft_order_id: null,
     shopify_order_id: null,

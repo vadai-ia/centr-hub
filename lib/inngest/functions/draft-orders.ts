@@ -220,6 +220,7 @@ export const draftOrdersCreate = inngest.createFunction(
           // draft) sí hereda del contacto — ahí el contacto es el dueño
           // actual; este cambio es acotado al path de draft. Ver ERRORES.md.
           assignedAdvisorId: tagAssignment ?? null,
+          isOutbound: contact.is_outbound,
           effectiveUpdatedAt,
         }),
       );
@@ -255,6 +256,9 @@ function buildOpportunityInsertFromDraftOrder(args: {
   stageId: UUID;
   contactId: UUID;
   assignedAdvisorId: UUID | null;
+  // Marca outbound denormalizada del contacto (0040 — birth-stamping). Una
+  // Cotización de un contacto ya outbound nace marcada; en Fase 1 es false.
+  isOutbound: boolean;
   effectiveUpdatedAt: string;
 }): Parameters<typeof createOpportunity>[0] {
   return {
@@ -262,6 +266,7 @@ function buildOpportunityInsertFromDraftOrder(args: {
     stage_id: args.stageId,
     contact_id: args.contactId,
     assigned_advisor_id: args.assignedAdvisorId,
+    is_outbound: args.isOutbound,
     parent_opportunity_id: null,
     shopify_draft_order_id: args.normalized.shopifyDraftOrderId,
     shopify_order_id: null,
@@ -367,6 +372,7 @@ export const draftOrdersUpdate = inngest.createFunction(
           // draft) sí hereda del contacto — ahí el contacto es el dueño
           // actual; este cambio es acotado al path de draft. Ver ERRORES.md.
           assignedAdvisorId: tagAssignment ?? null,
+            isOutbound: contact.is_outbound,
             effectiveUpdatedAt,
           }),
         );

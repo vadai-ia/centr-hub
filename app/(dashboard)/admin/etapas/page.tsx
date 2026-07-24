@@ -16,5 +16,11 @@ export default async function EtapasPage() {
       </div>
     );
   }
-  return <EtapasScreen initialVenta={res.venta} initialPostVenta={res.postVenta} />;
+  return (
+    <EtapasScreen
+      initialOutbound={res.outbound}
+      initialVenta={res.venta}
+      initialPostVenta={res.postVenta}
+    />
+  );
 }

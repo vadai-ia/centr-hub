@@ -209,6 +209,9 @@ async function createProblemCaseChild(
     contact_id: ventaOpp.contact_id,
     // R2/R5: hereda el asesor de la Venta, no lo reasigna.
     assigned_advisor_id: ventaOpp.assigned_advisor_id,
+    // Hereda la marca outbound de la Venta padre (0040 — igual que el
+    // asesor y los datos comerciales; la hija mantiene la categoría).
+    is_outbound: ventaOpp.is_outbound,
     parent_opportunity_id: ventaOpp.id,
     // NO heredar shopify_draft_order_id (unique constraint — 0021).
     shopify_draft_order_id: null,

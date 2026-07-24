@@ -26,6 +26,8 @@ import path from "node:path";
  *   INV-2 line items  — INSERT-SELECT de opportunity_line_items F1 → hija.
  *   INV-3 asesor      — asesor de la hija = coalesce(asesor_orden, F1).
  *   INV-4 fecha real  — won_at / shopify_event_at desde orders.shopify_created_at.
+ *   INV-5 outbound    — la hija hereda is_outbound de la F1 (marca 0040 que
+ *                       recorre todo el ciclo de vida de la oportunidad).
  */
 
 const MIGRATIONS_DIR = path.resolve(__dirname, "..", "supabase", "migrations");
@@ -136,5 +138,18 @@ describe("contrato SQL del trigger F1→F2 (guard anti-regresión)", () => {
     expect(body, "INV-4: las entradas de historial no setean shopify_event_at").toContain(
       "shopify_event_at",
     );
+  });
+
+  it("INV-5 outbound: la hija hereda is_outbound de la F1", () => {
+    // La columna is_outbound debe estar en la lista del INSERT de la hija...
+    expect(
+      body,
+      "INV-5: el INSERT de la hija no lista la columna is_outbound",
+    ).toContain("is_outbound");
+    // ...y su valor debe ser el de la F1 (denormalización que recorre el ciclo).
+    expect(
+      body,
+      "INV-5: la hija no hereda is_outbound de la F1 (v_f1.is_outbound)",
+    ).toContain("v_f1.is_outbound");
   });
 });

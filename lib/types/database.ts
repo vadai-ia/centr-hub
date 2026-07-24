@@ -19,7 +19,13 @@ export type Json =
   | { [key: string]: Json }
   | Json[];
 
-export type Funnel = "venta" | "post_venta";
+// `Funnel` se define UNA vez en `lib/constants` (runtime `FUNNELS` + tipo
+// derivado). Se importa (binding local, usado por los Row de abajo) y se
+// re-exporta para que los muchos `import { Funnel } from "@/lib/types/database"`
+// sigan funcionando sin duplicar el dominio {'outbound','venta','post_venta'}
+// (Fase 1 de Outbound).
+import type { Funnel } from "@/lib/constants";
+export type { Funnel };
 /**
  * Roles de SISTEMA (protegidos, siembra 0039). NO es el universo cerrado
  * de roles: desde el constructor de roles se crean roles custom cuya `key`
@@ -135,6 +141,10 @@ export interface ContactRow {
   // Migración 0013 (v5.1): última actividad observada en Whaapy.
   // Usado por R12 (b) y la pestaña Contactos para "sin actividad X días".
   last_whaapy_activity_at: ISODateString | null;
+  // Marca outbound (0040) — FUENTE DE VERDAD. true = contacto trabajado por
+  // el SDR en el pipeline Outbound. Permanente (solo admin des-marca, con
+  // audit). Se denormaliza a opportunities/orders para métricas.
+  is_outbound: boolean;
   created_at: ISODateString;
   updated_at: ISODateString;
 }
@@ -230,6 +240,10 @@ export interface OpportunityRow {
   // Fuente de webhook específica que originó el lead (0038, FK a
   // inbound_webhook_sources). NULL para leads manuales o de otra vía.
   inbound_webhook_source_id: UUID | null;
+  // Marca outbound denormalizada (0040) desde el contacto. Se estampa al
+  // crear la opp (birth-stamping) y al convertir el contacto (solo opps no
+  // terminales). El dashboard la usa para el split outbound/inbound.
+  is_outbound: boolean;
 }
 
 export interface OpportunityLineItemRow {
@@ -309,6 +323,9 @@ export interface OrderRow {
   // (migración 0036). NULL en filas pre-fix hasta el correctivo
   // backfill-order-delivery-status o el cron.
   delivery_status: string | null;
+  // Marca outbound denormalizada (0040) para el split de revenue del
+  // dashboard. El estampado se cablea en la Fase 4.
+  is_outbound: boolean;
 }
 
 export interface OrderLineItemRow {
@@ -511,7 +528,15 @@ export interface Database {
       user_profiles: { Row: UserProfileRow; Insert: Insertable<UserProfileRow>; Update: Updatable<UserProfileRow> };
       memberships: { Row: MembershipRow; Insert: Insertable<MembershipRow>; Update: Updatable<MembershipRow> };
       roles: { Row: RoleRow; Insert: Insertable<RoleRow>; Update: Updatable<RoleRow> };
-      contacts: { Row: ContactRow; Insert: Insertable<ContactRow>; Update: Updatable<ContactRow> };
+      contacts: {
+        Row: ContactRow;
+        // is_outbound (0040) nullable-por-default en BD (NOT NULL DEFAULT
+        // false): opcional en Insert para no romper los callers V1 (un
+        // contacto nace inbound salvo que el path outbound lo setee).
+        Insert: Omit<Insertable<ContactRow>, "is_outbound"> &
+          Partial<Pick<ContactRow, "is_outbound">>;
+        Update: Updatable<ContactRow>;
+      };
       pipeline_stages: { Row: PipelineStageRow; Insert: Insertable<PipelineStageRow>; Update: Updatable<PipelineStageRow> };
       loss_reasons: { Row: LossReasonRow; Insert: Insertable<LossReasonRow>; Update: Updatable<LossReasonRow> };
       opportunities: {
@@ -525,6 +550,9 @@ export interface Database {
         // solo el flujo de cierre de caso (M3v2) las escribe.
         // lead_source / inbound_webhook_source_id (0038) idem: nullable con
         // default NULL, solo el camino canónico de creación de leads las setea.
+        // is_outbound (0040): NOT NULL DEFAULT false → opcional en Insert
+        // (el birth-stamping lo pasa desde el contacto; los callers que lo
+        // omiten heredan false = inbound).
         Insert: Omit<
           Insertable<OpportunityRow>,
           | "effective_created_at"
@@ -534,6 +562,7 @@ export interface Database {
           | "reopened_at"
           | "lead_source"
           | "inbound_webhook_source_id"
+          | "is_outbound"
         > &
           Partial<
             Pick<
@@ -544,6 +573,7 @@ export interface Database {
               | "reopened_at"
               | "lead_source"
               | "inbound_webhook_source_id"
+              | "is_outbound"
             >
           >;
         Update: Omit<Updatable<OpportunityRow>, "effective_created_at">;
@@ -557,7 +587,14 @@ export interface Database {
           Partial<Pick<OpportunityStageHistoryRow, "id" | "changed_at" | "shopify_event_at">>;
         Update: Omit<Updatable<OpportunityStageHistoryRow>, "effective_event_at">;
       };
-      orders: { Row: OrderRow; Insert: Insertable<OrderRow>; Update: Updatable<OrderRow> };
+      orders: {
+        Row: OrderRow;
+        // is_outbound (0040): NOT NULL DEFAULT false → opcional en Insert
+        // (el estampado se cablea en la Fase 4; hasta entonces default false).
+        Insert: Omit<Insertable<OrderRow>, "is_outbound"> &
+          Partial<Pick<OrderRow, "is_outbound">>;
+        Update: Updatable<OrderRow>;
+      };
       order_line_items: { Row: OrderLineItemRow; Insert: Insertable<OrderLineItemRow>; Update: Updatable<OrderLineItemRow> };
       automation_rules: { Row: AutomationRuleRow; Insert: Insertable<AutomationRuleRow>; Update: Updatable<AutomationRuleRow> };
       rule_executions: {
