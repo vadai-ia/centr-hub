@@ -6,7 +6,6 @@ import { canSeeAllData, canAccessAdminPanel } from "@/lib/auth/capabilities";
 import { withTenantContext } from "@/lib/tenant/context";
 import { getContactById } from "@/lib/db/contacts";
 import { getOpportunityById } from "@/lib/db/opportunities";
-import { listPipelineStages } from "@/lib/db/pipeline";
 import { listActiveRealVendors } from "@/lib/db/users";
 import { setContactOutbound } from "@/lib/services/outbound-mark";
 import { handoffOutboundOpportunity } from "@/lib/services/outbound-handoff";
@@ -124,18 +123,9 @@ export async function handoffOutboundOpportunityAction(
         return { ok: false, message: "La oportunidad ya no está en Outbound." };
       }
 
-      // Solo se entrega desde la ÚLTIMA etapa de Outbound (por posición) —
-      // la etapa "listo para entregar" (rename/reorder-safe).
-      const stages = (await listPipelineStages("outbound"))
-        .filter((s) => s.is_active)
-        .sort((a, b) => a.position - b.position);
-      const lastStage = stages[stages.length - 1];
-      if (!lastStage || opp.stage_id !== lastStage.id) {
-        return {
-          ok: false,
-          message: `Mueve la oportunidad a "${lastStage?.name ?? "la última etapa"}" antes de entregarla al vendedor.`,
-        };
-      }
+      // El disparador es el gesto de arrastrar la card a "Cliente calificado"
+      // (última etapa) en el board — el flip es válido desde cualquier etapa de
+      // Outbound, así que aquí basta con validar funnel='outbound' + vendedor.
 
       // El asesor debe ser un vendedor real activo (misma fuente que el
       // round-robin / selector — el SDR nunca aparece aquí).

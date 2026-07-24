@@ -1,7 +1,9 @@
 import "server-only";
 import { getTenantScopedClient } from "@/lib/db/client";
 import { getOpportunityById, updateOpportunity } from "@/lib/db/opportunities";
+import { getContactById } from "@/lib/db/contacts";
 import { recordAuditEvent } from "@/lib/db/operational";
+import { recordWhaapySyncIntent } from "@/lib/inngest/functions/customers";
 import type { Json, UUID } from "@/lib/types/database";
 
 /**
@@ -15,6 +17,7 @@ interface HandoffRpcResult {
   status: "handed_off" | "skipped" | "error";
   reason?: string | null;
   opportunity_id?: UUID;
+  contact_id?: UUID;
   target_stage_id?: UUID;
   advisor_membership_id?: UUID;
 }
@@ -61,6 +64,33 @@ export async function handoffOutboundOpportunity(args: {
         target_stage_id: result.target_stage_id ?? null,
       } as Json,
     });
+
+    // Track 2: el RPC ya asignó el vendedor al CONTACTO (atómico). Ahora se
+    // propaga a Whaapy con el agente mapeado (mismo camino que createLead /
+    // reasignación de contacto). El worker resuelve whaapy_agent_id desde el
+    // snapshot del contacto. Non-fatal: la entrega ya persistió; un fallo al
+    // ENCOLAR no la revierte (se audita; reintenta el worker / se re-dispara).
+    if (result.contact_id) {
+      try {
+        const contact = await getContactById(result.contact_id);
+        if (contact && contact.phone && !contact.missing_phone) {
+          await recordWhaapySyncIntent(
+            contact,
+            contact.whaapy_contact_id
+              ? "update_from_platform_ui"
+              : "create_from_platform_ui",
+          );
+        }
+      } catch (err) {
+        await recordAuditEvent({
+          actorUserId: args.actorUserId,
+          eventType: "outbound_handoff_whaapy_enqueue_failed",
+          entityType: "opportunity",
+          entityId: args.opportunityId,
+          payload: { error: (err as Error)?.message ?? String(err) } as Json,
+        });
+      }
+    }
     return { ok: true };
   }
 

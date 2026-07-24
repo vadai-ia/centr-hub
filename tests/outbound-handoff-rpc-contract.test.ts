@@ -17,6 +17,9 @@ import path from "node:path";
  *   INV-3 asesor      — setea assigned_advisor_id = p_advisor_membership_id.
  *   INV-4 destino     — resuelve la etapa Venta "Contacto calificado".
  *   INV-5 guard       — valida funnel='outbound' (idempotencia / no reuso).
+ *   INV-6 contacto    — asigna el vendedor al CONTACTO (contacts.assigned_
+ *                       advisor_id) en la misma transacción (dispara Whaapy/
+ *                       Shopify/data-scope).
  */
 
 const MIGRATIONS_DIR = path.resolve(__dirname, "..", "supabase", "migrations");
@@ -77,5 +80,18 @@ describe("contrato SQL del RPC handoff Outbound→Venta (guard anti-regresión)"
 
   it("INV-5 guard: valida funnel='outbound' (idempotencia)", () => {
     expect(lower).toMatch(/funnel\s*<>\s*'outbound'/);
+  });
+
+  it("INV-6 contacto: asigna el vendedor al contacto (contacts.assigned_advisor_id)", () => {
+    expect(lower, "INV-6: el handoff debe actualizar public.contacts").toMatch(
+      /update\s+public\.contacts/,
+    );
+    // El UPDATE de contacts debe setear el asesor al vendedor de la entrega.
+    const at = lower.indexOf("update public.contacts");
+    expect(at, "INV-6: no se encontró el UPDATE de contacts").toBeGreaterThan(0);
+    const block = lower.slice(at, at + 300);
+    expect(block, "INV-6: el contacto no adopta p_advisor_membership_id").toMatch(
+      /assigned_advisor_id\s*=\s*p_advisor_membership_id/,
+    );
   });
 });

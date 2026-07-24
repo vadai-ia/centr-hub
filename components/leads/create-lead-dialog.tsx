@@ -19,7 +19,15 @@ import {
  * marca el contacto como outbound y lo crea en el funnel Outbound. Dedup por
  * identidad: si el contacto ya existía (inbound), lo enlaza y lo convierte.
  */
-export function CreateLeadButton({ outbound = false }: { outbound?: boolean }) {
+export function CreateLeadButton({
+  outbound = false,
+  onCreated,
+}: {
+  outbound?: boolean;
+  /** Callback tras crear (además del router.refresh) — lo usa el board de
+   *  Outbound para recargar su estado local y que el lead aparezca en vivo. */
+  onCreated?: () => void;
+}) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [advisors, setAdvisors] = useState<LeadAdvisorOption[]>([]);
@@ -102,6 +110,7 @@ export function CreateLeadButton({ outbound = false }: { outbound?: boolean }) {
       return;
     }
     setSuccess(res.message);
+    onCreated?.();
     router.refresh();
   }
 

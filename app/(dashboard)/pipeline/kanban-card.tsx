@@ -117,6 +117,14 @@ export function KanbanCard({
           {pendingTasksCount !== undefined && pendingTasksCount > 0 && (
             <TasksBadge count={pendingTasksCount} />
           )}
+          <ContactTypeBadge isCustomer={isCustomer} />
+        </div>
+      </div>
+
+      {/* Marca outbound + conflicto de asesor en su PROPIA fila — no comparten
+          el renglón del nombre para no truncarlo (F3 fix #3). */}
+      {(opp.is_outbound || opp.overridden_tag_advisor_id) && (
+        <div className="flex items-center gap-1 flex-wrap mb-0.5">
           {opp.is_outbound && <OutboundBadge />}
           {opp.overridden_tag_advisor_id && (
             <span
@@ -126,9 +134,8 @@ export function KanbanCard({
               ⚠ Asesor
             </span>
           )}
-          <ContactTypeBadge isCustomer={isCustomer} />
         </div>
-      </div>
+      )}
 
       {opp.display_reference && (
         <p className="text-[10px] font-mono text-gray-400 dark:text-gray-500 truncate">

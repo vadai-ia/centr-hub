@@ -18,7 +18,6 @@ interface Props {
   onReassign?: () => void;
   onCreateInShopify?: () => void;
   onResolveCase?: () => void;
-  onHandoff?: () => void;
   onTasksChanged?: () => void;
 }
 
@@ -41,7 +40,6 @@ export function OpportunityDialogContent({
   onReassign,
   onCreateInShopify,
   onResolveCase,
-  onHandoff,
   onTasksChanged,
 }: Props) {
   const { opportunity, stage, contact, lineItems, lossReason } = bundle.detail;
@@ -251,15 +249,6 @@ export function OpportunityDialogContent({
             className="px-3 py-1.5 text-sm font-medium rounded-md bg-amber-600 text-white hover:bg-amber-700 transition-colors"
           >
             Marcar caso como resuelto
-          </button>
-        )}
-        {bundle.canHandoffOutbound && (
-          <button
-            type="button"
-            onClick={onHandoff}
-            className="px-3 py-1.5 text-sm font-medium rounded-md bg-cyan-600 text-white hover:bg-cyan-700 transition-colors"
-          >
-            Entregar a vendedor
           </button>
         )}
         <span className="flex-1" />

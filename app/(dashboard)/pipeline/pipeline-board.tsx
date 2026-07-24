@@ -34,6 +34,7 @@ import type {
 import { KanbanCard } from "./kanban-card";
 import { KanbanColumn } from "./kanban-column";
 import { LossReasonModal } from "./loss-reason-modal";
+import { HandoffDialog } from "@/components/opportunity/handoff-dialog";
 import { PipelineToolbar } from "./pipeline-toolbar";
 import { CreateLeadButton } from "@/components/leads/create-lead-dialog";
 import { PipelineToastStack } from "./pipeline-toast";
@@ -172,6 +173,7 @@ export function PipelineBoard({
 
   const [activeDragId, setActiveDragId] = useState<UUID | null>(null);
   const [pendingLoss, setPendingLoss] = useState<PendingLoss | null>(null);
+  const [pendingHandoff, setPendingHandoff] = useState<{ opp: KanbanOpportunity; fromStageId: UUID } | null>(null);
   const [pendingMoves, setPendingMoves] = useState<Set<UUID>>(new Set());
   const { toasts, push: pushToast, dismiss: dismissToast } = useToastStack();
 
@@ -450,6 +452,18 @@ export function PipelineBoard({
     const card = (cardsByStage[fromStage.id] ?? []).find((o) => o.id === oppId);
     if (!card) return;
 
+    // Fusión del handoff (F3 fix #2): en el board de Outbound, soltar en la
+    // ÚLTIMA etapa ("Cliente calificado") NO mueve la card — abre el popup de
+    // entrega. Confirmar → handoff (flip a Venta y sale de Outbound); cancelar
+    // → la card NO se mueve (se queda donde estaba). Así no se puede olvidar.
+    if (fromStage.funnel === "outbound") {
+      const lastOutbound = [...stages].sort((a, b) => a.position - b.position).at(-1);
+      if (lastOutbound && toStage.id === lastOutbound.id) {
+        setPendingHandoff({ opp: card, fromStageId: fromStage.id });
+        return;
+      }
+    }
+
     if (toStage.requires_loss_reason) {
       setPendingLoss({ opp: card, fromStage, toStage });
       return;
@@ -597,7 +611,9 @@ export function PipelineBoard({
           contacto inbound existente si el teléfono coincide. */}
       {funnel === "outbound" && canSeeAll && (
         <div className="flex justify-end mb-2">
-          <CreateLeadButton outbound />
+          {/* onCreated recarga el estado del board para que el lead nuevo
+              aparezca en vivo (el board no re-lee `initial` en router.refresh). */}
+          <CreateLeadButton outbound onCreated={() => void handlePollingTick()} />
         </div>
       )}
 
@@ -659,6 +675,29 @@ export function PipelineBoard({
         reasons={lossReasons}
         onCancel={cancelLoss}
         onConfirm={confirmLoss}
+      />
+
+      <HandoffDialog
+        open={!!pendingHandoff}
+        opportunityId={pendingHandoff?.opp.id ?? null}
+        advisors={advisors}
+        onCancel={() => setPendingHandoff(null)}
+        onSuccess={(msg) => {
+          const ph = pendingHandoff;
+          setPendingHandoff(null);
+          if (ph) {
+            // La opp flipeó a Venta → sale del board de Outbound.
+            setCardsByStage((cur) => {
+              const list = cur[ph.fromStageId] ?? [];
+              return { ...cur, [ph.fromStageId]: list.filter((o) => o.id !== ph.opp.id) };
+            });
+            setCountsByStage((cur) => ({
+              ...cur,
+              [ph.fromStageId]: Math.max(0, (cur[ph.fromStageId] ?? 1) - 1),
+            }));
+          }
+          pushToast(msg, "success");
+        }}
       />
 
       <OpportunityDialog />
