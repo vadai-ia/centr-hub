@@ -1,6 +1,10 @@
 import "server-only";
 import { getTenantScopedClient } from "@/lib/db/client";
-import { listTasksForUser, listNotificationsForUser } from "@/lib/db/operational";
+import {
+  listTasksForUser,
+  listOutboundTasks,
+  listNotificationsForUser,
+} from "@/lib/db/operational";
 import {
   listOpportunities,
   listKanbanOpportunitiesByIds,
@@ -102,6 +106,8 @@ export interface MiDiaData {
   silentClients: MiDiaSilentClient[];
   week: MiDiaWeekDay[];
   streak: number;
+  /** Vista Outbound del SDR (F4): el centro son tareas de opps outbound. */
+  outboundView: boolean;
 }
 
 const URGENCY_RANK: Record<Urgency, number> = { overdue: 0, today: 1, week: 2 };
@@ -117,13 +123,18 @@ function bucket(dueAt: string | null, startUtc: string, endUtc: string): Urgency
 export async function loadMiDiaForUser(input: {
   userId: UUID;
   advisorMembershipId: UUID | null;
+  /**
+   * Vista Outbound del SDR (F4): el centro se arma de las tareas de las
+   * oportunidades OUTBOUND (incl. entregadas), no de las tareas del usuario.
+   */
+  outboundView?: boolean;
 }): Promise<MiDiaData> {
   const { startUtc, endUtc } = todayBoundsUtc();
   const weekEndUtc = endOfWeekWindowUtc();
   const todayKey = todayKeyInTz();
 
   const [tasks, notifications, stages] = await Promise.all([
-    listTasksForUser(input.userId),
+    input.outboundView ? listOutboundTasks() : listTasksForUser(input.userId),
     listNotificationsForUser(input.userId),
     listPipelineStages(),
   ]);
@@ -247,6 +258,7 @@ export async function loadMiDiaForUser(input: {
     silentClients,
     week,
     streak,
+    outboundView: input.outboundView ?? false,
   };
 }
 

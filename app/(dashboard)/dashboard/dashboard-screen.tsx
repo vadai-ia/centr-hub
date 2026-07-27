@@ -12,6 +12,7 @@ import { DashboardToolbar } from "./dashboard-toolbar";
 import { DashboardGoals } from "./dashboard-goals";
 import { DashboardVenta } from "./dashboard-venta";
 import { DashboardPostventa } from "./dashboard-postventa";
+import { DashboardChannelStrip } from "./dashboard-channel-strip";
 import { DashboardExportModal } from "./dashboard-export-modal";
 import type { DashboardData } from "@/lib/types/dashboard";
 
@@ -41,6 +42,7 @@ export function DashboardScreen({
     customFrom: initial.filters.customFrom,
     customTo: initial.filters.customTo,
     advisor: initial.filters.advisorMembershipId ?? "",
+    channel: initial.filters.channel ?? "all",
   }));
   const [data, setData] = useState<DashboardData>(initial.data);
   const [advisors] = useState<AdvisorOption[]>(initial.advisors);
@@ -125,9 +127,16 @@ export function DashboardScreen({
             fetchWith({ ...filters, preset: "custom", customFrom, customTo })
           }
           onAdvisorChange={(advisor) => fetchWith({ ...filters, advisor })}
+          onChannelChange={(channel) => fetchWith({ ...filters, channel })}
           onExport={() => setExportOpen(true)}
         />
       </div>
+
+      {/* Comparativa outbound vs inbound (siempre ambos, F4). */}
+      <DashboardChannelStrip
+        venta={data.ventaByChannel}
+        postventa={data.postventaByChannel}
+      />
 
       <DashboardVenta m={data.venta} breakdown={data.ventaBreakdown} />
       <DashboardPostventa m={data.postventa} breakdown={data.postventaBreakdown} />

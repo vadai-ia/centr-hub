@@ -49,6 +49,8 @@ const filtersSchema = z.object({
   customTo: z.string().nullable().optional(),
   // "" → todos; "unassigned" → sin asignar; uuid → asesor (solo admin).
   advisor: z.string().optional(),
+  // Corte por canal (F4). Disponible a cualquier rol (eje ortogonal al asesor).
+  channel: z.enum(["all", "outbound", "inbound"]).optional(),
 });
 
 export type DashboardFiltersInput = z.infer<typeof filtersSchema>;
@@ -107,6 +109,7 @@ export async function loadDashboardAction(raw: unknown): Promise<DashboardLoadRe
       period: period.period,
       isAdmin,
       scope,
+      channel: input.channel ?? "all",
       organizationId: orgId,
     });
 
@@ -125,6 +128,7 @@ export async function loadDashboardAction(raw: unknown): Promise<DashboardLoadRe
         isAdmin && input.advisor && input.advisor !== "" && input.advisor !== "unassigned"
           ? (input.advisor as UUID)
           : null,
+      channel: input.channel ?? "all",
     };
 
     return { ok: true, data, filters, advisors, isAdmin };

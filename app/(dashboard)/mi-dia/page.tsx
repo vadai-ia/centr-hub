@@ -27,9 +27,12 @@ export default async function MiDiaPage() {
   // los datos (admin/superadmin/SDR); vista propia para vendedor (0039).
   const caps = ok ? session.data.activeRole : fallbackCapabilities("vendedor");
   const isAdmin = canSeeAllData(caps);
+  // El SDR (F4) ve Mi Día Outbound, NO la vista de equipo → no cargamos los
+  // extras de admin ni le pasamos isAdmin (suprime el toggle de equipo).
+  const isSdr = caps.key === "sdr";
 
   let adminExtras: MiDiaAdminExtras | null = null;
-  if (isAdmin) {
+  if (isAdmin && !isSdr) {
     const ex = await loadMiDiaAdminExtrasAction();
     if (ex.ok) adminExtras = ex.extras;
   }
@@ -47,7 +50,7 @@ export default async function MiDiaPage() {
       initialData={res.data}
       organizationId={organizationId}
       userId={userId}
-      isAdmin={isAdmin}
+      isAdmin={isAdmin && !isSdr}
       initialAdminExtras={adminExtras}
       goal={goal}
     />

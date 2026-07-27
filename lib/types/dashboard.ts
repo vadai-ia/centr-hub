@@ -107,6 +107,9 @@ export interface AdvisorBreakdownRow {
   problematicCases: number;
 }
 
+/** Corte por canal del dashboard (F4). inbound = NOT outbound. */
+export type Channel = "all" | "outbound" | "inbound";
+
 export interface DashboardFiltersState {
   /** Preset activo, o "custom" si el usuario eligió un rango manual. */
   preset: PeriodPreset | "custom";
@@ -115,6 +118,8 @@ export interface DashboardFiltersState {
   customTo: string | null;
   /** Solo admin: membership del asesor filtrado, null = todos. */
   advisorMembershipId: UUID | null;
+  /** Canal activo (Todo/Outbound/Inbound). */
+  channel: Channel;
 }
 
 /**
@@ -125,9 +130,15 @@ export interface DashboardFiltersState {
 export interface DashboardData {
   period: ResolvedPeriod;
   isAdmin: boolean;
-  /** Métricas del scope activo (toda la org, o el asesor filtrado). */
+  /** Canal activo aplicado a `venta`/`postventa`/breakdown (F4). */
+  channel: Channel;
+  /** Métricas del scope + canal activos (toda la org, o el asesor filtrado). */
   venta: VentaMetrics;
   postventa: PostventaMetrics;
+  /** Comparativa outbound-vs-inbound (SIEMPRE ambos, para la tira). Respeta
+   *  el scope activo, ignora el toggle de canal. */
+  ventaByChannel: { outbound: VentaMetrics; inbound: VentaMetrics };
+  postventaByChannel: { outbound: PostventaMetrics; inbound: PostventaMetrics };
   /** Drilldown por vendedor — solo admin y solo cuando no hay asesor filtrado. */
   ventaBreakdown: AdvisorBreakdownRow[] | null;
   postventaBreakdown: AdvisorBreakdownRow[] | null;

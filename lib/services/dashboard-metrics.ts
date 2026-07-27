@@ -35,6 +35,7 @@ import {
 import type { UUID } from "@/lib/types/database";
 import type {
   AdvisorBreakdownRow,
+  Channel,
   DashboardData,
   MonthValue,
   PostventaMetrics,
@@ -66,6 +67,17 @@ function matchScope(advisorId: UUID | null, scope: Scope): boolean {
   return advisorId === scope;
 }
 
+/**
+ * Corte por CANAL (F4). Segundo eje de filtrado, ortogonal al scope
+ * (asesor). `inbound = NOT outbound` (binario — decisión operador). Se
+ * aplica junto a `matchScope` en cada agregación. Default "all" = sin corte.
+ * (`Channel` se define en lib/types/dashboard.)
+ */
+function matchChannel(isOutbound: boolean, channel: Channel): boolean {
+  if (channel === "all") return true;
+  return channel === "outbound" ? isOutbound : !isOutbound;
+}
+
 /** Las 3 métricas de meta (M2v2) para un scope. */
 export interface ScopeAchievement {
   quotes: number; // cotizaciones enviadas (draft opps creadas en el periodo)
@@ -85,13 +97,19 @@ export function tallyAchievement(
   draftOpps: VentaRaw["draftOpps"],
   wonOpps: VentaRaw["wonOpps"],
   scope: Scope,
+  channel: Channel = "all",
 ): ScopeAchievement {
   let amount = 0;
   for (const o of paidOrders) {
-    if (matchScope(o.assigned_advisor_id, scope)) amount += Number(o.total_amount);
+    if (matchScope(o.assigned_advisor_id, scope) && matchChannel(o.is_outbound, channel))
+      amount += Number(o.total_amount);
   }
-  const quotes = draftOpps.filter((d) => matchScope(d.assigned_advisor_id, scope)).length;
-  const won = wonOpps.filter((w) => matchScope(w.assigned_advisor_id, scope)).length;
+  const quotes = draftOpps.filter(
+    (d) => matchScope(d.assigned_advisor_id, scope) && matchChannel(d.is_outbound, channel),
+  ).length;
+  const won = wonOpps.filter(
+    (w) => matchScope(w.assigned_advisor_id, scope) && matchChannel(w.is_outbound, channel),
+  ).length;
   return { quotes, won, amount };
 }
 
@@ -210,19 +228,23 @@ async function fetchVentaRaw(period: ResolvedPeriod): Promise<VentaRaw> {
   };
 }
 
-export function computeVentaMetrics(raw: VentaRaw, scope: Scope): VentaMetrics {
+export function computeVentaMetrics(
+  raw: VentaRaw,
+  scope: Scope,
+  channel: Channel = "all",
+): VentaMetrics {
   const { boundaries } = raw;
 
   // KPI1 Revenue + KPI2 Cotizaciones — tally compartido con las metas
   // (tallyAchievement = definición única de monto/cotizaciones/ganadas).
-  const tally = tallyAchievement(raw.paidOrders, raw.draftOpps, raw.wonOpps, scope);
+  const tally = tallyAchievement(raw.paidOrders, raw.draftOpps, raw.wonOpps, scope, channel);
   const revenue = tally.amount;
   const quotesSent = tally.quotes;
 
   // Serie de revenue por mes (bucketización; el total ya vino del tally).
   const monthRevenue = emptyMonths(raw.period);
   for (const o of raw.paidOrders) {
-    if (!matchScope(o.assigned_advisor_id, scope)) continue;
+    if (!matchScope(o.assigned_advisor_id, scope) || !matchChannel(o.is_outbound, channel)) continue;
     if (o.paid_at) {
       const key = monthKeyInTz(o.paid_at);
       if (monthRevenue.has(key)) {
@@ -235,7 +257,7 @@ export function computeVentaMetrics(raw: VentaRaw, scope: Scope): VentaMetrics {
   // (responde al filtro de fecha).
   let pipelineGrossPeriod = 0;
   for (const opp of raw.livePipeline) {
-    if (!matchScope(opp.assigned_advisor_id, scope)) continue;
+    if (!matchScope(opp.assigned_advisor_id, scope) || !matchChannel(opp.is_outbound, channel)) continue;
     const stage = boundaries.byId.get(opp.stage_id);
     if (!stage || stage.is_won || stage.is_lost) continue; // solo vivas
     pipelineGrossPeriod += amountOf(opp);
@@ -247,7 +269,7 @@ export function computeVentaMetrics(raw: VentaRaw, scope: Scope): VentaMetrics {
   let pipelineGrossNow = 0;
   let activeWithDraft = 0;
   for (const opp of raw.livePipelineSnapshot) {
-    if (!matchScope(opp.assigned_advisor_id, scope)) continue;
+    if (!matchScope(opp.assigned_advisor_id, scope) || !matchChannel(opp.is_outbound, channel)) continue;
     const stage = boundaries.byId.get(opp.stage_id);
     if (!stage || stage.is_won || stage.is_lost) continue; // solo vivas
     pipelineGrossNow += amountOf(opp);
@@ -264,7 +286,7 @@ export function computeVentaMetrics(raw: VentaRaw, scope: Scope): VentaMetrics {
   // Cohort por etapa para KPI9.
   const cohortByStage = new Map<UUID, Set<UUID>>();
   for (const e of raw.stageEntries) {
-    if (!matchScope(e.assigned_advisor_id, scope)) continue;
+    if (!matchScope(e.assigned_advisor_id, scope) || !matchChannel(e.is_outbound, channel)) continue;
     if (initialId && e.to_stage_id === initialId) leadOpps.add(e.opportunity_id);
     if (bandIds.has(e.to_stage_id)) qualifiedOpps.add(e.opportunity_id);
     let set = cohortByStage.get(e.to_stage_id);
@@ -276,7 +298,9 @@ export function computeVentaMetrics(raw: VentaRaw, scope: Scope): VentaMetrics {
   }
 
   // KPI6 Ganadas + KPI12 Sales cycle.
-  const wonScoped = raw.wonOpps.filter((w) => matchScope(w.assigned_advisor_id, scope));
+  const wonScoped = raw.wonOpps.filter(
+    (w) => matchScope(w.assigned_advisor_id, scope) && matchChannel(w.is_outbound, channel),
+  );
   const wonCount = tally.won; // == wonScoped.length (misma definición vía tally)
   const cycleDays: number[] = [];
   for (const w of wonScoped) {
@@ -290,7 +314,9 @@ export function computeVentaMetrics(raw: VentaRaw, scope: Scope): VentaMetrics {
     : null;
 
   // KPI8/10 Win/Loss rate + KPI11 Pérdidas por motivo.
-  const lostScoped = raw.lostEntries.filter((l) => matchScope(l.assigned_advisor_id, scope));
+  const lostScoped = raw.lostEntries.filter(
+    (l) => matchScope(l.assigned_advisor_id, scope) && matchChannel(l.is_outbound, channel),
+  );
   const lostCount = lostScoped.length;
   const closed = wonCount + lostCount;
   const winRateGlobal = rateOrNull(wonCount, closed);
@@ -396,12 +422,16 @@ async function fetchPostventaRaw(period: ResolvedPeriod): Promise<PostventaRaw> 
   return { ordersCreated, problematicOpps, liveOpps, postventaStages, period };
 }
 
-export function computePostventaMetrics(raw: PostventaRaw, scope: Scope): PostventaMetrics {
+export function computePostventaMetrics(
+  raw: PostventaRaw,
+  scope: Scope,
+  channel: Channel = "all",
+): PostventaMetrics {
   // Pedidos creados en el periodo (KPI base + serie por mes).
   const monthOrders = emptyMonths(raw.period);
   let ordersCount = 0;
   for (const o of raw.ordersCreated) {
-    if (!matchScope(o.assigned_advisor_id, scope)) continue;
+    if (!matchScope(o.assigned_advisor_id, scope) || !matchChannel(o.is_outbound, channel)) continue;
     ordersCount += 1;
     // Bucket por la fecha real de creación en Shopify (migración 0024),
     // no por `created_at` de BD.
@@ -409,8 +439,8 @@ export function computePostventaMetrics(raw: PostventaRaw, scope: Scope): Postve
     if (monthOrders.has(key)) monthOrders.set(key, monthOrders.get(key)! + 1);
   }
 
-  const problematicCases = raw.problematicOpps.filter((p) =>
-    matchScope(p.assigned_advisor_id, scope),
+  const problematicCases = raw.problematicOpps.filter(
+    (p) => matchScope(p.assigned_advisor_id, scope) && matchChannel(p.is_outbound, channel),
   ).length;
 
   // Pedidos activos/vivos ahora (M8.2 ajuste #10): órdenes DISTINTAS con
@@ -419,7 +449,7 @@ export function computePostventaMetrics(raw: PostventaRaw, scope: Scope): Postve
   const terminal = raw.postventaStages.terminalStageIds;
   const activeOrderKeys = new Set<string>();
   for (const opp of raw.liveOpps) {
-    if (!matchScope(opp.assigned_advisor_id, scope)) continue;
+    if (!matchScope(opp.assigned_advisor_id, scope) || !matchChannel(opp.is_outbound, channel)) continue;
     if (terminal.has(opp.stage_id)) continue; // ya cerrada (ganada/perdida)
     activeOrderKeys.add(opp.shopify_order_id ?? `opp:${opp.id}`);
   }
@@ -445,6 +475,8 @@ export interface ComputeDashboardInput {
    *  - UUID → membership del vendedor (su propia vista) o el asesor filtrado.
    */
   scope?: UUID | "unassigned";
+  /** Corte por canal del board completo (F4). Default "all". */
+  channel?: Channel;
   organizationId: UUID;
 }
 
@@ -456,6 +488,7 @@ export interface ComputeDashboardInput {
 export async function computeDashboardData(input: ComputeDashboardInput): Promise<DashboardData> {
   const scope: Scope =
     input.scope === undefined ? "all" : input.scope === "unassigned" ? null : input.scope;
+  const channel: Channel = input.channel ?? "all";
   const wantBreakdown = input.isAdmin && input.scope === undefined;
 
   const [ventaRaw, postventaRaw] = await Promise.all([
@@ -463,24 +496,41 @@ export async function computeDashboardData(input: ComputeDashboardInput): Promis
     fetchPostventaRaw(input.period),
   ]);
 
-  const venta = computeVentaMetrics(ventaRaw, scope);
-  const postventa = computePostventaMetrics(postventaRaw, scope);
+  const venta = computeVentaMetrics(ventaRaw, scope, channel);
+  const postventa = computePostventaMetrics(postventaRaw, scope, channel);
+
+  // Tira comparativa outbound-vs-inbound (F4): SIEMPRE se calcula (no depende
+  // del toggle de canal) para mostrar ambos lado a lado. Respeta el scope
+  // (asesor) y el periodo activos.
+  const ventaByChannel = {
+    outbound: computeVentaMetrics(ventaRaw, scope, "outbound"),
+    inbound: computeVentaMetrics(ventaRaw, scope, "inbound"),
+  };
+  const postventaByChannel = {
+    outbound: computePostventaMetrics(postventaRaw, scope, "outbound"),
+    inbound: computePostventaMetrics(postventaRaw, scope, "inbound"),
+  };
 
   let ventaBreakdown: AdvisorBreakdownRow[] | null = null;
   let postventaBreakdown: AdvisorBreakdownRow[] | null = null;
   if (wantBreakdown) {
     const scopes = await breakdownScopes(input.organizationId);
-    ventaBreakdown = scopes.map((s) => breakdownRow(s, computeVentaMetrics(ventaRaw, s.membershipId), null));
+    ventaBreakdown = scopes.map((s) =>
+      breakdownRow(s, computeVentaMetrics(ventaRaw, s.membershipId, channel), null),
+    );
     postventaBreakdown = scopes.map((s) =>
-      breakdownRow(s, null, computePostventaMetrics(postventaRaw, s.membershipId)),
+      breakdownRow(s, null, computePostventaMetrics(postventaRaw, s.membershipId, channel)),
     );
   }
 
   return {
     period: input.period,
     isAdmin: input.isAdmin,
+    channel,
     venta,
     postventa,
+    ventaByChannel,
+    postventaByChannel,
     ventaBreakdown,
     postventaBreakdown,
   };

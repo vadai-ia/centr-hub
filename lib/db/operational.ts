@@ -109,6 +109,28 @@ export async function listTasksForUser(userId: UUID): Promise<TaskRow[]> {
   return data ?? [];
 }
 
+/**
+ * Tareas cuyas OPORTUNIDADES son outbound (F4 — Mi Día del SDR). Scope por
+ * `opportunity.is_outbound`, NO por dueño de la tarea: así el SDR ve tanto lo
+ * que sigue en Outbound como lo ya ENTREGADO a un vendedor (la opp conserva
+ * is_outbound tras el flip; el cascade reasignó la tarea al vendedor, pero
+ * aquí no filtramos por assigned_user_id). Tareas sin opp (solo-contacto)
+ * quedan fuera (edge aceptado). `!inner` = solo tareas con opp outbound.
+ */
+export async function listOutboundTasks(): Promise<TaskRow[]> {
+  const { supabase, organizationId } = getTenantScopedClient();
+  const { data, error } = await supabase
+    .from("tasks")
+    .select("*, opportunity:opportunities!inner(is_outbound)")
+    .eq("organization_id", organizationId)
+    .eq("opportunity.is_outbound", true)
+    .order("due_at", { ascending: true, nullsFirst: false });
+  if (error) throw error;
+  return ((data ?? []) as unknown as Array<TaskRow & { opportunity?: unknown }>).map(
+    ({ opportunity: _drop, ...t }) => t as TaskRow,
+  );
+}
+
 export async function getTaskById(id: UUID): Promise<TaskRow | null> {
   const { supabase, organizationId } = getTenantScopedClient();
   const { data, error } = await supabase

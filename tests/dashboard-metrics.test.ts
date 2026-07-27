@@ -74,48 +74,48 @@ function ventaRaw(): VentaRaw {
     boundaries,
     lossReasonNames: new Map([["r1", "Precio"]]),
     paidOrders: [
-      { assigned_advisor_id: A, total_amount: "100", paid_at: "2026-05-10T18:00:00.000Z" },
-      { assigned_advisor_id: A, total_amount: "200", paid_at: "2026-05-12T18:00:00.000Z" },
-      { assigned_advisor_id: B, total_amount: "50", paid_at: "2026-05-12T18:00:00.000Z" },
-      { assigned_advisor_id: null, total_amount: "30", paid_at: "2026-05-12T18:00:00.000Z" },
+      { assigned_advisor_id: A, is_outbound: false, total_amount: "100", paid_at: "2026-05-10T18:00:00.000Z" },
+      { assigned_advisor_id: A, is_outbound: false, total_amount: "200", paid_at: "2026-05-12T18:00:00.000Z" },
+      { assigned_advisor_id: B, is_outbound: false, total_amount: "50", paid_at: "2026-05-12T18:00:00.000Z" },
+      { assigned_advisor_id: null, is_outbound: false, total_amount: "30", paid_at: "2026-05-12T18:00:00.000Z" },
     ],
-    draftOpps: [{ assigned_advisor_id: A }, { assigned_advisor_id: A }, { assigned_advisor_id: B }],
+    draftOpps: [{ assigned_advisor_id: A, is_outbound: false }, { assigned_advisor_id: A, is_outbound: false }, { assigned_advisor_id: B, is_outbound: false }],
     wonOpps: [
-      { assigned_advisor_id: A, effective_created_at: "2026-05-01T06:00:00.000Z", won_at: "2026-05-11T06:00:00.000Z", actual_amount: "100", estimated_amount: null },
-      { assigned_advisor_id: B, effective_created_at: "2026-05-01T06:00:00.000Z", won_at: "2026-05-21T06:00:00.000Z", actual_amount: "50", estimated_amount: null },
+      { assigned_advisor_id: A, is_outbound: false, effective_created_at: "2026-05-01T06:00:00.000Z", won_at: "2026-05-11T06:00:00.000Z", actual_amount: "100", estimated_amount: null },
+      { assigned_advisor_id: B, is_outbound: false, effective_created_at: "2026-05-01T06:00:00.000Z", won_at: "2026-05-21T06:00:00.000Z", actual_amount: "50", estimated_amount: null },
     ],
     // "Pipeline $ en el periodo" — opps vivas CREADAS en el periodo.
     livePipeline: [
-      { assigned_advisor_id: A, stage_id: CALIF.id, shopify_draft_order_id: null, actual_amount: null, estimated_amount: "40" },
-      { assigned_advisor_id: A, stage_id: COTIZ.id, shopify_draft_order_id: "d1", actual_amount: "100", estimated_amount: null },
-      { assigned_advisor_id: B, stage_id: DISENO.id, shopify_draft_order_id: "d2", actual_amount: "60", estimated_amount: null },
+      { assigned_advisor_id: A, is_outbound: false, stage_id: CALIF.id, shopify_draft_order_id: null, actual_amount: null, estimated_amount: "40" },
+      { assigned_advisor_id: A, is_outbound: false, stage_id: COTIZ.id, shopify_draft_order_id: "d1", actual_amount: "100", estimated_amount: null },
+      { assigned_advisor_id: B, is_outbound: false, stage_id: DISENO.id, shopify_draft_order_id: "d2", actual_amount: "60", estimated_amount: null },
       // Excluidas del pipeline $ (etapa ganada/perdida):
-      { assigned_advisor_id: A, stage_id: GANADA.id, shopify_draft_order_id: "d3", actual_amount: "999", estimated_amount: null },
-      { assigned_advisor_id: A, stage_id: PERDIDA.id, shopify_draft_order_id: null, actual_amount: "500", estimated_amount: null },
+      { assigned_advisor_id: A, is_outbound: false, stage_id: GANADA.id, shopify_draft_order_id: "d3", actual_amount: "999", estimated_amount: null },
+      { assigned_advisor_id: A, is_outbound: false, stage_id: PERDIDA.id, shopify_draft_order_id: null, actual_amount: "500", estimated_amount: null },
     ],
     // SNAPSHOT del ahora ("Activas" + "Pipeline $ actual") — superset del
     // periodo: incluye una opp en Cotización con draft CREADA antes del
     // periodo pero viva hoy (d4). Reproduce el caso "kanban=2 con draft,
     // pero snapshot=2" que el filtro de fecha escondía.
     livePipelineSnapshot: [
-      { assigned_advisor_id: A, stage_id: CALIF.id, shopify_draft_order_id: null, actual_amount: null, estimated_amount: "40" },
-      { assigned_advisor_id: A, stage_id: COTIZ.id, shopify_draft_order_id: "d1", actual_amount: "100", estimated_amount: null },
-      { assigned_advisor_id: B, stage_id: DISENO.id, shopify_draft_order_id: "d2", actual_amount: "60", estimated_amount: null },
+      { assigned_advisor_id: A, is_outbound: false, stage_id: CALIF.id, shopify_draft_order_id: null, actual_amount: null, estimated_amount: "40" },
+      { assigned_advisor_id: A, is_outbound: false, stage_id: COTIZ.id, shopify_draft_order_id: "d1", actual_amount: "100", estimated_amount: null },
+      { assigned_advisor_id: B, is_outbound: false, stage_id: DISENO.id, shopify_draft_order_id: "d2", actual_amount: "60", estimated_amount: null },
       // Vieja-pero-viva, fuera del periodo → solo el snapshot la captura:
-      { assigned_advisor_id: A, stage_id: COTIZ.id, shopify_draft_order_id: "d4", actual_amount: "80", estimated_amount: null },
+      { assigned_advisor_id: A, is_outbound: false, stage_id: COTIZ.id, shopify_draft_order_id: "d4", actual_amount: "80", estimated_amount: null },
       // Perdida → excluida del snapshot por etapa terminal:
-      { assigned_advisor_id: A, stage_id: PERDIDA.id, shopify_draft_order_id: null, actual_amount: "500", estimated_amount: null },
+      { assigned_advisor_id: A, is_outbound: false, stage_id: PERDIDA.id, shopify_draft_order_id: null, actual_amount: "500", estimated_amount: null },
     ],
     lostEntries: [
-      { opportunity_id: "l1", assigned_advisor_id: A, actual_amount: "70", estimated_amount: null, loss_reason_id: "r1" },
-      { opportunity_id: "l2", assigned_advisor_id: B, actual_amount: null, estimated_amount: null, loss_reason_id: null },
+      { opportunity_id: "l1", assigned_advisor_id: A, is_outbound: false, actual_amount: "70", estimated_amount: null, loss_reason_id: "r1" },
+      { opportunity_id: "l2", assigned_advisor_id: B, is_outbound: false, actual_amount: null, estimated_amount: null, loss_reason_id: null },
     ],
     stageEntries: [
-      { opportunity_id: "o1", to_stage_id: LEAD.id, assigned_advisor_id: A },
-      { opportunity_id: "o2", to_stage_id: LEAD.id, assigned_advisor_id: B },
-      { opportunity_id: "o1", to_stage_id: CALIF.id, assigned_advisor_id: A },
-      { opportunity_id: "o3", to_stage_id: CALIF.id, assigned_advisor_id: A },
-      { opportunity_id: "o1", to_stage_id: DISENO.id, assigned_advisor_id: A }, // dup en banda
+      { opportunity_id: "o1", to_stage_id: LEAD.id, assigned_advisor_id: A, is_outbound: false },
+      { opportunity_id: "o2", to_stage_id: LEAD.id, assigned_advisor_id: B, is_outbound: false },
+      { opportunity_id: "o1", to_stage_id: CALIF.id, assigned_advisor_id: A, is_outbound: false },
+      { opportunity_id: "o3", to_stage_id: CALIF.id, assigned_advisor_id: A, is_outbound: false },
+      { opportunity_id: "o1", to_stage_id: DISENO.id, assigned_advisor_id: A, is_outbound: false }, // dup en banda
     ],
     maxNonLostPos: new Map([
       ["o1", 5],
@@ -212,21 +212,21 @@ describe("computePostventaMetrics", () => {
     return {
       period: PERIOD,
       ordersCreated: [
-        { assigned_advisor_id: A, shopify_created_at: "2026-05-10T18:00:00.000Z" },
-        { assigned_advisor_id: A, shopify_created_at: "2026-05-11T18:00:00.000Z" },
-        { assigned_advisor_id: B, shopify_created_at: "2026-05-12T18:00:00.000Z" },
-        { assigned_advisor_id: null, shopify_created_at: "2026-05-13T18:00:00.000Z" },
+        { assigned_advisor_id: A, is_outbound: false, shopify_created_at: "2026-05-10T18:00:00.000Z" },
+        { assigned_advisor_id: A, is_outbound: false, shopify_created_at: "2026-05-11T18:00:00.000Z" },
+        { assigned_advisor_id: B, is_outbound: false, shopify_created_at: "2026-05-12T18:00:00.000Z" },
+        { assigned_advisor_id: null, is_outbound: false, shopify_created_at: "2026-05-13T18:00:00.000Z" },
       ],
-      problematicOpps: [{ assigned_advisor_id: A }, { assigned_advisor_id: B }],
+      problematicOpps: [{ assigned_advisor_id: A, is_outbound: false }, { assigned_advisor_id: B, is_outbound: false }],
       postventaStages: { problematicStage: null, terminalStageIds: TERMINAL },
       // Pedidos activos ahora = órdenes DISTINTAS con opp post-venta viva.
       liveOpps: [
-        { id: "p1", assigned_advisor_id: A, stage_id: "pv-open", shopify_order_id: "O1" },
-        { id: "p2", assigned_advisor_id: A, stage_id: "pv-open", shopify_order_id: "O1" }, // misma orden O1 → dedupe
-        { id: "p3", assigned_advisor_id: A, stage_id: "pv-open", shopify_order_id: "O2" },
-        { id: "p4", assigned_advisor_id: B, stage_id: "pv-open", shopify_order_id: "O3" },
-        { id: "p5", assigned_advisor_id: A, stage_id: "pv-won", shopify_order_id: "O4" }, // terminal → excluida
-        { id: "p6", assigned_advisor_id: A, stage_id: "pv-open", shopify_order_id: null }, // sin orden → cuenta por su id
+        { id: "p1", assigned_advisor_id: A, is_outbound: false, stage_id: "pv-open", shopify_order_id: "O1" },
+        { id: "p2", assigned_advisor_id: A, is_outbound: false, stage_id: "pv-open", shopify_order_id: "O1" }, // misma orden O1 → dedupe
+        { id: "p3", assigned_advisor_id: A, is_outbound: false, stage_id: "pv-open", shopify_order_id: "O2" },
+        { id: "p4", assigned_advisor_id: B, is_outbound: false, stage_id: "pv-open", shopify_order_id: "O3" },
+        { id: "p5", assigned_advisor_id: A, is_outbound: false, stage_id: "pv-won", shopify_order_id: "O4" }, // terminal → excluida
+        { id: "p6", assigned_advisor_id: A, is_outbound: false, stage_id: "pv-open", shopify_order_id: null }, // sin orden → cuenta por su id
       ],
     };
   }
@@ -250,5 +250,59 @@ describe("computePostventaMetrics", () => {
     raw.liveOpps = [];
     const m = computePostventaMetrics(raw, "all");
     expect(m.activeOrders).toBe(0);
+  });
+});
+
+describe("computeVentaMetrics — corte por canal (F4)", () => {
+  function mixedRaw(): VentaRaw {
+    return {
+      period: PERIOD,
+      boundaries,
+      lossReasonNames: new Map(),
+      paidOrders: [
+        { assigned_advisor_id: A, is_outbound: true, total_amount: "100", paid_at: "2026-05-10T18:00:00.000Z" },
+        { assigned_advisor_id: A, is_outbound: false, total_amount: "50", paid_at: "2026-05-11T18:00:00.000Z" },
+      ],
+      draftOpps: [
+        { assigned_advisor_id: A, is_outbound: true },
+        { assigned_advisor_id: A, is_outbound: false },
+      ],
+      wonOpps: [
+        { assigned_advisor_id: A, is_outbound: true, effective_created_at: "2026-05-01T06:00:00.000Z", won_at: "2026-05-11T06:00:00.000Z", actual_amount: "100", estimated_amount: null },
+        { assigned_advisor_id: A, is_outbound: false, effective_created_at: "2026-05-01T06:00:00.000Z", won_at: "2026-05-12T06:00:00.000Z", actual_amount: "50", estimated_amount: null },
+      ],
+      livePipeline: [],
+      livePipelineSnapshot: [],
+      lostEntries: [],
+      stageEntries: [],
+      maxNonLostPos: new Map(),
+    };
+  }
+
+  it("outbound: solo filas outbound", () => {
+    const m = computeVentaMetrics(mixedRaw(), "all", "outbound");
+    expect(m.revenue).toBe(100);
+    expect(m.quotesSent).toBe(1);
+    expect(m.wonCount).toBe(1);
+  });
+  it("inbound: solo filas NO outbound", () => {
+    const m = computeVentaMetrics(mixedRaw(), "all", "inbound");
+    expect(m.revenue).toBe(50);
+    expect(m.quotesSent).toBe(1);
+    expect(m.wonCount).toBe(1);
+  });
+  it("all: ambos (default)", () => {
+    const m = computeVentaMetrics(mixedRaw(), "all", "all");
+    expect(m.revenue).toBe(150);
+    expect(m.quotesSent).toBe(2);
+    expect(m.wonCount).toBe(2);
+    // Sin canal explícito = "all".
+    expect(computeVentaMetrics(mixedRaw(), "all").revenue).toBe(150);
+  });
+  it("canal se combina con scope (asesor)", () => {
+    const m = computeVentaMetrics(mixedRaw(), A, "outbound");
+    expect(m.revenue).toBe(100);
+    const none = computeVentaMetrics(mixedRaw(), B, "outbound");
+    expect(none.revenue).toBe(0);
   });
 });

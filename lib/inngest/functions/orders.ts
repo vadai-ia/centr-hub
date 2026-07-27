@@ -15,6 +15,7 @@ import { hydrateContactFromEmbeddedShopifyCustomer } from "@/lib/inngest/functio
 import {
   createContact,
   findContactByShopifyCustomerId,
+  getContactById,
 } from "@/lib/db/contacts";
 import {
   createOrder,
@@ -143,9 +144,15 @@ async function upsertOrderShell(
 
   const existing = await findOrderByShopifyOrderId(normalized.shopifyOrderId);
   if (!existing) {
+    // Canal (0040/F4): la orden hereda is_outbound del CONTACTO al NACER
+    // (birth-stamp), como el revenue de ese contacto. NO se re-estampa en
+    // update — una conversión posterior del contacto NO reescribe el canal de
+    // una orden ya cerrada (decisión "solo activas y futuras").
+    const orderContact = await getContactById(contactId);
     const created = await createOrder({
       contact_id: contactId,
       assigned_advisor_id: tagAssignment ?? null,
+      is_outbound: orderContact?.is_outbound ?? false,
       opportunity_id: opportunityId,
       shopify_order_id: normalized.shopifyOrderId,
       shopify_name: normalized.shopifyName,

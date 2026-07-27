@@ -20,8 +20,16 @@ interface Props {
   /** Aplica el rango personalizado (botón "Aplicar" — M8.2 ajuste #6). */
   onCustomApply: (from: string, to: string) => void;
   onAdvisorChange: (advisor: string) => void;
+  /** Corte por canal (F4) — disponible a cualquier rol. */
+  onChannelChange: (channel: NonNullable<DashboardFiltersInput["channel"]>) => void;
   onExport: () => void;
 }
+
+const CHANNEL_BUTTONS: Array<{ value: NonNullable<DashboardFiltersInput["channel"]>; label: string }> = [
+  { value: "all", label: "Todo" },
+  { value: "outbound", label: "Outbound" },
+  { value: "inbound", label: "Inbound" },
+];
 
 /**
  * Barra de filtros del Dashboard (M8.2 rediseño). Sin toggle de funnel
@@ -39,9 +47,11 @@ export function DashboardToolbar({
   onPresetChange,
   onCustomApply,
   onAdvisorChange,
+  onChannelChange,
   onExport,
 }: Props) {
   const isCustom = filters.preset === "custom";
+  const activeChannel = filters.channel ?? "all";
 
   // Draft local de las fechas: el dashboard NO se recalcula hasta "Aplicar".
   const [draftFrom, setDraftFrom] = useState(filters.customFrom ?? "");
@@ -78,6 +88,33 @@ export function DashboardToolbar({
         <div className="flex flex-wrap items-center gap-1.5">
           {PRESET_BUTTONS.map((b) => presetBtn(b.value, b.label))}
           {presetBtn("custom", "Personalizado")}
+        </div>
+
+        {/* Canal (F4) — Todo / Outbound / Inbound. Segmentado, para todos. */}
+        <div
+          role="tablist"
+          aria-label="Canal"
+          className="inline-flex rounded-md border border-gray-200 dark:border-gray-700 p-0.5"
+        >
+          {CHANNEL_BUTTONS.map((c) => {
+            const active = activeChannel === c.value;
+            return (
+              <button
+                key={c.value}
+                type="button"
+                role="tab"
+                aria-selected={active}
+                onClick={() => onChannelChange(c.value)}
+                className={`px-2.5 py-1 text-sm rounded transition-colors ${
+                  active
+                    ? "bg-cyan-600 text-white"
+                    : "text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700"
+                }`}
+              >
+                {c.label}
+              </button>
+            );
+          })}
         </div>
 
         {/* Asesor (admin) — junto a los botones de periodo (#3) */}

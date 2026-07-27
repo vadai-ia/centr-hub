@@ -31,7 +31,7 @@ export type MiDiaMutationResult =
   | { ok: false; message: string };
 
 async function resolveActor(): Promise<
-  | { ok: true; orgId: string; userId: string; membershipId: string | null; isAdmin: boolean }
+  | { ok: true; orgId: string; userId: string; membershipId: string | null; isAdmin: boolean; isSdr: boolean }
   | { ok: false; message: string }
 > {
   const session = await getSession();
@@ -43,12 +43,16 @@ async function resolveActor(): Promise<
   // "Sees all" (admin/superadmin/SDR) puede operar tareas/avisos de
   // cualquiera; "own" (vendedor) solo los suyos (0039).
   const isAdmin = canSeeAllData(session.data.activeRole);
+  // El SDR (rol sembrado, key inmutable 'sdr') tiene Mi Día Outbound (F4):
+  // ve las tareas de las opps outbound (incl. entregadas), NO la vista de
+  // equipo. Se identifica por role.key, igual que 'vendedor' está cableado.
+  const isSdr = session.data.activeRole.key === "sdr";
   const membership = await withTenantContext(
     orgId,
     () => getMembership(userId, orgId),
     { source: "user_session" },
   );
-  return { ok: true, orgId, userId, membershipId: membership?.id ?? null, isAdmin };
+  return { ok: true, orgId, userId, membershipId: membership?.id ?? null, isAdmin, isSdr };
 }
 
 export async function loadMiDiaAction(): Promise<MiDiaLoadResult> {
@@ -61,6 +65,7 @@ export async function loadMiDiaAction(): Promise<MiDiaLoadResult> {
       data: await loadMiDiaForUser({
         userId: actor.userId,
         advisorMembershipId: actor.membershipId,
+        outboundView: actor.isSdr,
       }),
     }),
     { source: "user_session" },

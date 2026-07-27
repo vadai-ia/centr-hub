@@ -21,11 +21,13 @@ const ROW_CAP = 50000;
 // ------------------------------------------------------------
 export interface PaidOrderRow {
   assigned_advisor_id: UUID | null;
+  is_outbound: boolean;
   total_amount: string;
   paid_at: string | null;
 }
 export interface CreatedOrderRow {
   assigned_advisor_id: UUID | null;
+  is_outbound: boolean;
   /**
    * Fecha real de creación del pedido en Shopify (migración 0024). El
    * dashboard cuenta/agrupa pedidos por esta fecha, NO por `created_at`
@@ -37,9 +39,11 @@ export interface CreatedOrderRow {
 }
 export interface AdvisorOnlyRow {
   assigned_advisor_id: UUID | null;
+  is_outbound: boolean;
 }
 export interface WonOppRow {
   assigned_advisor_id: UUID | null;
+  is_outbound: boolean;
   /**
    * Fecha efectiva de creación (COALESCE(shopify_created_at, created_at),
    * migración 0025) — inicio del Sales cycle. Para opps de Shopify es la
@@ -52,6 +56,7 @@ export interface WonOppRow {
 }
 export interface LivePipelineRow {
   assigned_advisor_id: UUID | null;
+  is_outbound: boolean;
   stage_id: UUID;
   shopify_draft_order_id: string | null;
   actual_amount: string | null;
@@ -60,12 +65,14 @@ export interface LivePipelineRow {
 export interface LivePostventaRow {
   id: UUID;
   assigned_advisor_id: UUID | null;
+  is_outbound: boolean;
   stage_id: UUID;
   shopify_order_id: string | null;
 }
 export interface LostEntryRow {
   opportunity_id: UUID;
   assigned_advisor_id: UUID | null;
+  is_outbound: boolean;
   actual_amount: string | null;
   estimated_amount: string | null;
   loss_reason_id: UUID | null;
@@ -74,6 +81,7 @@ export interface StageEntryRow {
   opportunity_id: UUID;
   to_stage_id: UUID;
   assigned_advisor_id: UUID | null;
+  is_outbound: boolean;
 }
 export interface HistoryStageRow {
   opportunity_id: UUID;
@@ -92,7 +100,7 @@ export async function listPaidOrdersInPeriod(
   const { supabase, organizationId } = getTenantScopedClient();
   const { data, error } = await supabase
     .from("orders")
-    .select("assigned_advisor_id, total_amount, paid_at")
+    .select("assigned_advisor_id, is_outbound, total_amount, paid_at")
     .eq("organization_id", organizationId)
     .eq("financial_status", "paid")
     .gte("paid_at", startUtc)
@@ -115,7 +123,7 @@ export async function listDraftOppsCreatedInPeriod(
   const { supabase, organizationId } = getTenantScopedClient();
   const { data, error } = await supabase
     .from("opportunities")
-    .select("assigned_advisor_id")
+    .select("assigned_advisor_id, is_outbound")
     .eq("organization_id", organizationId)
     .eq("funnel", "venta")
     .is("cancelled_at", null)
@@ -140,7 +148,7 @@ export async function listWonOppsInPeriod(
   const { supabase, organizationId } = getTenantScopedClient();
   const { data, error } = await supabase
     .from("opportunities")
-    .select("assigned_advisor_id, effective_created_at, won_at, actual_amount, estimated_amount")
+    .select("assigned_advisor_id, is_outbound, effective_created_at, won_at, actual_amount, estimated_amount")
     .eq("organization_id", organizationId)
     .eq("funnel", "venta")
     .is("cancelled_at", null)
@@ -172,7 +180,7 @@ export async function listLivePipelineOpps(
   const { supabase, organizationId } = getTenantScopedClient();
   const { data, error } = await supabase
     .from("opportunities")
-    .select("assigned_advisor_id, stage_id, shopify_draft_order_id, actual_amount, estimated_amount")
+    .select("assigned_advisor_id, is_outbound, stage_id, shopify_draft_order_id, actual_amount, estimated_amount")
     .eq("organization_id", organizationId)
     .eq("funnel", "venta")
     .is("cancelled_at", null)
@@ -202,7 +210,7 @@ export async function listLivePipelineSnapshot(): Promise<LivePipelineRow[]> {
   const { supabase, organizationId } = getTenantScopedClient();
   const { data, error } = await supabase
     .from("opportunities")
-    .select("assigned_advisor_id, stage_id, shopify_draft_order_id, actual_amount, estimated_amount")
+    .select("assigned_advisor_id, is_outbound, stage_id, shopify_draft_order_id, actual_amount, estimated_amount")
     .eq("organization_id", organizationId)
     .eq("funnel", "venta")
     .is("cancelled_at", null)
@@ -226,7 +234,7 @@ export async function listLostEntriesInPeriod(
   const { data, error } = await supabase
     .from("opportunity_stage_history")
     .select(
-      "opportunity_id, opportunity:opportunities!inner(assigned_advisor_id, actual_amount, estimated_amount, loss_reason_id, cancelled_at)",
+      "opportunity_id, opportunity:opportunities!inner(assigned_advisor_id, is_outbound, actual_amount, estimated_amount, loss_reason_id, cancelled_at)",
     )
     .eq("organization_id", organizationId)
     .eq("to_stage_id", lostStageId)
@@ -239,6 +247,7 @@ export async function listLostEntriesInPeriod(
     opportunity_id: UUID;
     opportunity: {
       assigned_advisor_id: UUID | null;
+      is_outbound: boolean;
       actual_amount: string | null;
       estimated_amount: string | null;
       loss_reason_id: UUID | null;
@@ -252,6 +261,7 @@ export async function listLostEntriesInPeriod(
     out.push({
       opportunity_id: r.opportunity_id,
       assigned_advisor_id: r.opportunity.assigned_advisor_id,
+      is_outbound: r.opportunity.is_outbound,
       actual_amount: r.opportunity.actual_amount,
       estimated_amount: r.opportunity.estimated_amount,
       loss_reason_id: r.opportunity.loss_reason_id,
@@ -275,7 +285,7 @@ export async function listStageEntriesInPeriod(
   const { data, error } = await supabase
     .from("opportunity_stage_history")
     .select(
-      "opportunity_id, to_stage_id, opportunity:opportunities!inner(assigned_advisor_id, cancelled_at)",
+      "opportunity_id, to_stage_id, opportunity:opportunities!inner(assigned_advisor_id, is_outbound, cancelled_at)",
     )
     .eq("organization_id", organizationId)
     .in("to_stage_id", stageIds)
@@ -287,12 +297,13 @@ export async function listStageEntriesInPeriod(
   type Raw = {
     opportunity_id: UUID;
     to_stage_id: UUID;
-    opportunity: { assigned_advisor_id: UUID | null };
+    opportunity: { assigned_advisor_id: UUID | null; is_outbound: boolean };
   };
   return ((data ?? []) as unknown as Raw[]).map((r) => ({
     opportunity_id: r.opportunity_id,
     to_stage_id: r.to_stage_id,
     assigned_advisor_id: r.opportunity.assigned_advisor_id,
+    is_outbound: r.opportunity.is_outbound,
   }));
 }
 
@@ -343,7 +354,7 @@ export async function listOrdersCreatedInPeriod(
   const { supabase, organizationId } = getTenantScopedClient();
   const { data, error } = await supabase
     .from("orders")
-    .select("assigned_advisor_id, shopify_created_at")
+    .select("assigned_advisor_id, is_outbound, shopify_created_at")
     .eq("organization_id", organizationId)
     .gte("shopify_created_at", startUtc)
     .lte("shopify_created_at", endUtc)
@@ -359,7 +370,7 @@ export async function listProblematicCaseOpps(
   const { supabase, organizationId } = getTenantScopedClient();
   const { data, error } = await supabase
     .from("opportunities")
-    .select("assigned_advisor_id")
+    .select("assigned_advisor_id, is_outbound")
     .eq("organization_id", organizationId)
     .eq("funnel", "post_venta")
     .eq("stage_id", problematicStageId)
@@ -381,7 +392,7 @@ export async function listLivePostventaOpps(): Promise<LivePostventaRow[]> {
   const { supabase, organizationId } = getTenantScopedClient();
   const { data, error } = await supabase
     .from("opportunities")
-    .select("id, assigned_advisor_id, stage_id, shopify_order_id")
+    .select("id, assigned_advisor_id, is_outbound, stage_id, shopify_order_id")
     .eq("organization_id", organizationId)
     .eq("funnel", "post_venta")
     .is("cancelled_at", null)

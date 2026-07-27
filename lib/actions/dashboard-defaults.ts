@@ -13,4 +13,5 @@ export const DEFAULT_DASHBOARD_FILTERS: DashboardFiltersInput = {
   customFrom: null,
   customTo: null,
   advisor: "",
+  channel: "all",
 };

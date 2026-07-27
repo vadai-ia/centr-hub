@@ -168,6 +168,12 @@ export function MiDiaScreen({
 
       <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_20rem]">
         <main className="min-w-0 space-y-4">
+          {data.outboundView && (
+            <div className="rounded-lg border border-cyan-200 bg-cyan-50 px-3 py-2 text-sm text-cyan-800 dark:border-cyan-500/30 dark:bg-cyan-500/5 dark:text-cyan-300">
+              <strong>Mi Día · Outbound</strong> — tareas de todos los contactos y
+              oportunidades outbound, incluidas las ya entregadas a un vendedor.
+            </div>
+          )}
           {isAdmin && (
             <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5 text-sm dark:border-slate-700 dark:bg-slate-800">
               <button onClick={() => setView("mine")} className={tabCls(view === "mine")}>
