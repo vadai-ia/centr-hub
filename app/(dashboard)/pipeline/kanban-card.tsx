@@ -121,15 +121,17 @@ export function KanbanCard({
         </div>
       </div>
 
-      {/* Marca outbound + conflicto de asesor en su PROPIA fila — no comparten
-          el renglón del nombre para no truncarlo (F3 fix #3). */}
+      {/* Marca outbound (compacta "Out") + conflicto de asesor en su PROPIA
+          fila — nunca comparten el renglón del nombre, así el nombre jamás se
+          trunca por ellos (F3 fix #3). `flex-wrap` evita que los dos badges
+          colisionen en la columna más angosta. */}
       {(opp.is_outbound || opp.overridden_tag_advisor_id) && (
         <div className="flex items-center gap-1 flex-wrap mb-0.5">
-          {opp.is_outbound && <OutboundBadge />}
+          {opp.is_outbound && <OutboundBadge compact />}
           {opp.overridden_tag_advisor_id && (
             <span
               title="Shopify asignó otro asesor por su tag; se mantuvo el asesor de la entrega. Abre la oportunidad para ver el detalle."
-              className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded font-medium flex-shrink-0 bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300"
+              className="text-[9px] uppercase tracking-wide px-1 py-px rounded font-medium flex-shrink-0 bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300"
             >
               ⚠ Asesor
             </span>

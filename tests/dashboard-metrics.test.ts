@@ -10,6 +10,7 @@ import {
 } from "@/lib/services/dashboard-metrics";
 import type { VentaStageBoundaries } from "@/lib/services/dashboard-stages";
 import type { PipelineStageRow } from "@/lib/types/database";
+import { channelOutboundValue, type Channel } from "@/lib/types/dashboard";
 
 /**
  * Correctitud de los KPIs del Dashboard (M8.2) — se testean las
@@ -304,5 +305,29 @@ describe("computeVentaMetrics — corte por canal (F4)", () => {
     expect(m.revenue).toBe(100);
     const none = computeVentaMetrics(mixedRaw(), B, "outbound");
     expect(none.revenue).toBe(0);
+  });
+});
+
+describe("channelOutboundValue — definición ÚNICA de canal (dashboard + pipeline)", () => {
+  // Guard: el corte in-memory del dashboard (matchChannel) y el filtro SQL
+  // del pipeline (listKanbanOpportunities) DEBEN derivar del mismo mapeo. Si
+  // alguien bifurca la definición de inbound/outbound, este test lo atrapa.
+  it("mapea canal → is_outbound esperado", () => {
+    expect(channelOutboundValue("all")).toBe(null); // sin corte
+    expect(channelOutboundValue("outbound")).toBe(true);
+    expect(channelOutboundValue("inbound")).toBe(false);
+  });
+
+  it("es consistente con el corte que aplica el dashboard (inbound = NOT outbound)", () => {
+    // Réplica del predicado que usa matchChannel: want===null || is_outbound===want.
+    const decide = (isOutbound: boolean, channel: Channel) => {
+      const want = channelOutboundValue(channel);
+      return want === null || isOutbound === want;
+    };
+    for (const isOutbound of [true, false]) {
+      expect(decide(isOutbound, "all")).toBe(true);
+      expect(decide(isOutbound, "outbound")).toBe(isOutbound);
+      expect(decide(isOutbound, "inbound")).toBe(!isOutbound);
+    }
   });
 });

@@ -1,6 +1,7 @@
 import "server-only";
 import { getTenantScopedClient } from "@/lib/db/client";
 import { PIPELINE_FLOOR_AUTOMATED_SOURCES } from "@/lib/constants";
+import { channelOutboundValue, type Channel } from "@/lib/types/dashboard";
 import type {
   Funnel,
   OpportunityLineItemRow,
@@ -438,6 +439,10 @@ export async function listKanbanOpportunities(opts: {
    *  previas al corte que ya no se trabajan (visibility-only). Incondicional
    *  respecto a `dateFrom`/`dateTo` — se aplica siempre. */
   minEffectiveIso?: string;
+  /** Corte por canal (mismo eje que el dashboard). "all"/undefined = sin
+   *  corte; "outbound"/"inbound" filtran `is_outbound` según la definición
+   *  única `channelOutboundValue`. Solo filtra — no cambia visibilidad/rol. */
+  channel?: Channel;
 }): Promise<KanbanOpportunity[]> {
   const { supabase, organizationId } = getTenantScopedClient();
 
@@ -480,6 +485,12 @@ export async function listKanbanOpportunities(opts: {
   }
   if (opts.dateFrom) query = query.gte("effective_created_at", opts.dateFrom);
   if (opts.dateTo) query = query.lte("effective_created_at", opts.dateTo);
+
+  // Corte por canal (mismo inbound/outbound que el dashboard).
+  const listOutboundValue = channelOutboundValue(opts.channel ?? "all");
+  if (listOutboundValue !== null) {
+    query = query.eq("is_outbound", listOutboundValue);
+  }
 
   // Piso de visibilidad (cutoff de arranque): incondicional, se AND-ea con
   // el filtro de fecha del usuario y con el resto de `.or()`.
@@ -572,6 +583,9 @@ export async function countKanbanOpportunitiesByStage(opts: {
   /** Piso de visibilidad (cutoff de arranque). Mismo criterio y semántica
    *  que en `listKanbanOpportunities` — mantiene conteo y lista alineados. */
   minEffectiveIso?: string;
+  /** Corte por canal — mismo eje/definición que en `listKanbanOpportunities`;
+   *  mantiene el conteo por etapa alineado con la lista y con el dashboard. */
+  channel?: Channel;
 }): Promise<{ counts: Record<UUID, number>; hiddenCounts: Record<UUID, number> }> {
   const { supabase, organizationId } = getTenantScopedClient();
 
@@ -611,6 +625,12 @@ export async function countKanbanOpportunitiesByStage(opts: {
   }
   if (opts.dateFrom) query = query.gte("effective_created_at", opts.dateFrom);
   if (opts.dateTo) query = query.lte("effective_created_at", opts.dateTo);
+
+  // Corte por canal — alineado con la lista y el dashboard.
+  const countOutboundValue = channelOutboundValue(opts.channel ?? "all");
+  if (countOutboundValue !== null) {
+    query = query.eq("is_outbound", countOutboundValue);
+  }
 
   // Piso de visibilidad (cutoff de arranque) — alineado con la lista.
   if (opts.minEffectiveIso) {

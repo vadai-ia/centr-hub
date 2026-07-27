@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { AdvisorOption } from "@/lib/types/pipeline";
 import type { UUID } from "@/lib/types/database";
+import type { Channel } from "@/lib/types/dashboard";
 
 export interface ActiveFilters {
   /** yyyy-mm-dd o null. */
@@ -10,7 +11,16 @@ export interface ActiveFilters {
   /** UUID de membership o null. */
   advisorId: UUID | null;
   query: string;
+  /** Corte por canal (Todo/Outbound/Inbound) — misma definición que el
+   *  dashboard. "all" (default) = sin corte, vista actual sin cambios. */
+  channel: Channel;
 }
+
+const CHANNEL_OPTIONS: { value: Channel; label: string }[] = [
+  { value: "all", label: "Todo" },
+  { value: "outbound", label: "Outbound" },
+  { value: "inbound", label: "Inbound" },
+];
 
 interface QuickRange {
   label: string;
@@ -78,11 +88,12 @@ export function PipelineFiltersBar({ filters, advisors, showAdvisorFilter, onCha
     filters.dateFrom !== null ||
     filters.dateTo !== null ||
     filters.advisorId !== null ||
+    filters.channel !== "all" ||
     (filters.query.trim().length > 0);
 
   function clear() {
     setLocalQuery("");
-    onChange({ dateFrom: null, dateTo: null, advisorId: null, query: "" });
+    onChange({ dateFrom: null, dateTo: null, advisorId: null, query: "", channel: "all" });
   }
 
   // Identifica cuál rango rápido coincide con la selección actual para
@@ -156,6 +167,42 @@ export function PipelineFiltersBar({ filters, advisors, showAdvisorFilter, onCha
         value={filters.dateTo}
         onChange={(v) => onChange({ ...filters, dateTo: v })}
       />
+
+      {/* Corte por canal (Todo/Outbound/Inbound). Mismo eje/definición que el
+          dashboard; solo filtra la vista — no cambia visibilidad ni rol.
+          Disponible a cualquier rol que ve el tablero. Default "Todo". */}
+      <div
+        className="inline-flex rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-0.5 gap-0.5"
+        role="group"
+        aria-label="Filtrar por canal"
+      >
+        {CHANNEL_OPTIONS.map((opt) => {
+          const isActive = filters.channel === opt.value;
+          return (
+            <button
+              key={opt.value}
+              type="button"
+              onClick={() => onChange({ ...filters, channel: opt.value })}
+              aria-pressed={isActive}
+              className={[
+                "cursor-pointer text-[11px] font-medium px-2 py-1 rounded transition-colors",
+                isActive
+                  ? "bg-cyan-500 text-white"
+                  : "text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700",
+              ].join(" ")}
+              title={
+                opt.value === "all"
+                  ? "Todos los canales"
+                  : opt.value === "outbound"
+                    ? "Solo origen Outbound (trabajado por el SDR)"
+                    : "Solo origen Inbound"
+              }
+            >
+              {opt.label}
+            </button>
+          );
+        })}
+      </div>
 
       {showAdvisorFilter && (
         <select

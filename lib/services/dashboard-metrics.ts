@@ -33,6 +33,7 @@ import {
   type ResolvedPeriod,
 } from "@/lib/time/period";
 import type { UUID } from "@/lib/types/database";
+import { channelOutboundValue } from "@/lib/types/dashboard";
 import type {
   AdvisorBreakdownRow,
   Channel,
@@ -74,8 +75,8 @@ function matchScope(advisorId: UUID | null, scope: Scope): boolean {
  * (`Channel` se define en lib/types/dashboard.)
  */
 function matchChannel(isOutbound: boolean, channel: Channel): boolean {
-  if (channel === "all") return true;
-  return channel === "outbound" ? isOutbound : !isOutbound;
+  const want = channelOutboundValue(channel);
+  return want === null || isOutbound === want;
 }
 
 /** Las 3 métricas de meta (M2v2) para un scope. */

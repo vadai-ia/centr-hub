@@ -31,6 +31,7 @@ import type {
   PipelineStageRow,
   UUID,
 } from "@/lib/types/database";
+import { channelOutboundValue, type Channel } from "@/lib/types/dashboard";
 import { KanbanCard } from "./kanban-card";
 import { KanbanColumn } from "./kanban-column";
 import { LossReasonModal } from "./loss-reason-modal";
@@ -150,6 +151,7 @@ export function PipelineBoard({
     dateTo: null,
     advisorId: null,
     query: "",
+    channel: "all",
   });
   // Vista "Casos resueltos" (solo Post-venta): muestra el archivo de casos
   // cerrados en vez del pipeline activo. Se resetea al cambiar de funnel.
@@ -191,6 +193,13 @@ export function PipelineBoard({
     cardsRef.current = cardsByStage;
   }, [cardsByStage]);
 
+  // Canal activo leído por el handler de realtime sin re-crear el callback
+  // en cada cambio de filtro (mismo patrón que cardsRef).
+  const channelRef = useRef<Channel>(filters.channel);
+  useEffect(() => {
+    channelRef.current = filters.channel;
+  }, [filters.channel]);
+
   const dndSensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
     useSensor(TouchSensor, {
@@ -228,6 +237,14 @@ export function PipelineBoard({
         effectiveAdvisorId !== null &&
         opp.assigned_advisor_id !== effectiveAdvisorId
       ) {
+        setCardsByStage((cur) => removeOppById(cur, oppId));
+        return;
+      }
+      // Corte por canal activo: si la opp dejó de matchear el canal filtrado
+      // (ej. un handoff que cambió su origen), se saca del tablero. Misma
+      // definición que el server (`channelOutboundValue`).
+      const wantOutbound = channelOutboundValue(channelRef.current);
+      if (wantOutbound !== null && opp.is_outbound !== wantOutbound) {
         setCardsByStage((cur) => removeOppById(cur, oppId));
         return;
       }
@@ -363,6 +380,7 @@ export function PipelineBoard({
       query: payload.query,
       showClosed: showClosedByStage.has(stage.id),
       resolvedScope: payload.resolvedScope,
+      channel: payload.channel,
     });
     if (!res.ok) {
       pushToast(res.message, "error");
@@ -393,6 +411,7 @@ export function PipelineBoard({
       query: payload.query,
       showClosed: willShow,
       resolvedScope: payload.resolvedScope,
+      channel: payload.channel,
     });
     if (!res.ok) {
       pushToast(res.message, "error");
@@ -730,6 +749,7 @@ function filtersToPayload(
   advisorId?: UUID;
   query?: string;
   resolvedScope?: "active" | "resolved";
+  channel?: Channel;
 } {
   return {
     dateFrom: filters.dateFrom ? `${filters.dateFrom}T00:00:00.000Z` : undefined,
@@ -737,5 +757,8 @@ function filtersToPayload(
     advisorId: filters.advisorId ?? undefined,
     query: filters.query.trim().length > 0 ? filters.query.trim() : undefined,
     resolvedScope: resolvedView ? "resolved" : undefined,
+    // "all" es el default del server (sin corte) → se omite para no ensuciar
+    // el payload y mantener la vista por defecto idéntica a hoy.
+    channel: filters.channel !== "all" ? filters.channel : undefined,
   };
 }

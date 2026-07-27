@@ -34,6 +34,7 @@ import {
 } from "@/lib/services/pipeline-visibility";
 import { resolvePostventaStages } from "@/lib/services/dashboard-stages";
 import { FUNNELS, PIPELINE_FUNNEL_COOKIE, PIPELINE_PAGE_SIZE, PIPELINE_UNASSIGNED_COOKIE } from "@/lib/constants";
+import type { Channel } from "@/lib/types/dashboard";
 import type { Funnel, Json, UUID } from "@/lib/types/database";
 import type {
   FetchOppActionResult,
@@ -147,6 +148,8 @@ const loadPageSchema = z.object({
   /** Vista "Casos resueltos" (Post-venta): "resolved" trae solo los
    *  casos archivados; default/"active" excluye los resueltos. */
   resolvedScope: z.enum(["active", "resolved"]).optional(),
+  /** Corte por canal (Todo/Outbound/Inbound). Default sin corte. */
+  channel: z.enum(["all", "outbound", "inbound"]).optional(),
 });
 
 /**
@@ -243,6 +246,7 @@ export async function loadKanbanPageAction(
       resolvedScope: input.resolvedScope,
       resolvedSinceIso,
       minEffectiveIso: readPipelineMinDateIso(org?.config ?? null),
+      channel: input.channel,
     });
     const hasMore = items.length > PIPELINE_PAGE_SIZE;
     return {
@@ -448,6 +452,9 @@ export interface PipelineFilters {
   /** Vista "Casos resueltos" (Post-venta): "resolved" muestra solo el
    *  archivo de casos cerrados; default excluye los resueltos. */
   resolvedScope?: "active" | "resolved";
+  /** Corte por canal (Todo/Outbound/Inbound) — mismo eje/definición que el
+   *  dashboard. Solo filtra la vista; no cambia visibilidad ni rol. */
+  channel?: Channel;
 }
 
 /**
@@ -499,6 +506,7 @@ export async function loadInitialPipelineState(opts: {
     const filterDateTo = opts.filters?.dateTo;
     const filterQuery = opts.filters?.query;
     const resolvedScope = opts.filters?.resolvedScope;
+    const filterChannel = opts.filters?.channel;
 
     // Pre-resolve contact_ids that match the search query ONCE. Both
     // the count query and the per-stage list queries reuse this set
@@ -540,6 +548,7 @@ export async function loadInitialPipelineState(opts: {
         resolvedScope,
         resolvedSinceIso,
         minEffectiveIso,
+        channel: filterChannel,
       }),
       Promise.all(
         activeStages.map(async (stage) => {
@@ -556,6 +565,7 @@ export async function loadInitialPipelineState(opts: {
             resolvedScope,
             resolvedSinceIso,
             minEffectiveIso,
+            channel: filterChannel,
           });
           return { stageId: stage.id, items };
         }),

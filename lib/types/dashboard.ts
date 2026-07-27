@@ -110,6 +110,18 @@ export interface AdvisorBreakdownRow {
 /** Corte por canal del dashboard (F4). inbound = NOT outbound. */
 export type Channel = "all" | "outbound" | "inbound";
 
+/**
+ * Definición ÚNICA de canal → valor esperado de `is_outbound`:
+ *   "all" → null (sin corte) · "outbound" → true · "inbound" → false.
+ * Fuente de verdad compartida entre el corte in-memory del dashboard
+ * (`matchChannel`) y el filtro SQL del pipeline (`listKanbanOpportunities`)
+ * — para que ambos hablen del MISMO inbound/outbound, no de dos definiciones.
+ */
+export function channelOutboundValue(channel: Channel): boolean | null {
+  if (channel === "all") return null;
+  return channel === "outbound";
+}
+
 export interface DashboardFiltersState {
   /** Preset activo, o "custom" si el usuario eligió un rango manual. */
   preset: PeriodPreset | "custom";
