@@ -8,6 +8,7 @@ import { withTenantContext } from "@/lib/tenant/context";
 import {
   whaapyRest,
   whaapyRestWith409,
+  WhaapyApiError,
 } from "@/lib/whaapy/admin-client";
 import { WHAAPY_OUTBOUND_MARKER_FIELD } from "@/lib/whaapy/config";
 import {
@@ -147,27 +148,37 @@ export const whaapyOutboundContactSync = inngest.createFunction(
   },
 );
 
-interface OutboundBody {
-  name: string | null;
+export interface OutboundBody {
+  name?: string;
   phone_number: string;
-  email: string | null;
+  email?: string;
   custom_fields: Record<string, unknown>;
   add_tags?: string[];
   assigned_agent_id?: string | null;
 }
 
-function buildOutboundBody(
+/**
+ * Body del outbound. Whaapy valida los campos opcionales como `string`
+ * (solo `phone_number` es requerido) y RECHAZA `null` con un 400
+ * "Expected string, received null". Por eso los campos nullables (name,
+ * email) se OMITEN cuando son null en vez de enviarse como `null`. Ver
+ * ERRORES.md "Whaapy 400 por email:null en el body outbound".
+ *
+ * Trade-off en PATCH: omitir null = "no cambiar" (no se puede VACIAR un
+ * campo mandando null). Mismo gap R3 aceptado que las direcciones Shopify.
+ */
+export function buildOutboundBody(
   snapshot: WhaapyContactSyncEnvelope["contactSnapshot"],
   assignedAgentId: string | null,
 ): OutboundBody {
   const body: OutboundBody = {
-    name: snapshot.fullName,
     phone_number: snapshot.phone as string,
-    email: snapshot.email,
     custom_fields: {
       [WHAAPY_OUTBOUND_MARKER_FIELD]: new Date().toISOString(),
     },
   };
+  if (snapshot.fullName) body.name = snapshot.fullName;
+  if (snapshot.email) body.email = snapshot.email;
   if (snapshot.shopifyTags && snapshot.shopifyTags.length > 0) {
     body.add_tags = snapshot.shopifyTags;
   }
@@ -181,33 +192,38 @@ async function runCreate(
   envelope: WhaapyContactSyncEnvelope,
   body: OutboundBody,
 ): Promise<unknown> {
-  const result = await whaapyRestWith409<{ id: string }>(
-    { organizationId: envelope.organizationId },
-    "POST",
-    "/contacts/v1",
-    body,
+  const result = await withOutboundFailureAudit(envelope, "create", () =>
+    whaapyRestWith409<{ contact?: { id?: string }; id?: string }>(
+      { organizationId: envelope.organizationId },
+      "POST",
+      "/contacts/v1",
+      body,
+    ),
   );
   if (result.ok) {
+    // La respuesta de create viene ENVUELTA: `{ contact: { id, ... } }` (no
+    // flat `{id}`). Se lee `.contact.id` con fallback a `.id` por si cambia.
     const created = result.data;
-    if (!created?.id) {
+    const createdId = created?.contact?.id ?? created?.id ?? null;
+    if (!createdId) {
       await recordAuditEvent({
         actorUserId: null,
         eventType: "whaapy_outbound_failed",
         entityType: "contact",
         entityId: envelope.contactId,
-        payload: { reason: "no_id_in_response" },
+        payload: { reason: "no_id_in_response", body_excerpt: stringifyExcerpt(created) } as Json,
       });
       throw new Error("whaapy_create_no_id_in_response");
     }
-    await linkWhaapyContactId(envelope.contactId, created.id);
+    await linkWhaapyContactId(envelope.contactId, createdId);
     await recordAuditEvent({
       actorUserId: null,
       eventType: "whaapy_contact_created_outbound",
       entityType: "contact",
       entityId: envelope.contactId,
-      payload: { whaapy_contact_id: created.id },
+      payload: { whaapy_contact_id: createdId },
     });
-    return { contactId: envelope.contactId, whaapyContactId: created.id, created: true };
+    return { contactId: envelope.contactId, whaapyContactId: createdId, created: true };
   }
   // 409 conflict: phone duplicado → enlazar al existing.
   const existing = extractExistingId(result.body);
@@ -257,11 +273,13 @@ async function runUpdate(
   }
   // PATCH solo lleva los campos del snapshot — Whaapy mergea custom_fields.
   // Para tags usamos `add_tags`/`remove_tags` (NO `tags`, que reemplaza todo).
-  await whaapyRest<unknown>(
-    { organizationId: envelope.organizationId },
-    "PATCH",
-    `/contacts/v1/${whaapyId}`,
-    body,
+  await withOutboundFailureAudit(envelope, "update", () =>
+    whaapyRest<unknown>(
+      { organizationId: envelope.organizationId },
+      "PATCH",
+      `/contacts/v1/${whaapyId}`,
+      body,
+    ),
   );
   await recordAuditEvent({
     actorUserId: null,
@@ -319,6 +337,41 @@ function stringifyExcerpt(body: unknown): string {
     return s.length > 500 ? `${s.slice(0, 500)}...` : s;
   } catch {
     return String(body).slice(0, 500);
+  }
+}
+
+/**
+ * Instrumentación de fallos del REST outbound (observabilidad). El cliente
+ * lanza `WhaapyApiError` en cualquier respuesta no-2xx/no-409; antes ese throw
+ * subía SIN dejar rastro en `audit_log` (el fallo solo era visible en el
+ * dashboard de Inngest). Aquí se audita `whaapy_outbound_failed` con el status
+ * HTTP + excerpt del body + reason/phase ANTES de re-lanzar, para diagnosticar
+ * retries/DLQ desde la BD (lección "exit_reason auditable desde el 1er commit").
+ */
+async function withOutboundFailureAudit<T>(
+  envelope: WhaapyContactSyncEnvelope,
+  phase: "create" | "update",
+  fn: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await fn();
+  } catch (err) {
+    if (err instanceof WhaapyApiError) {
+      await recordAuditEvent({
+        actorUserId: null,
+        eventType: "whaapy_outbound_failed",
+        entityType: "contact",
+        entityId: envelope.contactId,
+        payload: {
+          reason: envelope.reason,
+          phase,
+          status: err.status,
+          retriable: err.retriable,
+          body_excerpt: stringifyExcerpt(err.body),
+        } as Json,
+      });
+    }
+    throw err;
   }
 }
 
