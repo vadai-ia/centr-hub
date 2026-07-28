@@ -19,6 +19,7 @@
     "whaapy:inspect-webhook-headers": "tsx --tsconfig scripts/tsconfig.json scripts/whaapy/inspect-webhook-headers.ts",
   "whaapy:inspect-team": "tsx --tsconfig scripts/tsconfig.json scripts/whaapy/inspect-team.ts",
     "whaapy:inspect-postventa-stages": "tsx --tsconfig scripts/tsconfig.json scripts/whaapy/inspect-postventa-stages.ts",
+    "whaapy:diagnose-outbound-bugs": "tsx --tsconfig scripts/tsconfig.json scripts/whaapy/diagnose-outbound-whaapy-bugs.ts",
     "maintenance:cancel-orphaned-lead-nuevo": "tsx --tsconfig scripts/tsconfig.json scripts/maintenance/cancel-orphaned-lead-nuevo.ts",
     "maintenance:backfill-postventa-child-data": "tsx --tsconfig scripts/tsconfig.json scripts/maintenance/backfill-postventa-child-data.ts",
     "maintenance:reattribute-postventa-child-advisor": "tsx --tsconfig scripts/tsconfig.json scripts/maintenance/reattribute-postventa-child-advisor.ts",
