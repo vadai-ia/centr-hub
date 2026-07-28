@@ -96,6 +96,9 @@ export interface MembershipRow {
   role: string;
   is_active: boolean;
   whaapy_agent_id: string | null;
+  /** Round-robin de leads por webhook (0045): true = en la rotación. Solo
+   *  aplica a vendedores; default true. Ver lib/services/lead-advisor-assignment. */
+  in_lead_rotation: boolean;
   created_at: ISODateString;
   updated_at: ISODateString;
 }
@@ -530,7 +533,9 @@ export interface Database {
     Tables: {
       organizations: { Row: OrganizationRow; Insert: Insertable<OrganizationRow>; Update: Updatable<OrganizationRow> };
       user_profiles: { Row: UserProfileRow; Insert: Insertable<UserProfileRow>; Update: Updatable<UserProfileRow> };
-      memberships: { Row: MembershipRow; Insert: Insertable<MembershipRow>; Update: Updatable<MembershipRow> };
+      // in_lead_rotation tiene DEFAULT true en SQL (0045) → opcional en Insert
+      // para no romper los callers de createMembership (ERRORES.md "Insertable").
+      memberships: { Row: MembershipRow; Insert: Omit<Insertable<MembershipRow>, "in_lead_rotation"> & Partial<Pick<MembershipRow, "in_lead_rotation">>; Update: Updatable<MembershipRow> };
       roles: { Row: RoleRow; Insert: Insertable<RoleRow>; Update: Updatable<RoleRow> };
       contacts: {
         Row: ContactRow;

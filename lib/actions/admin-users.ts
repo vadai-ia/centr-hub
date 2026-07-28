@@ -19,6 +19,7 @@ import {
   sendSetPasswordEmail,
   setAuthUserEmail,
   setMembershipActive,
+  setMembershipInLeadRotation,
   updateMembershipRole,
   updateUserProfile,
 } from "@/lib/db/users";
@@ -148,6 +149,7 @@ export async function buildManagedUsers(
       loginStatus: deriveLoginStatus(info),
       isSelf: m.user_id === selfUserId,
       activeOpportunities: activeOpps.get(m.id) ?? 0,
+      inLeadRotation: m.in_lead_rotation,
     });
   }
   return users;
@@ -383,6 +385,64 @@ export async function updateUserRoleAction(
       }
       await updateMembershipRole(target.id, newRole.key);
       revalidatePath("/admin/usuarios");
+      const users = await buildManagedUsers(
+        admin.ctx.orgId,
+        admin.ctx.userId,
+        rolesMap,
+      );
+      return { ok: true, users };
+    },
+    { source: "user_session" },
+  );
+}
+
+const rotationSchema = z.object({
+  membershipId: z.string().uuid(),
+  inRotation: z.boolean(),
+});
+
+/**
+ * Activa/desactiva la pertenencia de un vendedor al reparto round-robin de
+ * leads por webhook (0045). Solo afecta ese pool — no cambia rol, acceso, ni
+ * la asignabilidad manual del vendedor. Solo aplica a vendedores.
+ */
+export async function updateUserRotationAction(
+  raw: unknown,
+): Promise<UsersActionResult> {
+  const parsed = rotationSchema.safeParse(raw);
+  if (!parsed.success) {
+    return { ok: false, message: "Parámetros inválidos." };
+  }
+  const admin = await resolveAdmin();
+  if (!admin.ok) return admin;
+
+  return withTenantContext(
+    admin.ctx.orgId,
+    async () => {
+      const rolesMap = await loadOrgRolesMap(admin.ctx.orgId);
+      const memberships = await listManageableMemberships(admin.ctx.orgId);
+      const target = memberships.find((m) => m.id === parsed.data.membershipId);
+      if (!target) {
+        return { ok: false, message: "El usuario ya no existe en la organización." };
+      }
+      // La rotación es solo de vendedores — el admin nunca entra a la rotación.
+      if (target.role !== "vendedor") {
+        return {
+          ok: false,
+          message: "Solo los vendedores participan en el reparto de leads.",
+        };
+      }
+      if (target.in_lead_rotation !== parsed.data.inRotation) {
+        await setMembershipInLeadRotation(target.id, parsed.data.inRotation);
+        await recordAuditEvent({
+          actorUserId: admin.ctx.userId,
+          eventType: "user_lead_rotation_updated",
+          entityType: "membership",
+          entityId: target.id,
+          payload: { in_lead_rotation: parsed.data.inRotation },
+        });
+        revalidatePath("/admin/usuarios");
+      }
       const users = await buildManagedUsers(
         admin.ctx.orgId,
         admin.ctx.userId,

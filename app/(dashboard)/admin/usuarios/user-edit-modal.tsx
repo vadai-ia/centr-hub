@@ -4,6 +4,7 @@ import {
   updateUserEmailAction,
   updateUserProfileAction,
   updateUserRoleAction,
+  updateUserRotationAction,
 } from "@/lib/actions/admin-users";
 import type { ManagedUserView, RoleOption } from "@/lib/types/admin";
 
@@ -28,6 +29,7 @@ export function UserEditModal({ open, user, assignableRoles, onClose, onSaved }:
   const [email, setEmail] = useState("");
   const [color, setColor] = useState("#6B7280");
   const [role, setRole] = useState<string>("vendedor");
+  const [inRotation, setInRotation] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -38,6 +40,7 @@ export function UserEditModal({ open, user, assignableRoles, onClose, onSaved }:
     setEmail(user.email ?? "");
     setColor(HEX.test(user.color) ? user.color : "#6B7280");
     setRole(user.role);
+    setInRotation(user.inLeadRotation);
     setError(null);
     setSubmitting(false);
   }, [open, user]);
@@ -93,6 +96,20 @@ export function UserEditModal({ open, user, assignableRoles, onClose, onSaved }:
       const res = await updateUserRoleAction({
         membershipId: user.membershipId,
         role,
+      });
+      if (!res.ok) {
+        setSubmitting(false);
+        setError(res.message);
+        return;
+      }
+      latest = res.users;
+    }
+
+    // Toggle de rotación (solo vendedores). Se aplica según el rol PERSISTIDO.
+    if (user.role === "vendedor" && inRotation !== user.inLeadRotation) {
+      const res = await updateUserRotationAction({
+        membershipId: user.membershipId,
+        inRotation,
       });
       if (!res.ok) {
         setSubmitting(false);
@@ -232,6 +249,30 @@ export function UserEditModal({ open, user, assignableRoles, onClose, onSaved }:
               </span>
             )}
           </label>
+
+          {user.role === "vendedor" && (
+            <div className="rounded-md border border-gray-200 dark:border-gray-700 p-3">
+              <label className="flex items-start gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={inRotation}
+                  onChange={(e) => setInRotation(e.target.checked)}
+                  disabled={submitting}
+                  className="mt-0.5 h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                />
+                <span className="text-sm">
+                  <span className="font-medium text-gray-900 dark:text-gray-100">
+                    Recibe leads por reparto automático
+                  </span>
+                  <span className="block text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                    Entra a la rotación round-robin de leads que llegan por
+                    formularios/campañas. Apágalo para que deje de recibir leads
+                    automáticos (sigue tomándolos a mano y conserva los suyos).
+                  </span>
+                </span>
+              </label>
+            </div>
+          )}
 
           {error && (
             <div

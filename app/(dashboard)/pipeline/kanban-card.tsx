@@ -121,21 +121,18 @@ export function KanbanCard({
         </div>
       </div>
 
-      {/* Marca outbound (compacta "Out") + conflicto de asesor en su PROPIA
-          fila — nunca comparten el renglón del nombre, así el nombre jamás se
-          trunca por ellos (F3 fix #3). `flex-wrap` evita que los dos badges
-          colisionen en la columna más angosta. */}
-      {(opp.is_outbound || opp.overridden_tag_advisor_id) && (
+      {/* Conflicto de asesor en su propia fila (nunca en el renglón del
+          nombre). La marca "Out" ya NO vive aquí — bajó a la esquina inferior
+          derecha (fila del monto). Así el badge no compite con el nombre y no
+          colisiona con ⚠ Asesor (viven en filas distintas). */}
+      {opp.overridden_tag_advisor_id && (
         <div className="flex items-center gap-1 flex-wrap mb-0.5">
-          {opp.is_outbound && <OutboundBadge compact />}
-          {opp.overridden_tag_advisor_id && (
-            <span
-              title="Shopify asignó otro asesor por su tag; se mantuvo el asesor de la entrega. Abre la oportunidad para ver el detalle."
-              className="text-[9px] uppercase tracking-wide px-1 py-px rounded font-medium flex-shrink-0 bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300"
-            >
-              ⚠ Asesor
-            </span>
-          )}
+          <span
+            title="Shopify asignó otro asesor por su tag; se mantuvo el asesor de la entrega. Abre la oportunidad para ver el detalle."
+            className="text-[9px] uppercase tracking-wide px-1 py-px rounded font-medium flex-shrink-0 bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300"
+          >
+            ⚠ Asesor
+          </span>
         </div>
       )}
 
@@ -145,7 +142,7 @@ export function KanbanCard({
         </p>
       )}
 
-      <div className="flex items-baseline justify-between mt-1.5 gap-2">
+      <div className="flex items-center justify-between mt-1.5 gap-2">
         {noAmount && phone ? (
           <a
             href={`tel:${phone}`}
@@ -168,6 +165,10 @@ export function KanbanCard({
             {amount.text}
           </span>
         )}
+        {/* Marca outbound compacta, anclada a la derecha de la fila del monto
+            = esquina inferior derecha del contenido. `ml-auto` la empuja al
+            borde aunque el monto sea corto. */}
+        {opp.is_outbound && <OutboundBadge compact className="ml-auto" />}
       </div>
 
       {showAdvisor && (

@@ -23,6 +23,7 @@ import {
 } from "@/lib/services/last-write-wins";
 import { discardIfOwnEcho } from "@/lib/services/sync-loop-defense";
 import { isEchoByCustomFieldMarker } from "@/lib/services/whaapy-echo-detection";
+import { findActiveMembershipIdByWhaapyAgentId } from "@/lib/db/users";
 import {
   createContact,
   findContactByWhaapyContactId,
@@ -81,6 +82,16 @@ export const whaapyContactCreated = inngest.createFunction(
         email: data.email ?? null,
       });
 
+      // Asesor mapeado desde el agente de Whaapy (bug 2): un contacto que
+      // entra desde Whaapy con agente asignado debe aterrizar CON asesor en
+      // la plataforma. Se resuelve `assigned_agent_id` → membership por
+      // `memberships.whaapy_agent_id`. Null si el evento no trae agente o el
+      // agente no está mapeado a un vendedor activo. R2: nunca roba un asesor
+      // ya asignado — solo rellena cuando el contacto no tiene.
+      const advisorFromAgent = data.assigned_agent_id
+        ? await findActiveMembershipIdByWhaapyAgentId(env.organizationId, data.assigned_agent_id)
+        : null;
+
       let contact: ContactRow;
       let isInitialMatch = false;
 
@@ -109,7 +120,7 @@ export const whaapyContactCreated = inngest.createFunction(
           internal_note: null,
           shopify_state: null,
           shopify_tags: [],
-          assigned_advisor_id: null,
+          assigned_advisor_id: advisorFromAgent,
           shopify_customer_id: null,
           whaapy_contact_id: data.contact_id,
           missing_phone: normalizePhone(data.phone_number ?? null) === null,
@@ -121,6 +132,24 @@ export const whaapyContactCreated = inngest.createFunction(
           anonymized_at: null,
           last_whaapy_activity_at: null,
         });
+      }
+
+      // 1.5 R11 opción B (timestamp) — ANTES de la hidratación LWW, que
+      //     sobreescribe `last_modified_source='platform'` (el marcador que
+      //     dejó el outbound). El `contact.created` de Whaapy NO trae el
+      //     custom_field marker (la opción A de abajo falla ahí), así que
+      //     esta capa de timestamp es la que ataja el eco de nuestro propio
+      //     POST /contacts/v1 → sin ella R12 crea un "Lead nuevo" duplicado.
+      //     (El worker de contact.updated ya usa esta misma defensa.)
+      const isEchoTimestamp = await discardIfOwnEcho({
+        contactId: contact.id,
+        payloadUpdatedAt: effectiveUpdatedAt,
+        source: "whaapy",
+        whaapyEntityId: data.contact_id,
+      });
+      if (isEchoTimestamp) {
+        await updateContact(contact.id, { last_whaapy_activity_at: env.receivedAt });
+        return { contactId: contact.id, discarded: true, reason: "sync_loop_prevented", r12Suppressed: true };
       }
 
       // 2. LWW por campo con los datos que vinieron en el payload.
@@ -140,6 +169,11 @@ export const whaapyContactCreated = inngest.createFunction(
       };
       const phoneFinal = normalizePhone(data.phone_number ?? null);
       finalPatch.missing_phone = phoneFinal === null;
+      // Bug 2 (rama matched): si el contacto ya existía sin asesor y Whaapy
+      // trae un agente mapeado, sellar el asesor (fill-if-null, R2 no roba).
+      if (contact.assigned_advisor_id === null && advisorFromAgent) {
+        finalPatch.assigned_advisor_id = advisorFromAgent;
+      }
       const updated = await updateContact(contact.id, finalPatch);
 
       // 3. R11 opción A — eco de nuestro propio outbound. Si el payload

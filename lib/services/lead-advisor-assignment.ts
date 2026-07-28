@@ -1,6 +1,6 @@
 import "server-only";
 import { getRedisClient } from "@/lib/redis/client";
-import { listActiveRealVendors } from "@/lib/db/users";
+import { listRotationEligibleVendors } from "@/lib/db/users";
 import type { UUID } from "@/lib/types/database";
 
 /**
@@ -8,9 +8,10 @@ import type { UUID } from "@/lib/types/database";
  * (Bloque C de creación de leads). Los leads manuales NO usan esto —
  * el usuario elige el asesor explícitamente.
  *
- * Elegibilidad: `listActiveRealVendors` (vendedores activos, reales —
- * excluye el usuario sistema "Histórico", R10). Orden estable por
- * `created_at asc`.
+ * Elegibilidad: `listRotationEligibleVendors` (vendedores activos, reales
+ * —excluye el usuario sistema "Histórico", R10— Y con `in_lead_rotation =
+ * true`, 0045). El admin (rol no-vendedor) nunca entra; los vendedores que
+ * el admin saca de la rotación tampoco. Orden estable por `created_at asc`.
  *
  * Contador: `INCR` atómico en Redis por organización (`leadrr:{orgId}`).
  * Atómico ⇒ dos webhooks concurrentes reciben contadores distintos y no
@@ -53,7 +54,7 @@ export interface RoundRobinPick {
 export async function pickRoundRobinAdvisor(
   organizationId: UUID,
 ): Promise<RoundRobinPick> {
-  const vendors = await listActiveRealVendors(organizationId);
+  const vendors = await listRotationEligibleVendors(organizationId);
   if (vendors.length === 0) {
     return { advisorId: null, poolSize: 0 };
   }

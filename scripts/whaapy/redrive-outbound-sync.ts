@@ -68,7 +68,12 @@ async function reSync(orgId: UUID, contact: ContactRow): Promise<Outcome> {
     lastModifiedAt: contact.last_modified_at,
     lastModifiedSource: contact.last_modified_source,
   };
-  const body = buildOutboundBody(snapshot, agentId);
+  // Redrive es siempre CREATE → set si hay agente mapeado, omit si no
+  // (nunca clear: en create no hay agente que limpiar).
+  const body = buildOutboundBody(
+    snapshot,
+    agentId ? { kind: "set", id: agentId } : { kind: "omit" },
+  );
   await markOutboundWrite({ contactId: contact.id, source: PLATFORM_ORIGIN_MARKER });
 
   try {

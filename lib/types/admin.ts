@@ -140,6 +140,9 @@ export interface ManagedUserView {
   isSelf: boolean;
   /** Oportunidades activas (no terminales, no canceladas) asignadas. Para el bloqueo de desactivación (Block 3). */
   activeOpportunities: number;
+  /** Round-robin de leads por webhook (0045): true = en la rotación. Solo
+   *  relevante para vendedores (el toggle se muestra solo para ellos). */
+  inLeadRotation: boolean;
 }
 
 export type UsersActionResult =

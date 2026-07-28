@@ -144,6 +144,74 @@ export async function listActiveRealVendors(
 }
 
 /**
+ * Vendedores ELEGIBLES para el reparto round-robin de leads por webhook
+ * (0045). Es `listActiveRealVendors` + el filtro `in_lead_rotation = true`.
+ *
+ * IMPORTANTE: úsala SOLO desde el round-robin (`pickRoundRobinAdvisor`). El
+ * resto del sistema (selectores de asignación manual, mapeo de tags, etc.)
+ * sigue usando `listActiveRealVendors` — el toggle NO debe restringir la
+ * visibilidad/asignabilidad de un vendedor, solo su pertenencia a la rotación.
+ */
+export async function listRotationEligibleVendors(
+  organizationId: UUID,
+): Promise<Array<MembershipRow & { profile: UserProfileRow }>> {
+  const supabase = getSupabaseAdminClient();
+  const { data, error } = await supabase
+    .from("memberships")
+    .select("*, profile:user_profiles!inner(*)")
+    .eq("organization_id", organizationId)
+    .eq("is_active", true)
+    .eq("role", "vendedor")
+    .eq("in_lead_rotation", true)
+    .eq("profile.is_system_user", false)
+    .order("created_at", { ascending: true });
+  if (error) throw error;
+  return (data ?? []) as Array<MembershipRow & { profile: UserProfileRow }>;
+}
+
+/**
+ * Resuelve el membership (vendedor activo) mapeado a un `whaapy_agent_id`.
+ * Inverso de `resolveWhaapyAgentIdForMembership` — usado por el inbound de
+ * Whaapy para asignar el asesor de un contacto nuevo desde su agente. Devuelve
+ * el `membership.id` o null si el agente no está mapeado a ningún vendedor
+ * activo. Ver CLAUDE.md "Sincronización agente↔Whaapy".
+ */
+export async function findActiveMembershipIdByWhaapyAgentId(
+  organizationId: UUID,
+  whaapyAgentId: string,
+): Promise<UUID | null> {
+  const supabase = getSupabaseAdminClient();
+  const { data, error } = await supabase
+    .from("memberships")
+    .select("id")
+    .eq("organization_id", organizationId)
+    .eq("whaapy_agent_id", whaapyAgentId)
+    .eq("is_active", true)
+    .eq("role", "vendedor")
+    .order("created_at", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return (data?.id as UUID | undefined) ?? null;
+}
+
+/** Setea el flag de pertenencia a la rotación de un membership (admin, 0045). */
+export async function setMembershipInLeadRotation(
+  membershipId: UUID,
+  inRotation: boolean,
+): Promise<MembershipRow> {
+  const supabase = getSupabaseAdminClient();
+  const { data, error } = await supabase
+    .from("memberships")
+    .update({ in_lead_rotation: inRotation })
+    .eq("id", membershipId)
+    .select("*")
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+/**
  * Lista vendedores REALES para el mapeo de tags (M7.2, Bloque 5).
  * A diferencia de `listActiveRealVendors`, INCLUYE vendedores
  * desactivados (no filtra por `is_active`) — un mapeo histórico a un

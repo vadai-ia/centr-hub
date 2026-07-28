@@ -30,22 +30,24 @@ function snap(overrides: Partial<Snapshot> = {}): Snapshot {
   };
 }
 
+const OMIT = { kind: "omit" } as const;
+
 describe("buildOutboundBody — omitir null (fix Whaapy 400)", () => {
   it("email null → NO incluye la clave email (nunca la manda como null)", () => {
-    const body = buildOutboundBody(snap({ email: null }), null);
+    const body = buildOutboundBody(snap({ email: null }), OMIT);
     expect("email" in body).toBe(false);
     expect(body.phone_number).toBe("+525512345678");
     expect(body.name).toBe("Juan");
   });
 
   it("name null → NO incluye la clave name", () => {
-    const body = buildOutboundBody(snap({ fullName: null }), null);
+    const body = buildOutboundBody(snap({ fullName: null }), OMIT);
     expect("name" in body).toBe(false);
     expect(body.email).toBe("juan@x.com");
   });
 
   it("ambos null → solo phone_number + custom_fields", () => {
-    const body = buildOutboundBody(snap({ fullName: null, email: null }), null);
+    const body = buildOutboundBody(snap({ fullName: null, email: null }), OMIT);
     expect("name" in body).toBe(false);
     expect("email" in body).toBe(false);
     expect(body.phone_number).toBe("+525512345678");
@@ -53,21 +55,37 @@ describe("buildOutboundBody — omitir null (fix Whaapy 400)", () => {
   });
 
   it("campos presentes → se incluyen como string (no null)", () => {
-    const body = buildOutboundBody(snap({ fullName: "Ana", email: "ana@x.com" }), "agent-1");
+    const body = buildOutboundBody(snap({ fullName: "Ana", email: "ana@x.com" }), { kind: "set", id: "agent-1" });
     expect(body.name).toBe("Ana");
     expect(body.email).toBe("ana@x.com");
     expect(body.assigned_agent_id).toBe("agent-1");
   });
 
-  it("assigned_agent_id null → se omite", () => {
-    const body = buildOutboundBody(snap(), null);
+  it("name/email NUNCA se envían como null (invariante anti-400)", () => {
+    // El agente puede ir como null (clear); name/email jamás.
+    const body = buildOutboundBody(snap({ fullName: null, email: null }), { kind: "clear" }) as unknown as Record<string, unknown>;
+    expect(body.name ?? undefined).not.toBeNull();
+    expect(body.email ?? undefined).not.toBeNull();
+    for (const k of ["name", "email"]) {
+      if (k in body) expect(body[k], `campo ${k} no debe ser null`).not.toBeNull();
+    }
+  });
+});
+
+describe("buildOutboundBody — directiva tri-estado del agente (bug 3)", () => {
+  it("omit → NO incluye la clave assigned_agent_id", () => {
+    const body = buildOutboundBody(snap(), OMIT);
     expect("assigned_agent_id" in body).toBe(false);
   });
 
-  it("ningún valor del body es null (invariante anti-400)", () => {
-    const body = buildOutboundBody(snap({ fullName: null, email: null }), null) as unknown as Record<string, unknown>;
-    for (const [k, v] of Object.entries(body)) {
-      expect(v, `campo ${k} no debe ser null`).not.toBeNull();
-    }
+  it("set → assigned_agent_id = id (string)", () => {
+    const body = buildOutboundBody(snap(), { kind: "set", id: "agent-9" });
+    expect(body.assigned_agent_id).toBe("agent-9");
+  });
+
+  it("clear → assigned_agent_id = null (desasignar en Whaapy)", () => {
+    const body = buildOutboundBody(snap(), { kind: "clear" });
+    expect("assigned_agent_id" in body).toBe(true);
+    expect(body.assigned_agent_id).toBeNull();
   });
 });

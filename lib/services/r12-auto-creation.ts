@@ -47,6 +47,7 @@ export type R12SkipReason =
   | "backfill_in_progress"
   | "no_initial_stage"
   | "active_opportunity_exists"
+  | "active_outbound_opportunity_exists"
   | "reactivity_threshold_not_met"
   | "organization_not_found";
 
@@ -105,6 +106,19 @@ export async function evaluateAndCreateC2Opportunity(
   const blocking = activeOpps.find((opp) => isBlockingOpportunity(opp));
   if (blocking) {
     return await skip("active_opportunity_exists", input);
+  }
+
+  // Defensa en profundidad (bug Outbound): un contacto con una oportunidad
+  // OUTBOUND activa lo está trabajando el SDR — no se le crea un "Lead nuevo"
+  // paralelo en Venta. El eco del propio POST a Whaapy (que dispara este R12)
+  // ya se descarta en el worker por R11; esto es la segunda barrera para que,
+  // aunque un evento se cuele, no aparezca el duplicado.
+  const activeOutbound = await listOpportunities({
+    funnel: "outbound",
+    contactId: input.contact.id,
+  });
+  if (activeOutbound.some((opp) => isBlockingOpportunity(opp))) {
+    return await skip("active_outbound_opportunity_exists", input);
   }
 
   // Crear oportunidad.

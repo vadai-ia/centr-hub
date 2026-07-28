@@ -109,16 +109,23 @@ export const whaapyOutboundContactSync = inngest.createFunction(
           source: PLATFORM_ORIGIN_MARKER,
         });
 
-        // 4. Componer assigned_agent_id si el asesor maestro mapea
-        //    a un membership.whaapy_agent_id.
-        const assignedAgentId = snapshot.assignedAdvisorId
-          ? await resolveWhaapyAgentIdForMembership(
-              envelope.organizationId,
-              snapshot.assignedAdvisorId,
-            )
-          : null;
+        // 4. Directiva del agente (tri-estado, bug 3):
+        //    - asesor mapeado a whaapy_agent_id → set (mandar el id).
+        //    - asesor NULL (desasignado) → clear en UPDATE (mandar null para
+        //      vaciarlo en Whaapy; la doc de Whaapy acepta null para
+        //      desasignar), omitir en CREATE (no hay nada que limpiar).
+        //    - asesor presente pero SIN mapeo whaapy_agent_id → omit (no
+        //      podemos setear y NO debemos borrar un agente válido por error).
+        const isUpdate =
+          envelope.reason === "update_from_shopify" ||
+          envelope.reason === "update_from_platform_ui";
+        const agent = await resolveAgentDirective(
+          envelope.organizationId,
+          snapshot.assignedAdvisorId,
+          isUpdate,
+        );
 
-        const baseBody = buildOutboundBody(snapshot, assignedAgentId);
+        const baseBody = buildOutboundBody(snapshot, agent);
 
         // 5. Ejecutar según reason.
         if (
@@ -127,10 +134,7 @@ export const whaapyOutboundContactSync = inngest.createFunction(
         ) {
           return await runCreate(envelope, baseBody);
         }
-        if (
-          envelope.reason === "update_from_shopify" ||
-          envelope.reason === "update_from_platform_ui"
-        ) {
+        if (isUpdate) {
           return await runUpdate(envelope, baseBody);
         }
 
@@ -158,18 +162,49 @@ export interface OutboundBody {
 }
 
 /**
- * Body del outbound. Whaapy valida los campos opcionales como `string`
- * (solo `phone_number` es requerido) y RECHAZA `null` con un 400
- * "Expected string, received null". Por eso los campos nullables (name,
- * email) se OMITEN cuando son null en vez de enviarse como `null`. Ver
- * ERRORES.md "Whaapy 400 por email:null en el body outbound".
+ * Directiva tri-estado del agente en el body outbound (bug 3):
+ *   - `set`   → mandar `assigned_agent_id: <id>` (asignar).
+ *   - `clear` → mandar `assigned_agent_id: null` (DESASIGNAR — la doc de
+ *               Whaapy dice "envía null para quitar la asignación"). Solo se
+ *               usa en UPDATE; en CREATE no hay agente que limpiar.
+ *   - `omit`  → NO incluir la clave (no tocar el agente en Whaapy).
+ */
+export type AgentDirective =
+  | { kind: "set"; id: string }
+  | { kind: "clear" }
+  | { kind: "omit" };
+
+/** Resuelve la directiva del agente según el asesor del snapshot + create/update. */
+export async function resolveAgentDirective(
+  organizationId: UUID,
+  assignedAdvisorId: UUID | null | undefined,
+  isUpdate: boolean,
+): Promise<AgentDirective> {
+  if (assignedAdvisorId) {
+    const mapped = await resolveWhaapyAgentIdForMembership(
+      organizationId,
+      assignedAdvisorId,
+    );
+    return mapped ? { kind: "set", id: mapped } : { kind: "omit" };
+  }
+  // Sin asesor: en UPDATE limpiamos (null); en CREATE no hay nada que limpiar.
+  return isUpdate ? { kind: "clear" } : { kind: "omit" };
+}
+
+/**
+ * Body del outbound. Whaapy valida los campos de TEXTO opcionales (name,
+ * email) como `string` y RECHAZA `null` con un 400 "Expected string, received
+ * null" (solo `phone_number` es requerido) → esos se OMITEN cuando son null.
+ * Ver ERRORES.md "Whaapy 400 por email:null en el body outbound".
  *
- * Trade-off en PATCH: omitir null = "no cambiar" (no se puede VACIAR un
- * campo mandando null). Mismo gap R3 aceptado que las direcciones Shopify.
+ * `assigned_agent_id` es la EXCEPCIÓN: Whaapy sí acepta `null` para
+ * DESASIGNAR el agente (doc "envía null para quitar la asignación"). Por eso
+ * usa la directiva tri-estado: set (id) / clear (null, en UPDATE) / omit. El
+ * gap R3 "omitir = no cambiar" sigue aplicando a name/email/dirección.
  */
 export function buildOutboundBody(
   snapshot: WhaapyContactSyncEnvelope["contactSnapshot"],
-  assignedAgentId: string | null,
+  agent: AgentDirective,
 ): OutboundBody {
   const body: OutboundBody = {
     phone_number: snapshot.phone as string,
@@ -182,9 +217,12 @@ export function buildOutboundBody(
   if (snapshot.shopifyTags && snapshot.shopifyTags.length > 0) {
     body.add_tags = snapshot.shopifyTags;
   }
-  if (assignedAgentId) {
-    body.assigned_agent_id = assignedAgentId;
+  if (agent.kind === "set") {
+    body.assigned_agent_id = agent.id;
+  } else if (agent.kind === "clear") {
+    body.assigned_agent_id = null;
   }
+  // "omit" → no se incluye la clave.
   return body;
 }
 
