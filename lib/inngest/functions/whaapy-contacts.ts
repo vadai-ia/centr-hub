@@ -24,6 +24,7 @@ import {
 import { discardIfOwnEcho } from "@/lib/services/sync-loop-defense";
 import { isEchoByCustomFieldMarker } from "@/lib/services/whaapy-echo-detection";
 import { findActiveMembershipIdByWhaapyAgentId } from "@/lib/db/users";
+import { decideAgentAdvisorSync } from "@/lib/services/whaapy-agent-sync";
 import {
   createContact,
   findContactByWhaapyContactId,
@@ -360,7 +361,56 @@ export const whaapyContactUpdated = inngest.createFunction(
         last_whaapy_activity_at: env.receivedAt,
         missing_phone: phoneFinal === null,
       };
+
+      // 4b. Sync del AGENTE de Whaapy → asesor de la plataforma (dirección
+      //     Whaapy→plataforma para contactos EXISTENTES; el `contact.created`
+      //     ya cubre los nuevos). Solo actúa cuando Whaapy señala que el
+      //     agente cambió (`updated_fields` incluye "assignedAgentId") — un
+      //     cambio de nombre/email NO toca el asesor. Corre DESPUÉS de las
+      //     defensas de eco (3a/3b): sólo un cambio GENUINO de Whaapy llega
+      //     aquí, nunca el eco de una escritura propia de la plataforma (por
+      //     eso no reasigna en bucle). `assigned_agent_id` viene del snapshot
+      //     del GET (el delta del webhook no lo trae). R2 intacto: solo toca
+      //     el CONTACTO, no la opp. La decisión pura vive en
+      //     `decideAgentAdvisorSync` (testeable).
+      const agentFieldChanged = data.updated_fields.includes("assignedAgentId");
+      const snapshotAgentId = agentFieldChanged ? snapshot.assigned_agent_id ?? null : null;
+      const mappedMembershipId =
+        agentFieldChanged && snapshotAgentId
+          ? await findActiveMembershipIdByWhaapyAgentId(env.organizationId, snapshotAgentId)
+          : null;
+      const agentDecision = decideAgentAdvisorSync({
+        agentFieldChanged,
+        snapshotAgentId,
+        currentAdvisorId: contact.assigned_advisor_id,
+        mappedMembershipId,
+      });
+      if (agentDecision.changed) {
+        finalPatch.assigned_advisor_id = agentDecision.nextAdvisorId;
+      }
+
       const updated = await updateContact(contact.id, finalPatch);
+      if (agentDecision.audit === "synced") {
+        await recordAuditEvent({
+          actorUserId: null,
+          eventType: "whaapy_agent_advisor_synced",
+          entityType: "contact",
+          entityId: updated.id,
+          payload: {
+            whaapy_agent_id: snapshotAgentId,
+            from_membership_id: contact.assigned_advisor_id,
+            to_membership_id: agentDecision.nextAdvisorId,
+          } as Json,
+        });
+      } else if (agentDecision.audit === "mapping_missing") {
+        await recordAuditEvent({
+          actorUserId: null,
+          eventType: "whaapy_agent_mapping_missing",
+          entityType: "contact",
+          entityId: updated.id,
+          payload: { whaapy_agent_id: snapshotAgentId, whaapy_entity_id: data.contact_id } as Json,
+        });
+      }
 
       // 5. Propagación a Shopify SOLO si LWW efectivamente cambió algún
       //    campo. Si nada cambió (snapshot trae los mismos valores que
