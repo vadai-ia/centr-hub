@@ -1,5 +1,6 @@
 import "server-only";
 import { getOpportunityById, updateOpportunity } from "@/lib/db/opportunities";
+import { syncVentaContactOwnerFromOpp } from "@/lib/services/contact-advisor-sync";
 import {
   recordAuditEvent,
   listOpenTasksForOpportunity,
@@ -130,6 +131,29 @@ export async function reassignOpportunityAdvisor(input: {
       entityId: input.opportunityId,
       payload: { error: e instanceof Error ? e.message : String(e) },
     }).catch(() => {});
+  }
+
+  // Materializar el dueño-Venta del contacto desde esta reasignación MANUAL.
+  // SOLO Venta: una asignación de Post-venta NUNCA toca el dueño del contacto
+  // ni el Whaapy de Venta (aislamiento — un contacto puede tener vendedor en
+  // Venta y Customer Success en Post-venta). Best-effort: si falla, la opp ya
+  // quedó reasignada y auditada; el sync es derivado y re-disparable.
+  if (opp.funnel === "venta") {
+    try {
+      await syncVentaContactOwnerFromOpp({
+        contactId: opp.contact_id,
+        justAssignedAdvisorId: input.newMembershipId,
+        actorUserId: input.actorUserId,
+      });
+    } catch (e) {
+      await recordAuditEvent({
+        actorUserId: input.actorUserId,
+        eventType: "contact_owner_sync_failed",
+        entityType: "opportunity",
+        entityId: input.opportunityId,
+        payload: { contact_id: opp.contact_id, error: e instanceof Error ? e.message : String(e) },
+      }).catch(() => {});
+    }
   }
 
   return { ok: true, changed: true };

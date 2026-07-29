@@ -21,18 +21,17 @@ import {
   type TimelineEvent,
 } from "@/lib/services/timeline";
 import { reassignOpportunityAdvisor } from "@/lib/services/opportunity-reassignment";
+import { propagateContactAdvisorChange } from "@/lib/services/contact-advisor-sync";
 import {
   getMembership,
   listActiveRealVendors,
   listMembershipsForOrganization,
 } from "@/lib/db/users";
 import { getUserProfile } from "@/lib/db/users";
-import { listTagMappings } from "@/lib/db/configuration";
 import { getOrganizationById } from "@/lib/db/organizations";
 import { recordAuditEvent } from "@/lib/db/operational";
 import {
   createCustomer,
-  updateCustomerTags,
   BackfillSuppressedError,
 } from "@/lib/shopify/outbound";
 import {
@@ -816,8 +815,9 @@ async function reassignContact(
   }
 
   // Propagación post-commit, best-effort. Cualquier falla se audita
-  // sin afectar la transacción principal (el cambio local quedó).
-  void propagateContactReassignment(updated, previousMembershipId);
+  // sin afectar la transacción principal (el cambio local quedó). Reusa el
+  // helper compartido con la sincronización dueño-desde-opp (Venta).
+  void propagateContactAdvisorChange(updated, previousMembershipId);
 
   return { ok: true, entityType: "contact", entityId: contactId };
 }
@@ -836,79 +836,6 @@ async function revertContactAdvisor(
     // Best-effort — si la reversa falla, el cliente verá error y
     // refrescará. Mismo trade-off que M5 (pipeline-move).
   }
-}
-
-async function propagateContactReassignment(
-  contact: ContactRow,
-  previousMembershipId: UUID | null,
-): Promise<void> {
-  // Shopify: tags de vendedor.
-  if (contact.shopify_customer_id) {
-    try {
-      const org = await getOrganizationById(contact.organization_id);
-      const shopDomain = org?.shopify_store_domain;
-      if (shopDomain) {
-        const vendorTagsByMembership = await loadVendorTagsByMembership();
-        const newTag = contact.assigned_advisor_id
-          ? vendorTagsByMembership.get(contact.assigned_advisor_id) ?? null
-          : null;
-        const oldTag = previousMembershipId
-          ? vendorTagsByMembership.get(previousMembershipId) ?? null
-          : null;
-        const tagsToAdd = newTag ? [newTag] : [];
-        const tagsToRemove = oldTag && oldTag !== newTag ? [oldTag] : [];
-        if (tagsToAdd.length > 0 || tagsToRemove.length > 0) {
-          await updateCustomerTags({
-            ctx: { organizationId: contact.organization_id, shopDomain },
-            contactId: contact.id,
-            shopifyCustomerId: contact.shopify_customer_id,
-            currentTags: contact.shopify_tags,
-            tagsToAdd,
-            tagsToRemove,
-          });
-        }
-      }
-    } catch (e) {
-      await recordAuditEvent({
-        actorUserId: null,
-        eventType: "contact_reassignment_shopify_tag_failed",
-        entityType: "contact",
-        entityId: contact.id,
-        payload: {
-          error: e instanceof Error ? e.message : "unknown",
-        },
-      });
-    }
-  }
-
-  // Whaapy: evento Inngest. Reusa el helper de M3 que envía el snapshot
-  // completo del contact a la cola — el worker M4 propaga via PATCH.
-  if (contact.whaapy_contact_id) {
-    try {
-      await recordWhaapySyncIntent(contact, "update_from_platform_ui");
-    } catch (e) {
-      await recordAuditEvent({
-        actorUserId: null,
-        eventType: "contact_reassignment_whaapy_dispatch_failed",
-        entityType: "contact",
-        entityId: contact.id,
-        payload: {
-          error: e instanceof Error ? e.message : "unknown",
-        },
-      });
-    }
-  }
-}
-
-async function loadVendorTagsByMembership(): Promise<Map<UUID, string>> {
-  const mappings = await listTagMappings({ classification: "vendor" });
-  const out = new Map<UUID, string>();
-  for (const m of mappings) {
-    if (m.mapped_membership_id) {
-      out.set(m.mapped_membership_id, m.original_tag);
-    }
-  }
-  return out;
 }
 
 async function reassignOpportunity(

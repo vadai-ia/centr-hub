@@ -52,10 +52,33 @@ import type { Json, MembershipRow, UUID } from "@/lib/types/database";
 
 const inngest = getInngestClient();
 
+/**
+ * Límites de ráfaga del outbound Whaapy (bug de desactivación masiva).
+ * Conservadores (Whaapy publica 10/min para bulk; el individual no está
+ * documentado): 30/min por org drena ~30 contactos/min, cómodo para una
+ * desactivación grande sin arriesgar 429. Ajustables si Whaapy publica su
+ * límite individual real.
+ */
+const WHAAPY_OUTBOUND_CONCURRENCY = 4;
+const WHAAPY_OUTBOUND_THROTTLE_PER_MIN = 30;
+
 export const whaapyOutboundContactSync = inngest.createFunction(
   {
     id: "whaapy-outbound-contact-sync",
     retries: 5,
+    // Protección contra ráfagas (ej. desactivación masiva de un vendedor que
+    // reasigna N opps de Venta → N PATCH a Whaapy): el rate limit de Whaapy es
+    // bajo (bulk documentado en 10/min; el individual no está publicado). El
+    // throttle por-org drena a un ritmo seguro y encola el resto en Inngest;
+    // una operación puntual entra de inmediato (el throttle solo muerde en
+    // ráfaga). Un 429 que se cuele es `retriable` → Inngest reintenta con
+    // backoff. Aplica a TODO el outbound Whaapy (Shopify, leads, reasignación).
+    concurrency: { limit: WHAAPY_OUTBOUND_CONCURRENCY },
+    throttle: {
+      limit: WHAAPY_OUTBOUND_THROTTLE_PER_MIN,
+      period: "60s",
+      key: "event.data.organizationId",
+    },
     triggers: [{ event: WHAAPY_OUTBOUND_CONTACT_SYNC_EVENT }],
   },
   async ({ event }) => {

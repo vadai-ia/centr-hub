@@ -285,6 +285,9 @@ export async function getContactIdsWithDerivedAdvisor(
     .from("opportunities")
     .select("contact_id, contacts!inner(id, assigned_advisor_id)")
     .eq("organization_id", organizationId)
+    // Dueño "heredado" = solo VENTA. Una asignación de Post-venta (Customer
+    // Success) NO es el dueño del contacto (aislamiento Venta/Post-venta).
+    .eq("funnel", "venta")
     .eq("assigned_advisor_id", advisorMembershipId)
     .is("cancelled_at", null)
     .is("contacts.assigned_advisor_id", null)
@@ -307,6 +310,9 @@ export async function getDerivedAdvisorsForContacts(
     .from("opportunities")
     .select("contact_id, assigned_advisor_id")
     .eq("organization_id", organizationId)
+    // Dueño "heredado" mostrado = solo VENTA (Post-venta no es dueño del
+    // contacto; su asesor vive en la opp de Post-venta).
+    .eq("funnel", "venta")
     .in("contact_id", contactIds)
     .is("cancelled_at", null)
     .not("assigned_advisor_id", "is", null);
