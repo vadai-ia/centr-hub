@@ -410,6 +410,39 @@ El motor mueve solo las oportunidades de Post-venta por sus 4 primeras etapas se
 
 Un caso cancelado/reembolsado aterriza en "Caso problemático" (sumidero del motor). Una persona lo resuelve desde el detalle de la opp (botón "Marcar caso como resuelto", visible solo ahí, para asesor asignado o admin): setea `resolved_at` **sin cambiar la etapa** (flag ortogonal, patrón "cancelado ≠ perdido"). El caso se archiva de las vistas activas pero sigue consultable en la vista "Casos resueltos" (toggle del toolbar, solo Post-venta) y por búsqueda de orden/contacto. Sin reopen en MVP — el flag permite des-setear en V2 si Centr lo pide.
 
+## Admin → Integraciones (migración 0046)
+
+Pantalla admin-only que gestiona las TRES conexiones externas —**Shopify**, **Whaapy Venta** y **Whaapy Post-venta**— sin tocar código, `.env.local`, Vercel env ni SQL: capturar/rotar credenciales, editar el identificador de cada sistema, probar la conexión, desconectar y reemplazar. Los dos Whaapy siguen siendo proveedores **separados** (namespace de Vault, discriminador y endpoint propios).
+
+**Dónde vive cada cosa (sin cambios de fondo):** las credenciales siguen en `organizations.vault_keys` (solo `service_role`); los discriminadores siguen en `organizations` (`shopify_store_domain`, `whaapy_business_id`, `whaapy_postventa_business_id`). Lo nuevo es `integration_connections`: **una fila por (org, proveedor) con metadata NO secreta** — estado, últimos 4 de cada credencial, callback, resultado del último test y `generation`. La pantalla lee SOLO esa tabla, así que ningún bug de presentación puede filtrar un secreto. Los campos de credencial son **write-only**: no existe getter que devuelva un valor guardado.
+
+### Fail-closed: el env ya NO es respaldo de credenciales
+
+Los getters del Vault (`getShopifyClientId`, `getWhaapyApiKey`, …) **ya no caen a variables de entorno**. Una organización sin credenciales propias antes autenticaba en silencio con las de la primera; ahora lanza `VaultMissingCredentialError`. Detalle y guard en `ERRORES.md` ("El fallback a env de las credenciales era un fallo de aislamiento multi-tenant").
+
+### Pasos operativos obligatorios (NO son código del repo)
+
+1. **Materializar env → Vault ANTES de desplegar.** Medido en producción antes del cambio, Centr tenía `vault_keys.shopify` VACÍO y `whaapy.api_key` ausente: operaba por env. Sin este paso, Shopify y Whaapy Venta quedan mudos al desplegar.
+   ```
+   npm run maintenance:adopt-env-credentials -- --org-slug centr --dry-run
+   npm run maintenance:adopt-env-credentials -- --org-slug centr
+   ```
+   Idempotente y no destructivo (nunca pisa lo que ya está en Vault). Es seguro correrlo **antes** del deploy: el código vigente ya prefiere Vault sobre env, así que copiar los mismos valores no cambia comportamiento. El `--dry-run` imprime el estado del Vault (solo nombres de credencial, nunca valores) — es el chequeo previo.
+
+2. **Aplicar la migración 0046.** Crea `integration_connections` + RLS, backfillea una fila por proveedor con el estado real, agrega los RPC `count_integration_linked_rows` y `replace_integration_connection`, siembra la pestaña `admin-integraciones` en los roles admin/superadmin existentes y re-CREA `bootstrap_organization` (desde la VIGENTE 0041) para que las orgs nuevas nazcan con la pestaña y sus filas de conexión.
+
+3. **Capturar en la pantalla lo que el script no puede recuperar.** Whaapy muestra sus secretos una sola vez: `whaapy.webhook_secret` (si se recreó el webhook) y, en Post-venta, `webhook_secret`/`inbound_token`. Verificar el estado final en Admin → Integraciones y usar **Probar conexión** en las tres tarjetas.
+
+### Qué pasa con los datos al cambiar una conexión
+
+- **Rotar una credencial del mismo sistema:** sin impacto en datos. Cambiar el Client Secret invalida además el `access_token` cacheado (se re-obtiene con el secret nuevo).
+- **Desconectar:** borra credenciales y **nada más**. Ningún id externo se toca, ninguna fila de negocio cambia; reconectar el mismo sistema restaura el enlace tal cual.
+- **Reemplazar (sistema externo DISTINTO):** bloqueado mientras existan filas enlazadas, salvo por el flujo explícito con dry-run + palabra de confirmación (`reemplazar`, revalidada en backend). Ejecuta el RPC atómico que desenlaza toda identidad externa del proveedor. **Desenlazar no es borrar:** oportunidades, pedidos, montos, etapas, historial y asesores quedan intactos. Tras un reemplazo hay que rehacer el mapeo de Admin → Agentes Whaapy (Venta) y volver a capturar credenciales.
+
+### Observabilidad del ingreso
+
+El endpoint de Shopify ahora persiste cada request en `whaapy_raw_webhooks` (`endpoint='shopify'`) con `exit_reason` por cada camino de salida, igual que Whaapy desde M4. La tarjeta de cada proveedor muestra eventos recibidos y rechazados de las últimas 24 h — un dominio mal escrito deja de ser un 200 silencioso. Los headers con credencial se redactan al persistir.
+
 ## Cambios al stack
 
 Cualquier modificación al stack documentado en `package.json` (agregar dependencia, subir versión mayor, cambiar provider externo) requiere aprobación explícita del operador antes de comitearse. Razón: el stack está fijado por experiencias previas (Kibah, FindMed, Hemenesy) y cualquier desviación inesperada introduce riesgo operacional.

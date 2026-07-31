@@ -522,6 +522,35 @@ export interface InboundWebhookSourceRow {
   updated_at: ISODateString;
 }
 
+/**
+ * Conexión externa administrable (0046). Metadata NO SECRETA — las
+ * credenciales siguen en `organizations.vault_keys` (solo service_role).
+ * De cada credencial aquí vive únicamente su `last4` para la UI.
+ */
+export type IntegrationProvider = "shopify" | "whaapy_venta" | "whaapy_postventa";
+export type IntegrationStatus = "not_configured" | "connected" | "disconnected";
+
+export interface IntegrationConnectionRow {
+  id: UUID;
+  organization_id: UUID;
+  provider: IntegrationProvider;
+  status: IntegrationStatus;
+  /** { client_secret: "ab12", api_key: "...", ... } — NUNCA el valor completo. */
+  credential_last4: Json;
+  callback_url: string | null;
+  webhook_registered_at: ISODateString | null;
+  last_test_at: ISODateString | null;
+  last_test_ok: boolean | null;
+  last_test_message: string | null;
+  connected_at: ISODateString | null;
+  disconnected_at: ISODateString | null;
+  /** Sube con cada reemplazo del sistema externo. Sufija los ids desenlazados. */
+  generation: number;
+  updated_by_user_id: UUID | null;
+  created_at: ISODateString;
+  updated_at: ISODateString;
+}
+
 type Insertable<R extends { id: UUID; created_at: ISODateString; updated_at: ISODateString }> =
   Omit<R, "id" | "created_at" | "updated_at"> &
     Partial<Pick<R, "id" | "created_at" | "updated_at">>;
@@ -651,6 +680,15 @@ export interface Database {
           Partial<Pick<InboundWebhookSourceRow, "last_used_at" | "rotated_at">>;
         Update: Updatable<InboundWebhookSourceRow>;
       };
+      integration_connections: {
+        Row: IntegrationConnectionRow;
+        // Todo lo que no es (organization_id, provider) tiene DEFAULT en SQL
+        // (0046) → opcional en Insert. La fila nace vacía y la va poblando el
+        // admin desde la pantalla (ERRORES.md "Insertable exige TODA columna").
+        Insert: Pick<IntegrationConnectionRow, "organization_id" | "provider"> &
+          Partial<Omit<IntegrationConnectionRow, "organization_id" | "provider">>;
+        Update: Updatable<IntegrationConnectionRow>;
+      };
     };
     Views: Record<string, never>;
     Functions: {
@@ -675,6 +713,22 @@ export interface Database {
       is_member_of: {
         Args: { p_org: UUID };
         Returns: boolean;
+      };
+      /** Dry-run READ-ONLY del reemplazo de conexión (0046). */
+      count_integration_linked_rows: {
+        Args: { p_organization_id: UUID; p_provider: IntegrationProvider };
+        Returns: Json;
+      };
+      /** Reemplazo ATÓMICO de conexión: discriminador + desenlace + Vault (0046). */
+      replace_integration_connection: {
+        Args: {
+          p_organization_id: UUID;
+          p_provider: IntegrationProvider;
+          p_new_discriminator: string;
+          p_actor_user_id?: UUID | null;
+          p_new_store_url?: string | null;
+        };
+        Returns: Json;
       };
     };
     Enums: Record<string, never>;

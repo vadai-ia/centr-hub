@@ -12,6 +12,11 @@ import { withTenantContext } from "@/lib/tenant/context";
 import { recordAuditEvent } from "@/lib/db/operational";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createNotification } from "@/lib/db/operational";
+import {
+  INGRESS_ENDPOINT,
+  recordWebhookIngress,
+  tagWebhookExitReason,
+} from "@/lib/db/webhook-ingress";
 import type { UUID } from "@/lib/types/database";
 
 /**
@@ -19,7 +24,7 @@ import type { UUID } from "@/lib/types/database";
  *
  * Disciplina:
  *   1. Body raw como Buffer ANTES de parsear.
- *   2. HMAC-SHA256 verify con Client Secret de la org (Vault o env).
+ *   2. HMAC-SHA256 verify con Client Secret de la org (Vault, fail-closed).
  *   3. Dedup atómico en Upstash (`SET NX EX 24h`) con `X-Shopify-Webhook-Id`.
  *   4. Resolución de tenant por `X-Shopify-Shop-Domain`.
  *   5. Encolar a Inngest con envelope normalizado.
@@ -28,6 +33,14 @@ import type { UUID } from "@/lib/types/database";
  *
  * HMAC falla → 401. Topic no soportado → 200 + audit (Shopify
  * suscribió algo que no manejamos — no es nuestro problema).
+ *
+ * OBSERVABILIDAD (0046): cada request se persiste en `whaapy_raw_webhooks`
+ * con `endpoint='shopify'` ANTES de validar nada, y cada camino de salida
+ * taggea su `exit_reason`. Antes de esto, el path más peligroso —dominio
+ * desconocido— respondía 200 y solo dejaba un `console.warn`: sin rastro en
+ * BD, un dominio mal escrito era indistinguible de una tienda sin actividad.
+ * Ese camino corre ANTES de resolver el tenant, así que no puede escribir en
+ * `audit_log` (organization_id NOT NULL) — de ahí la tabla tenant-independiente.
  */
 
 export const runtime = "nodejs";
@@ -43,6 +56,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return new NextResponse("invalid_body", { status: 400 });
   }
 
+  const rawId = await recordWebhookIngress(
+    INGRESS_ENDPOINT.shopify,
+    req.headers,
+    bodyBuf,
+  );
+
   const topic = req.headers.get("x-shopify-topic");
   const shopDomain = req.headers.get("x-shopify-shop-domain");
   const hmacHeader = req.headers.get("x-shopify-hmac-sha256");
@@ -50,14 +69,17 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const triggeredAt = req.headers.get("x-shopify-triggered-at");
 
   if (!topic || !shopDomain || !hmacHeader) {
+    await tagWebhookExitReason(rawId, "missing_headers");
     return new NextResponse("missing_headers", { status: 400 });
   }
 
   // 1. Resolución de tenant ANTES de HMAC (necesitamos el secret).
   const org = await getOrganizationByShopifyDomain(shopDomain);
   if (!org) {
-    // No conocemos esta tienda — devuelve 200 para no acumular DLQ
-    // del lado de Shopify, pero registra para diagnóstico.
+    // No conocemos esta tienda — devuelve 200 para no acumular DLQ del lado
+    // de Shopify, pero deja rastro EN BD (no solo en logs efímeros): es el
+    // síntoma exacto de un dominio mal escrito tras cambiar la conexión.
+    await tagWebhookExitReason(rawId, "unknown_shop");
     // eslint-disable-next-line no-console
     console.warn("shopify_webhook_unknown_shop", { shopDomain, topic });
     return new NextResponse("ok", { status: 200 });
@@ -69,9 +91,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     secret = await getShopifyWebhookSecret(org.id);
   } catch {
     // Sin secret no podemos validar. 401 para que Shopify no continúe.
+    await tagWebhookExitReason(rawId, "missing_secret");
     return new NextResponse("missing_secret", { status: 401 });
   }
   if (!verifyShopifyHmac(bodyBuf, hmacHeader, secret)) {
+    await tagWebhookExitReason(rawId, "invalid_hmac");
     return new NextResponse("invalid_hmac", { status: 401 });
   }
 
@@ -91,6 +115,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     firstDelivery = true;
   }
   if (!firstDelivery) {
+    await tagWebhookExitReason(rawId, "dedup_hit");
     return new NextResponse("ok", { status: 200, headers: { "x-centrhub-dedup": "hit" } });
   }
 
@@ -113,6 +138,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     } catch {
       // no bloquear
     }
+    await tagWebhookExitReason(rawId, "unhandled_topic");
     return new NextResponse("ok", { status: 200 });
   }
 
@@ -122,6 +148,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     payload = JSON.parse(bodyBuf.toString("utf8"));
   } catch {
     await notifyAdminOfMalformedPayload(org.id, topic, eventId);
+    await tagWebhookExitReason(rawId, "invalid_json");
     return new NextResponse("invalid_json", { status: 400 });
   }
 
@@ -148,9 +175,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       err: (err as Error).message,
     });
     // Devolver 5xx para que Shopify reintente.
+    await tagWebhookExitReason(rawId, "enqueue_failed");
     return new NextResponse("enqueue_failed", { status: 503 });
   }
 
+  await tagWebhookExitReason(rawId, "enqueue_succeeded");
   return new NextResponse("ok", { status: 200, headers: { "x-centrhub-dedup": "miss" } });
 }
 
