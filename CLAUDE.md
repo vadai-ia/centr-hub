@@ -437,7 +437,9 @@ Los getters del Vault (`getShopifyClientId`, `getWhaapyApiKey`, …) **ya no cae
 
 - **Rotar una credencial del mismo sistema:** sin impacto en datos. Cambiar el Client Secret invalida además el `access_token` cacheado (se re-obtiene con el secret nuevo).
 - **Desconectar:** borra credenciales y **nada más**. Ningún id externo se toca, ninguna fila de negocio cambia; reconectar el mismo sistema restaura el enlace tal cual.
-- **Reemplazar (sistema externo DISTINTO):** bloqueado mientras existan filas enlazadas, salvo por el flujo explícito con dry-run + palabra de confirmación (`reemplazar`, revalidada en backend). Ejecuta el RPC atómico que desenlaza toda identidad externa del proveedor. **Desenlazar no es borrar:** oportunidades, pedidos, montos, etapas, historial y asesores quedan intactos. Tras un reemplazo hay que rehacer el mapeo de Admin → Agentes Whaapy (Venta) y volver a capturar credenciales.
+- **Reemplazar (sistema externo DISTINTO):** bloqueado mientras existan filas enlazadas, salvo por el flujo explícito con dry-run + palabra de confirmación (`reemplazar`) + **reconocimiento de respaldo**; las dos últimas se revalidan en backend (un gate de UI no es una garantía) y el rechazo NUNCA llega a invocar el RPC. Ejecuta el RPC atómico que desenlaza toda identidad externa del proveedor. **Desenlazar no es borrar:** oportunidades, pedidos, montos, etapas, historial y asesores quedan intactos. Tras un reemplazo hay que rehacer el mapeo de Admin → Agentes Whaapy (Venta) y volver a capturar credenciales.
+
+  **Es la ÚNICA acción de la pantalla que un rollback de código NO deshace** y esta base **no tiene respaldos automáticos** (Supabase Free — ver "Backups"). El modal lo dice explícitamente y exige marcar "tengo un respaldo reciente" antes de habilitar el botón; queda audit `integration_replace_backup_acknowledged` (quién lo declaró) ANTES de tocar nada, de modo que el intento queda registrado aunque el RPC reviente y revierta. **Tomar `pg_dump` antes del primer uso.** Guard: `tests/admin-integrations-replace-guards.test.ts`.
 
 ### Observabilidad del ingreso
 

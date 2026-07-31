@@ -7,7 +7,12 @@ interface Props {
   preview: ReplacePreview;
   busy: boolean;
   onCancel: () => void;
-  onSubmit: (input: { newDiscriminator: string; storeUrl: string | null; confirmation: string }) => void;
+  onSubmit: (input: {
+    newDiscriminator: string;
+    storeUrl: string | null;
+    confirmation: string;
+    backupAcknowledged: boolean;
+  }) => void;
 }
 
 /**
@@ -24,11 +29,13 @@ export function ReplaceModal({ card, preview, busy, onCancel, onSubmit }: Props)
   const [newDiscriminator, setNewDiscriminator] = useState("");
   const [storeUrl, setStoreUrl] = useState("");
   const [confirmation, setConfirmation] = useState("");
+  const [backupAcknowledged, setBackupAcknowledged] = useState(false);
 
   const confirmed =
     confirmation.trim().toLowerCase() === preview.confirmationWord.toLowerCase();
   const canSubmit =
-    !busy && confirmed && newDiscriminator.trim().length > 0 &&
+    !busy && confirmed && backupAcknowledged &&
+    newDiscriminator.trim().length > 0 &&
     newDiscriminator.trim() !== preview.currentDiscriminator;
 
   return (
@@ -47,6 +54,7 @@ export function ReplaceModal({ card, preview, busy, onCancel, onSubmit }: Props)
             newDiscriminator: newDiscriminator.trim(),
             storeUrl: storeUrl.trim() || null,
             confirmation,
+            backupAcknowledged,
           });
         }}
         className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-lg w-full p-6 max-h-[90vh] overflow-y-auto"
@@ -114,6 +122,43 @@ export function ReplaceModal({ card, preview, busy, onCancel, onSubmit }: Props)
             />
           </label>
         )}
+
+        {/* Irreversibilidad — la única acción de la pantalla que un rollback
+            de código NO deshace. Se dice antes de pedir la confirmación. */}
+        <div className="mt-4 rounded-md border border-red-300 dark:border-red-800 bg-red-50 dark:bg-red-900/20 p-3">
+          <p className="text-sm font-semibold text-red-800 dark:text-red-200">
+            Esta acción es irreversible
+          </p>
+          <ul className="mt-2 space-y-1 text-xs text-red-800 dark:text-red-200 list-disc pl-4">
+            <li>
+              El desenlace no se puede deshacer desde la aplicación: no hay botón para
+              revertirlo.
+            </li>
+            <li>
+              Revertir el código <span className="font-semibold">tampoco</span> lo deshace. Los
+              identificadores ya se habrán soltado en la base de datos.
+            </li>
+            <li>
+              Esta base de datos <span className="font-semibold">no tiene respaldos
+              automáticos</span>. Recuperar el estado anterior exige un respaldo manual
+              (<span className="font-mono">pg_dump</span>) hecho antes.
+            </li>
+          </ul>
+        </div>
+
+        <label className="flex items-start gap-2 mt-3 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={backupAcknowledged}
+            onChange={(e) => setBackupAcknowledged(e.target.checked)}
+            disabled={busy}
+            className="mt-0.5 h-4 w-4 rounded border-gray-300 dark:border-gray-600 text-red-600 focus:ring-red-500"
+          />
+          <span className="text-xs text-gray-700 dark:text-gray-300">
+            Confirmo que tengo un respaldo reciente de la base de datos y entiendo que este
+            cambio no se puede deshacer.
+          </span>
+        </label>
 
         <label className="block mt-4">
           <span className="block text-xs font-medium text-gray-600 dark:text-gray-300 mb-1">

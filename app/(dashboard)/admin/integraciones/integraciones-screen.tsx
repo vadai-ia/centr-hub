@@ -83,6 +83,7 @@ export function IntegracionesScreen({ initialCards }: Props) {
     newDiscriminator: string;
     storeUrl: string | null;
     confirmation: string;
+    backupAcknowledged: boolean;
   }) {
     if (!replaceState) return;
     const res = await run(() =>

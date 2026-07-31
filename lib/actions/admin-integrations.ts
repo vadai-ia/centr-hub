@@ -668,12 +668,20 @@ const replaceSchema = z.object({
   newDiscriminator: z.string().trim().min(1).max(200),
   storeUrl: z.string().trim().max(300).optional().nullable(),
   confirmation: z.string(),
+  /**
+   * El admin declara explícitamente que tiene un respaldo. Es la ÚNICA acción
+   * de la pantalla que un rollback de código no deshace, y esta base no tiene
+   * respaldos automáticos (Supabase Free) — así que la declaración es una
+   * pre-condición, no un aviso.
+   */
+  backupAcknowledged: z.boolean(),
 });
 
 /**
- * Ejecuta el reemplazo. La confirmación tecleada se revalida AQUÍ (no solo en
- * el cliente) — mismo patrón que el borrado de una etapa ligada a
- * automatizaciones. El desenlace corre dentro del RPC atómico: o cambia todo,
+ * Ejecuta el reemplazo. La confirmación tecleada Y el reconocimiento del
+ * respaldo se revalidan AQUÍ, no solo en el cliente — un gate de UI no es una
+ * garantía (mismo patrón que el borrado de una etapa ligada a
+ * automatizaciones). El desenlace corre dentro del RPC atómico: o cambia todo,
  * o no cambia nada.
  */
 export async function replaceIntegrationAction(
@@ -688,6 +696,13 @@ export async function replaceIntegrationAction(
     return {
       ok: false,
       message: `Escribe “${REPLACE_CONFIRMATION_WORD}” para confirmar el reemplazo.`,
+    };
+  }
+  if (!parsed.data.backupAcknowledged) {
+    return {
+      ok: false,
+      message:
+        "Confirma que tienes un respaldo de la base de datos antes de reemplazar la conexión.",
     };
   }
   const formatError = validateDiscriminator(
@@ -709,6 +724,22 @@ export async function replaceIntegrationAction(
         };
       }
       await ensureIntegrationConnection(parsed.data.provider);
+
+      // Rastro de QUIÉN declaró tener respaldo, ANTES de tocar nada. Si el RPC
+      // falla a mitad, el audit del RPC no se escribe (rollback) pero este sí
+      // quedó — es el registro de que la operación se intentó y bajo qué
+      // declaración.
+      await recordAuditEvent({
+        actorUserId: admin.ctx.userId,
+        eventType: "integration_replace_backup_acknowledged",
+        entityType: "integration_connection",
+        entityId: null,
+        payload: {
+          provider: parsed.data.provider,
+          previous: current,
+          next: parsed.data.newDiscriminator,
+        } as Json,
+      });
 
       let result;
       try {
