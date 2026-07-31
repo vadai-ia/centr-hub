@@ -89,6 +89,11 @@ export function IntegrationCard({
       <div className="mt-4">
         <p className="text-xs font-medium text-gray-600 dark:text-gray-300">
           {card.discriminatorLabel}
+          {!card.discriminatorRequired && (
+            <span className="ml-1 font-normal text-gray-400 dark:text-gray-500">
+              (opcional)
+            </span>
+          )}
         </p>
         {editingDiscriminator ? (
           <div className="flex items-center gap-2 mt-1">

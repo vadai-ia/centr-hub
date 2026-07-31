@@ -96,6 +96,8 @@ export interface IntegrationCardView {
   discriminatorHint: string;
   discriminatorPlaceholder: string;
   discriminatorValue: string | null;
+  /** false = la conexión funciona sin él (no se marca como carencia). */
+  discriminatorRequired: boolean;
   callbackUrl: string;
   credentials: CredentialView[];
   lastTestAt: string | null;
@@ -229,6 +231,7 @@ async function buildCard(input: {
     discriminatorHint: def.discriminatorHint,
     discriminatorPlaceholder: def.discriminatorPlaceholder,
     discriminatorValue: discriminator,
+    discriminatorRequired: def.discriminatorRequired,
     callbackUrl: `${siteUrl()}${def.callbackPath}`,
     credentials,
     lastTestAt: row.last_test_at,

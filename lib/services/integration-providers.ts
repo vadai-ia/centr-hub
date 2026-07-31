@@ -39,6 +39,14 @@ export interface IntegrationProviderDef {
   discriminatorLabel: string;
   discriminatorHint: string;
   discriminatorPlaceholder: string;
+  /**
+   * ¿La conexión NECESITA el discriminador para funcionar? No siempre: el
+   * inbound del Whaapy de Post-venta resuelve el tenant por el slug que la
+   * Automation manda en el body, no por businessId. Marcar como requerido
+   * algo que el sistema no usa haría que la pantalla reporte "incompleta" una
+   * integración que funciona — y una alarma falsa entrena a ignorar la alarma.
+   */
+  discriminatorRequired: boolean;
   /** Ruta del endpoint que el proveedor debe llamar. */
   callbackPath: string;
   credentials: readonly CredentialFieldDef[];
@@ -56,6 +64,7 @@ export const INTEGRATION_PROVIDERS: readonly IntegrationProviderDef[] = [
     discriminatorHint:
       "El dominio *.myshopify.com de la tienda. Resuelve la organización en cada webhook entrante y arma las llamadas a la Admin API.",
     discriminatorPlaceholder: "mi-tienda.myshopify.com",
+    discriminatorRequired: true,
     callbackPath: "/api/webhooks/shopify",
     credentials: [
       {
@@ -83,6 +92,7 @@ export const INTEGRATION_PROVIDERS: readonly IntegrationProviderDef[] = [
     discriminatorHint:
       "El businessId que Whaapy envía en la raíz de cada webhook. Resuelve la organización.",
     discriminatorPlaceholder: "1db0bff4-…",
+    discriminatorRequired: true,
     callbackPath: "/api/webhooks/whaapy",
     credentials: [
       {
@@ -108,8 +118,9 @@ export const INTEGRATION_PROVIDERS: readonly IntegrationProviderDef[] = [
     discriminatorColumn: "whaapy_postventa_business_id",
     discriminatorLabel: "Business ID",
     discriminatorHint:
-      "El businessId de la instancia de Post-venta. Debe ser DISTINTO del de Venta.",
+      "Opcional hoy: la resolución de casos entra por una Automation que manda el identificador de la organización en el cuerpo, así que este campo no se usa. Queda reservado por si se registra un webhook firmado en esta instancia. Si lo llenas, debe ser DISTINTO del de Venta.",
     discriminatorPlaceholder: "9ac1e0d2-…",
+    discriminatorRequired: false,
     callbackPath: "/api/webhooks/whaapy-postventa",
     credentials: [
       {
@@ -189,7 +200,9 @@ export function deriveIntegrationHealth(input: HealthInput): HealthResult {
   const present = new Set(input.presentCredentials);
 
   const missingCredentials = required.filter((k) => !present.has(k));
-  const missingDiscriminator = !input.discriminator?.trim();
+  const discriminatorAbsent = !input.discriminator?.trim();
+  // Un discriminador ausente solo es una carencia si la conexión lo USA.
+  const missingDiscriminator = def.discriminatorRequired && discriminatorAbsent;
   const missing = [
     ...(missingDiscriminator ? ["discriminator"] : []),
     ...missingCredentials,
@@ -203,7 +216,8 @@ export function deriveIntegrationHealth(input: HealthInput): HealthResult {
     };
   }
 
-  const nothingConfigured = missingDiscriminator && missingCredentials.length === required.length;
+  const nothingConfigured =
+    discriminatorAbsent && missingCredentials.length === required.length;
   if (nothingConfigured) {
     return {
       health: "not_configured",

@@ -95,6 +95,26 @@ describe("derivación de salud", () => {
     );
   });
 
+  it("Post-venta SIN business id sigue 'conectada': su inbound resuelve el tenant por el slug del body", () => {
+    // Estado real de producción: whaapy_postventa_business_id es NULL y la
+    // integración funciona. `getOrganizationByWhaapyPostventaBusinessId` no
+    // tiene callers. Marcarlo requerido produciría una alarma falsa permanente.
+    const res = deriveIntegrationHealth({
+      provider: "whaapy_postventa",
+      status: "connected",
+      discriminator: null,
+      presentCredentials: ["api_key", "inbound_token"],
+    });
+    expect(res.health).toBe("connected");
+    expect(res.missing).not.toContain("discriminator");
+  });
+
+  it("Shopify y Whaapy Venta SÍ exigen su discriminador (resuelven tenant con él)", () => {
+    expect(getProviderDef("shopify").discriminatorRequired).toBe(true);
+    expect(getProviderDef("whaapy_venta").discriminatorRequired).toBe(true);
+    expect(getProviderDef("whaapy_postventa").discriminatorRequired).toBe(false);
+  });
+
   it("una credencial OPCIONAL ausente no degrada la salud (webhook_secret de Post-venta)", () => {
     const res = deriveIntegrationHealth({
       provider: "whaapy_postventa",
