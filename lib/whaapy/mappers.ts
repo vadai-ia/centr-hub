@@ -134,6 +134,14 @@ export const WhaapyContactDeletedPayloadSchema = z
 // ============================================================
 // conversation.* — created / assigned / unassigned / closed
 // ============================================================
+//
+// IMPORTANTE (capturado de payloads REALES de producción — ver ERRORES.md
+// "conversation.* usa conversation_id, no id"): el identificador de la
+// conversación viaja como `conversation_id`, NO `id`; `contact.*` usa
+// `contact_id`. `conversation.assigned` NO trae `contact_id` — solo
+// `phone_number` (+ `assigned_to` = agente). Los schemas viejos exigían
+// `data.id`/`data.contact_id` → TODA conversation.* fallaba Zod → DLQ. Se
+// resuelve el contacto por `contact_id` cuando está y si no por `phone_number`.
 
 export const WhaapyConversationCreatedPayloadSchema = z
   .object({
@@ -142,10 +150,15 @@ export const WhaapyConversationCreatedPayloadSchema = z
     timestamp: z.string().nullish(),
     data: z
       .object({
-        id: z.string(),
-        contact_id: z.string(),
+        conversation_id: z.string(),
+        contact_id: z.string().nullish(),
+        contact_name: z.string().nullish(),
+        contact_first_name: z.string().nullish(),
+        contact_last_name: z.string().nullish(),
+        phone_number: z.string().nullish(),
         channel: z.string().nullish(),
         created_at: z.string().nullish(),
+        timestamp: z.string().nullish(),
       })
       .passthrough(),
   })
@@ -158,15 +171,25 @@ export const WhaapyConversationAssignedPayloadSchema = z
     timestamp: z.string().nullish(),
     data: z
       .object({
-        id: z.string(),
-        contact_id: z.string(),
+        conversation_id: z.string(),
+        // conversation.assigned NO trae contact_id — solo phone_number.
+        contact_id: z.string().nullish(),
         assigned_to: z.string(),
+        assigned_by: z.string().nullish(),
+        method: z.string().nullish(),
+        contact_name: z.string().nullish(),
+        phone_number: z.string().nullish(),
         assigned_at: z.string().nullish(),
+        timestamp: z.string().nullish(),
       })
       .passthrough(),
   })
   .passthrough();
 
+// unassigned/closed: sin payload real capturado (0 en la ventana). Schema
+// tolerante siguiendo la convención de assigned (conversation_id + phone_number
+// + campos opcionales de la doc). `.passthrough()` + `.nullish()` para no
+// re-romper si Whaapy agrega/omite campos. Resolución de contacto por teléfono.
 export const WhaapyConversationUnassignedPayloadSchema = z
   .object({
     event: z.literal("conversation.unassigned").optional(),
@@ -174,9 +197,15 @@ export const WhaapyConversationUnassignedPayloadSchema = z
     timestamp: z.string().nullish(),
     data: z
       .object({
-        id: z.string(),
-        contact_id: z.string(),
+        conversation_id: z.string(),
+        contact_id: z.string().nullish(),
+        phone_number: z.string().nullish(),
+        contact_name: z.string().nullish(),
+        previous_agent: z.string().nullish(),
+        unassigned_by: z.string().nullish(),
+        reason: z.string().nullish(),
         unassigned_at: z.string().nullish(),
+        timestamp: z.string().nullish(),
       })
       .passthrough(),
   })
@@ -189,9 +218,11 @@ export const WhaapyConversationClosedPayloadSchema = z
     timestamp: z.string().nullish(),
     data: z
       .object({
-        id: z.string(),
-        contact_id: z.string(),
+        conversation_id: z.string(),
+        contact_id: z.string().nullish(),
+        phone_number: z.string().nullish(),
         closed_at: z.string().nullish(),
+        timestamp: z.string().nullish(),
       })
       .passthrough(),
   })

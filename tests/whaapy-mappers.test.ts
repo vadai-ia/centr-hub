@@ -205,9 +205,10 @@ describe("WhaapyContactDeletedPayloadSchema", () => {
 });
 
 describe("WhaapyConversation*PayloadSchemas", () => {
-  it("conversation.created mínimo (sin channel, sin created_at)", () => {
+  // Convención REAL (capturada en prod): `conversation_id`, NO `id`.
+  it("conversation.created mínimo (conversation_id + contact_id)", () => {
     const payload = {
-      data: { id: "conv-1", contact_id: "c1" },
+      data: { conversation_id: "conv-1", contact_id: "c1", phone_number: "521..." },
       event: "conversation.created",
       businessId: "biz-1",
     };
@@ -215,14 +216,14 @@ describe("WhaapyConversation*PayloadSchemas", () => {
     expect(result.success).toBe(true);
   });
 
-  it("conversation.assigned requiere assigned_to (sin él no podemos mapear agente)", () => {
+  it("conversation.assigned requiere assigned_to; contact_id es opcional (viene solo phone)", () => {
     const valid = {
-      data: { id: "conv-1", contact_id: "c1", assigned_to: "agent-1" },
+      data: { conversation_id: "conv-1", assigned_to: "agent-1", phone_number: "521..." },
       event: "conversation.assigned",
       businessId: "biz-1",
     };
     const invalid = {
-      data: { id: "conv-1", contact_id: "c1" },
+      data: { conversation_id: "conv-1", phone_number: "521..." },
       event: "conversation.assigned",
       businessId: "biz-1",
     };
@@ -230,9 +231,9 @@ describe("WhaapyConversation*PayloadSchemas", () => {
     expect(WhaapyConversationAssignedPayloadSchema.safeParse(invalid).success).toBe(false);
   });
 
-  it("conversation.unassigned mínimo", () => {
+  it("conversation.unassigned mínimo (conversation_id)", () => {
     const payload = {
-      data: { id: "conv-1", contact_id: "c1" },
+      data: { conversation_id: "conv-1", phone_number: "521..." },
       event: "conversation.unassigned",
       businessId: "biz-1",
     };
@@ -240,9 +241,9 @@ describe("WhaapyConversation*PayloadSchemas", () => {
     expect(result.success).toBe(true);
   });
 
-  it("conversation.closed mínimo", () => {
+  it("conversation.closed mínimo (conversation_id)", () => {
     const payload = {
-      data: { id: "conv-1", contact_id: "c1" },
+      data: { conversation_id: "conv-1", phone_number: "521..." },
       event: "conversation.closed",
       businessId: "biz-1",
     };

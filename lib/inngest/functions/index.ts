@@ -15,6 +15,7 @@ import { postventaTransitionFunctions } from "./postventa-transition-cron";
 import { ruleEvaluationFunctions } from "./rule-evaluation";
 import { goalSnapshotFunctions } from "./goal-snapshot";
 import { leadWebhookFunctions } from "./lead-webhook";
+import { whaapyInboundHealthFunctions } from "./whaapy-inbound-health";
 
 /**
  * Registro completo de funciones Inngest para servir desde
@@ -40,4 +41,5 @@ export const allFunctions = [
   ...ruleEvaluationFunctions,
   ...goalSnapshotFunctions,
   ...leadWebhookFunctions,
+  ...whaapyInboundHealthFunctions,
 ];
