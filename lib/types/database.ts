@@ -251,6 +251,13 @@ export interface OpportunityRow {
   // asignar ESTE asesor pero se conservó el de la entrega Outbound (handoff
   // gana). NULL = sin conflicto. La reasignación manual lo limpia. Informativo.
   overridden_tag_advisor_id: UUID | null;
+  // Customer Success asignado (0047). Segunda ranura INDEPENDIENTE de
+  // assigned_advisor_id: el asesor de venta se conserva y el CS se suma.
+  // Una sola columna → un solo CS por opp (asignar otro reemplaza). Solo
+  // semántica de Post-venta; NULL en Venta y Outbound. El trigger
+  // `opportunities_default_customer_success` la rellena con el CS por
+  // defecto de la org al nacer una opp de Post-venta sin CS explícito.
+  customer_success_membership_id: UUID | null;
 }
 
 export interface OpportunityLineItemRow {
@@ -591,6 +598,10 @@ export interface Database {
         // is_outbound (0040): NOT NULL DEFAULT false → opcional en Insert
         // (el birth-stamping lo pasa desde el contacto; los callers que lo
         // omiten heredan false = inbound).
+        // customer_success_membership_id (0047): nullable, la rellena el
+        // trigger `opportunities_default_customer_success` para Post-venta.
+        // Opcional en Insert — un caller solo la pasa para FORZAR un CS
+        // concreto (la reapertura hereda el de la opp original).
         Insert: Omit<
           Insertable<OpportunityRow>,
           | "effective_created_at"
@@ -602,6 +613,7 @@ export interface Database {
           | "inbound_webhook_source_id"
           | "is_outbound"
           | "overridden_tag_advisor_id"
+          | "customer_success_membership_id"
         > &
           Partial<
             Pick<
@@ -614,6 +626,7 @@ export interface Database {
               | "inbound_webhook_source_id"
               | "is_outbound"
               | "overridden_tag_advisor_id"
+              | "customer_success_membership_id"
             >
           >;
         Update: Omit<Updatable<OpportunityRow>, "effective_created_at">;

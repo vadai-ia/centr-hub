@@ -10,11 +10,14 @@ import {
   contactIsCustomer,
   deriveDisplayAmount,
   resolveAdvisor,
+  resolveCustomerSuccess,
 } from "./utils";
 
 interface Props {
   opp: KanbanOpportunity;
   advisors: AdvisorOption[];
+  /** Catálogo de Customer Success (0047). Solo viene poblado en Post-venta. */
+  customerSuccess?: AdvisorOption[];
   showAdvisor: boolean;
   isDraggingDisabled?: boolean;
   /** Tareas pendientes asociadas a la opp (lote polish M6). */
@@ -39,6 +42,7 @@ interface Props {
 export function KanbanCard({
   opp,
   advisors,
+  customerSuccess,
   showAdvisor,
   isDraggingDisabled,
   pendingTasksCount,
@@ -66,6 +70,13 @@ export function KanbanCard({
 
   const amount = deriveDisplayAmount(opp);
   const advisor = resolveAdvisor(opp.assigned_advisor_id, advisors);
+  // Segunda ranura (0047): se pinta SIEMPRE que la opp tenga CS, con
+  // independencia de `showAdvisor` — un vendedor ve solo sus propias opps,
+  // y ahí saber quién es el Customer Success del caso es justamente el dato
+  // útil. La etiqueta "CS" lo separa del asesor a simple vista.
+  const cs = opp.customer_success_membership_id
+    ? resolveCustomerSuccess(opp.customer_success_membership_id, customerSuccess ?? [])
+    : null;
   const name = contactDisplayName(opp.contact);
   const isCustomer = contactIsCustomer(opp.contact);
 
@@ -187,6 +198,32 @@ export function KanbanCard({
             ].join(" ")}
           >
             {advisor.fullName}
+          </span>
+        </div>
+      )}
+
+      {cs && (
+        <div
+          className={[
+            "flex items-center gap-1.5",
+            // Si ya hay fila de asesor, esta va pegada debajo sin otra línea
+            // divisoria; si no, se separa del contenido con su propio borde.
+            showAdvisor
+              ? "mt-1"
+              : "mt-1.5 pt-1.5 border-t border-gray-100 dark:border-gray-700",
+          ].join(" ")}
+        >
+          <span
+            className="inline-block w-1.5 h-1.5 rounded-full flex-shrink-0"
+            style={{ backgroundColor: cs.color }}
+            aria-hidden
+          />
+          <span
+            className="text-[11px] truncate text-gray-600 dark:text-gray-400"
+            title={`Customer Success: ${cs.fullName}`}
+          >
+            <span className="text-gray-400 dark:text-gray-500">CS </span>
+            {cs.fullName}
           </span>
         </div>
       )}

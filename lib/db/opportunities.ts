@@ -343,6 +343,9 @@ export interface KanbanOpportunity {
    *  "Shopify asignó otro asesor; se mantuvo el de la entrega". NULL = sin
    *  conflicto. */
   overridden_tag_advisor_id: UUID | null;
+  /** Customer Success asignado (0047). Segunda ranura, independiente del
+   *  asesor. Solo se puebla en Post-venta. */
+  customer_success_membership_id: UUID | null;
   contact: KanbanContactEmbed | null;
 }
 
@@ -369,6 +372,7 @@ const KANBAN_OPPORTUNITY_SELECT = `
   reopened_at,
   is_outbound,
   overridden_tag_advisor_id,
+  customer_success_membership_id,
   contact:contacts!inner (
     id,
     full_name,
@@ -443,6 +447,10 @@ export async function listKanbanOpportunities(opts: {
    *  corte; "outbound"/"inbound" filtran `is_outbound` según la definición
    *  única `channelOutboundValue`. Solo filtra — no cambia visibilidad/rol. */
   channel?: Channel;
+  /** Filtro por Customer Success (0047). Es un eje INDEPENDIENTE del asesor:
+   *  si se pasan ambos, se AND-ean. Solo tiene sentido en Post-venta (en los
+   *  otros funnels la columna siempre es NULL). */
+  customerSuccessId?: UUID;
 }): Promise<KanbanOpportunity[]> {
   const { supabase, organizationId } = getTenantScopedClient();
 
@@ -482,6 +490,9 @@ export async function listKanbanOpportunities(opts: {
     } else {
       query = query.eq("assigned_advisor_id", opts.assignedAdvisorId);
     }
+  }
+  if (opts.customerSuccessId) {
+    query = query.eq("customer_success_membership_id", opts.customerSuccessId);
   }
   if (opts.dateFrom) query = query.gte("effective_created_at", opts.dateFrom);
   if (opts.dateTo) query = query.lte("effective_created_at", opts.dateTo);
@@ -586,6 +597,9 @@ export async function countKanbanOpportunitiesByStage(opts: {
   /** Corte por canal — mismo eje/definición que en `listKanbanOpportunities`;
    *  mantiene el conteo por etapa alineado con la lista y con el dashboard. */
   channel?: Channel;
+  /** Filtro por Customer Success (0047) — mismo eje que en
+   *  `listKanbanOpportunities`; mantiene el conteo alineado con la lista. */
+  customerSuccessId?: UUID;
 }): Promise<{ counts: Record<UUID, number>; hiddenCounts: Record<UUID, number> }> {
   const { supabase, organizationId } = getTenantScopedClient();
 
@@ -622,6 +636,9 @@ export async function countKanbanOpportunitiesByStage(opts: {
     } else {
       query = query.eq("assigned_advisor_id", opts.assignedAdvisorId);
     }
+  }
+  if (opts.customerSuccessId) {
+    query = query.eq("customer_success_membership_id", opts.customerSuccessId);
   }
   if (opts.dateFrom) query = query.gte("effective_created_at", opts.dateFrom);
   if (opts.dateTo) query = query.lte("effective_created_at", opts.dateTo);

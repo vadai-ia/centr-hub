@@ -69,6 +69,21 @@ export const ALL_TAB_KEYS: readonly string[] = TAB_REGISTRY.map((t) => t.key);
 export const SYSTEM_ROLE_KEYS = ["superadmin", "admin", "vendedor"] as const;
 
 /**
+ * Key del rol de Customer Success (0047). NO es un rol de sistema (se crea
+ * desde Admin → Roles), pero su `key` es el ancla estable que cablea la
+ * segunda ranura de asignación de Post-venta
+ * (`opportunities.customer_success_membership_id`), igual que `'vendedor'`
+ * cablea la de asesor.
+ *
+ * Vive aquí (módulo PURO) para que lo compartan el Client Component que
+ * decide si pinta el selector y la capa de datos que lista los elegibles.
+ * El mismo string está hardcodeado en la migración 0047 (función
+ * `default_customer_success_membership_id` y su trigger): cambiarlo de un
+ * solo lado desconecta la feature en silencio.
+ */
+export const CUSTOMER_SUCCESS_ROLE_KEY = "customer-success" as const;
+
+/**
  * Capacidades resueltas de un rol (proyección de la fila `roles`).
  * Es lo que se cuelga de la sesión y lo que reciben los helpers.
  */
@@ -99,6 +114,16 @@ export function hasTab(caps: RoleCapabilities, tabKey: string): boolean {
  */
 export function canSeeAllData(caps: RoleCapabilities): boolean {
   return caps.dataScope === "all";
+}
+
+/**
+ * ¿El rol puede designar al Customer Success de una oportunidad de
+ * Post-venta? (0047). Los roles con alcance de datos completo
+ * (admin/superadmin/SDR) y el propio Customer Success. Un vendedor lo VE
+ * pero no lo cambia.
+ */
+export function canAssignCustomerSuccess(caps: RoleCapabilities): boolean {
+  return canSeeAllData(caps) || caps.key === CUSTOMER_SUCCESS_ROLE_KEY;
 }
 
 /** ¿El rol tiene acceso a ALGUNA pestaña de Administración? */

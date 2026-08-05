@@ -3,7 +3,11 @@ import Link from "next/link";
 import { useCallback } from "react";
 import type { OpportunityDialogBundle } from "@/lib/actions/opportunities-m6";
 import { effectiveAmount, formatAmount } from "@/lib/format/money";
-import { resolveAdvisor, formatRelative } from "@/app/(dashboard)/contactos/utils";
+import {
+  resolveAdvisor,
+  resolveCustomerSuccess,
+  formatRelative,
+} from "@/app/(dashboard)/contactos/utils";
 import { OpportunityLineItems } from "./opportunity-line-items";
 import { OpportunityLossInfo } from "./opportunity-loss-info";
 import { OpportunityTimeline } from "./opportunity-timeline";
@@ -16,6 +20,7 @@ interface Props {
   onAddNote?: () => void;
   onCreateTask?: () => void;
   onReassign?: () => void;
+  onAssignCustomerSuccess?: () => void;
   onCreateInShopify?: () => void;
   onResolveCase?: () => void;
   onTasksChanged?: () => void;
@@ -38,6 +43,7 @@ export function OpportunityDialogContent({
   onAddNote,
   onCreateTask,
   onReassign,
+  onAssignCustomerSuccess,
   onCreateInShopify,
   onResolveCase,
   onTasksChanged,
@@ -51,6 +57,15 @@ export function OpportunityDialogContent({
   // se conservó el asesor de la entrega. Se resuelve el nombre para advertir.
   const tagConflictAdvisor = opportunity.overridden_tag_advisor_id
     ? resolveAdvisor(opportunity.overridden_tag_advisor_id, bundle.advisors)
+    : null;
+  // Segunda ranura de Post-venta (0047). Se resuelve contra su propio
+  // catálogo (Customer Success activos) — un CS no está en `advisors`.
+  const isPostventa = opportunity.funnel === "post_venta";
+  const customerSuccess = isPostventa
+    ? resolveCustomerSuccess(
+        opportunity.customer_success_membership_id,
+        bundle.customerSuccessOptions,
+      )
     : null;
 
   const handleContactClick = useCallback(() => {
@@ -113,6 +128,26 @@ export function OpportunityDialogContent({
                   {advisor.fullName}
                 </span>
               </span>
+              {/* Segunda ranura (0047): se pinta al lado del asesor, con
+                  etiqueta explícita para que no se lea como "otro asesor". */}
+              {customerSuccess && (
+                <span className="flex items-center gap-1.5">
+                  <span
+                    className="inline-block w-2 h-2 rounded-full ring-2 ring-white dark:ring-gray-800"
+                    style={{ backgroundColor: customerSuccess.color }}
+                  />
+                  <span className="text-gray-400 dark:text-gray-500">CS:</span>
+                  <span
+                    className={
+                      customerSuccess.isUnassigned
+                        ? "italic text-amber-700 dark:text-amber-300"
+                        : ""
+                    }
+                  >
+                    {customerSuccess.fullName}
+                  </span>
+                </span>
+              )}
               <span>· Actualizada {formatRelative(opportunity.last_modified_at)}</span>
               {opportunity.won_at && (
                 <span className="text-emerald-700 dark:text-emerald-300 font-medium">
@@ -231,6 +266,17 @@ export function OpportunityDialogContent({
             className="px-3 py-1.5 text-sm font-medium rounded-md bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600 transition-colors"
           >
             Reasignar asesor
+          </button>
+        )}
+        {bundle.canAssignCustomerSuccess && (
+          <button
+            type="button"
+            onClick={onAssignCustomerSuccess}
+            className="px-3 py-1.5 text-sm font-medium rounded-md bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600 transition-colors"
+          >
+            {opportunity.customer_success_membership_id
+              ? "Cambiar Customer Success"
+              : "Asignar Customer Success"}
           </button>
         )}
         {bundle.canCreateInShopify && (

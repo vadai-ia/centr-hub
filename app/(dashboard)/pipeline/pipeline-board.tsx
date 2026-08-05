@@ -150,6 +150,7 @@ export function PipelineBoard({
     dateFrom: null,
     dateTo: null,
     advisorId: null,
+    customerSuccessId: null,
     query: "",
     channel: "all",
   });
@@ -168,6 +169,9 @@ export function PipelineBoard({
   const [reopenOpen, setReopenOpen] = useState(false);
 
   const [advisors] = useState(initial.advisors);
+  // Customer Success de la org (0047). Se re-siembra al cambiar de funnel
+  // (el server solo lo puebla en Post-venta) — ver `applyState`.
+  const [customerSuccess, setCustomerSuccess] = useState(initial.customerSuccess);
   const [lossReasons] = useState(initial.lossReasons);
   const [effectiveAdvisorId, setEffectiveAdvisorId] = useState<
     UUID | null | undefined
@@ -290,6 +294,7 @@ export function PipelineBoard({
       setPendingTasksByOpp(state.pendingTasksByOpp);
       setProblematicStageId(state.problematicStageId);
       setPageByStage(() => initialPageByStage(state.stages));
+      setCustomerSuccess(state.customerSuccess);
       if (updateAdvisor) setEffectiveAdvisorId(state.effectiveAdvisorId);
     },
     [],
@@ -329,10 +334,16 @@ export function PipelineBoard({
     // "Casos resueltos" es exclusivo de Post-venta: al salir, se apaga.
     const nextResolvedView = next === "post_venta" ? resolvedView : false;
     setResolvedView(nextResolvedView);
+    // El filtro por Customer Success también es exclusivo de Post-venta: al
+    // salir se limpia, o quedaría un filtro activo invisible (su select no
+    // se pinta en Venta/Outbound) devolviendo cero resultados sin explicación.
+    const nextFilters: ActiveFilters =
+      next === "post_venta" ? filters : { ...filters, customerSuccessId: null };
+    if (nextFilters !== filters) setFilters(nextFilters);
     const res = await loadInitialPipelineState({
       funnel: next,
       unassignedFilter: isAdmin && unassignedFilter,
-      filters: filtersToPayload(filters, nextResolvedView),
+      filters: filtersToPayload(nextFilters, nextResolvedView),
     });
     if (res.ok) applyState(res.state, true);
   }
@@ -381,6 +392,7 @@ export function PipelineBoard({
       showClosed: showClosedByStage.has(stage.id),
       resolvedScope: payload.resolvedScope,
       channel: payload.channel,
+      customerSuccessId: payload.customerSuccessId,
     });
     if (!res.ok) {
       pushToast(res.message, "error");
@@ -640,6 +652,8 @@ export function PipelineBoard({
         filters={filters}
         advisors={advisors}
         showAdvisorFilter={isAdmin}
+        customerSuccess={customerSuccess}
+        showCustomerSuccessFilter={isAdmin && funnel === "post_venta"}
         onChange={changeFilters}
       />
 
@@ -658,6 +672,7 @@ export function PipelineBoard({
                 cards={cardsByStage[stage.id] ?? []}
                 hasMore={hasMoreByStage[stage.id] ?? false}
                 advisors={advisors}
+                customerSuccess={customerSuccess}
                 showAdvisor={isAdmin}
                 page={pageByStage[stage.id] ?? 0}
                 totalCount={countsByStage[stage.id]}
@@ -683,6 +698,7 @@ export function PipelineBoard({
             <KanbanCard
               opp={activeDragCard}
               advisors={advisors}
+              customerSuccess={customerSuccess}
               showAdvisor={isAdmin}
             />
           ) : null}
@@ -747,6 +763,7 @@ function filtersToPayload(
   dateFrom?: string;
   dateTo?: string;
   advisorId?: UUID;
+  customerSuccessId?: UUID;
   query?: string;
   resolvedScope?: "active" | "resolved";
   channel?: Channel;
@@ -755,6 +772,7 @@ function filtersToPayload(
     dateFrom: filters.dateFrom ? `${filters.dateFrom}T00:00:00.000Z` : undefined,
     dateTo: filters.dateTo ? `${filters.dateTo}T23:59:59.999Z` : undefined,
     advisorId: filters.advisorId ?? undefined,
+    customerSuccessId: filters.customerSuccessId ?? undefined,
     query: filters.query.trim().length > 0 ? filters.query.trim() : undefined,
     resolvedScope: resolvedView ? "resolved" : undefined,
     // "all" es el default del server (sin corte) → se omite para no ensuciar

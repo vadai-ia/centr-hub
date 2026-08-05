@@ -16,6 +16,8 @@ interface Props {
   cards: KanbanOpportunity[];
   hasMore: boolean;
   advisors: AdvisorOption[];
+  /** Catálogo de Customer Success (0047) — solo poblado en Post-venta. */
+  customerSuccess?: AdvisorOption[];
   showAdvisor: boolean;
   page: number;
   isOverlay?: boolean;
@@ -63,6 +65,7 @@ export function KanbanColumn({
   cards,
   hasMore,
   advisors,
+  customerSuccess,
   showAdvisor,
   page,
   isOverlay,
@@ -235,6 +238,7 @@ export function KanbanColumn({
                   <KanbanCard
                     opp={opp}
                     advisors={advisors}
+                    customerSuccess={customerSuccess}
                     showAdvisor={showAdvisor}
                     pendingTasksCount={pendingTasksByOpp?.[opp.id]}
                     canResolveCase={isProblematicStage}
@@ -252,6 +256,7 @@ export function KanbanColumn({
                 key={opp.id}
                 opp={opp}
                 advisors={advisors}
+                customerSuccess={customerSuccess}
                 showAdvisor={showAdvisor}
                 pendingTasksCount={pendingTasksByOpp?.[opp.id]}
                 canResolveCase={isProblematicStage}

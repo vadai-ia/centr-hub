@@ -10,6 +10,9 @@ export interface ActiveFilters {
   dateTo: string | null;
   /** UUID de membership o null. */
   advisorId: UUID | null;
+  /** Customer Success (0047): UUID de membership o null. Eje independiente
+   *  del asesor — se pueden combinar. Solo aplica en Post-venta. */
+  customerSuccessId: UUID | null;
   query: string;
   /** Corte por canal (Todo/Outbound/Inbound) — misma definición que el
    *  dashboard. "all" (default) = sin corte, vista actual sin cambios. */
@@ -56,6 +59,10 @@ interface Props {
   filters: ActiveFilters;
   advisors: AdvisorOption[];
   showAdvisorFilter: boolean;
+  /** Customer Success activos (0047). Vacío fuera de Post-venta. */
+  customerSuccess?: AdvisorOption[];
+  /** Solo se pinta en Post-venta y para roles que ven toda la org. */
+  showCustomerSuccessFilter?: boolean;
   onChange: (next: ActiveFilters) => void;
 }
 
@@ -68,7 +75,14 @@ const QUERY_DEBOUNCE_MS = 300;
  * se debouncea client-side para no saturar la BD mientras el usuario
  * teclea. Persistencia: solo durante la sesión — no se guarda nada.
  */
-export function PipelineFiltersBar({ filters, advisors, showAdvisorFilter, onChange }: Props) {
+export function PipelineFiltersBar({
+  filters,
+  advisors,
+  showAdvisorFilter,
+  customerSuccess,
+  showCustomerSuccessFilter,
+  onChange,
+}: Props) {
   const [localQuery, setLocalQuery] = useState(filters.query);
 
   useEffect(() => {
@@ -88,12 +102,20 @@ export function PipelineFiltersBar({ filters, advisors, showAdvisorFilter, onCha
     filters.dateFrom !== null ||
     filters.dateTo !== null ||
     filters.advisorId !== null ||
+    filters.customerSuccessId !== null ||
     filters.channel !== "all" ||
     (filters.query.trim().length > 0);
 
   function clear() {
     setLocalQuery("");
-    onChange({ dateFrom: null, dateTo: null, advisorId: null, query: "", channel: "all" });
+    onChange({
+      dateFrom: null,
+      dateTo: null,
+      advisorId: null,
+      customerSuccessId: null,
+      query: "",
+      channel: "all",
+    });
   }
 
   // Identifica cuál rango rápido coincide con la selección actual para
@@ -218,6 +240,28 @@ export function PipelineFiltersBar({ filters, advisors, showAdvisorFilter, onCha
           {advisors.map((a) => (
             <option key={a.membershipId} value={a.membershipId}>
               {a.fullName}
+            </option>
+          ))}
+        </select>
+      )}
+
+      {showCustomerSuccessFilter && (
+        <select
+          value={filters.customerSuccessId ?? ""}
+          onChange={(e) => {
+            const v = e.target.value;
+            onChange({
+              ...filters,
+              customerSuccessId: v === "" ? null : (v as UUID),
+            });
+          }}
+          className="text-sm rounded-md bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100 px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-amber-400"
+          aria-label="Filtrar por Customer Success"
+        >
+          <option value="">Todos los Customer Success</option>
+          {(customerSuccess ?? []).map((c) => (
+            <option key={c.membershipId} value={c.membershipId}>
+              {c.fullName}
             </option>
           ))}
         </select>

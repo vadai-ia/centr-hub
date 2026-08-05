@@ -7,6 +7,15 @@ import type { AdvisorOption } from "@/lib/types/pipeline";
  */
 
 /**
+ * Display del Customer Success (0047). Se REEXPORTA desde los helpers de
+ * Contactos en vez de duplicarse: el popup de detalle de oportunidad ya lo
+ * consume desde allí, y una segunda copia acabaría divergiendo en la
+ * etiqueta del caso "membership que ya no está en la lista". Así la card
+ * del kanban importa todos sus helpers de este módulo.
+ */
+export { resolveCustomerSuccess } from "@/app/(dashboard)/contactos/utils";
+
+/**
  * Formatea un monto pg numeric (string) en MXN. Para otras monedas
  * el currency code pasa a `Intl.NumberFormat`. Si la string está
  * vacía o nula devuelve null para que el caller decida cómo renderiza

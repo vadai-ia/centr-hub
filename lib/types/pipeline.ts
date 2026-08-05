@@ -66,6 +66,12 @@ export interface PipelineInitialState {
   problematicStageId: UUID | null;
   effectiveAdvisorId: UUID | null | undefined;
   advisors: AdvisorOption[];
+  /** Customer Success activos de la org (0047). Solo se puebla en el funnel
+   *  Post-venta (la segunda ranura no existe en Venta ni Outbound). Alimenta
+   *  el badge de la card y el filtro por Customer Success. Se envía a TODOS
+   *  los roles — un vendedor no puede cambiarlo, pero sí necesita ver quién
+   *  atiende su caso. */
+  customerSuccess: AdvisorOption[];
   lossReasons: LossReasonOption[];
 }
 

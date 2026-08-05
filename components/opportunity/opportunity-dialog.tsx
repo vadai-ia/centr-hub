@@ -10,6 +10,7 @@ import {
   type CreateInShopifyPrefill,
 } from "@/components/contacts/create-in-shopify-dialog";
 import { ReassignAdvisorDialog } from "@/components/contacts/reassign-advisor-dialog";
+import { AssignCustomerSuccessDialog } from "./assign-customer-success-dialog";
 import { emptyStructuredAddress } from "@/lib/contacts/address";
 import { AddNoteDialog } from "./add-note-dialog";
 import { CreateTaskDialog } from "./create-task-dialog";
@@ -50,6 +51,7 @@ export function OpportunityDialog({ paramName = "opp" }: Props) {
   const [loading, setLoading] = useState(false);
   const [shopifyDialogOpen, setShopifyDialogOpen] = useState(false);
   const [reassignOpen, setReassignOpen] = useState(false);
+  const [assignCsOpen, setAssignCsOpen] = useState(false);
   const [noteOpen, setNoteOpen] = useState(false);
   const [taskOpen, setTaskOpen] = useState(false);
   const [resolveOpen, setResolveOpen] = useState(false);
@@ -176,6 +178,7 @@ export function OpportunityDialog({ paramName = "opp" }: Props) {
             onAddNote={() => setNoteOpen(true)}
             onCreateTask={() => setTaskOpen(true)}
             onReassign={() => setReassignOpen(true)}
+            onAssignCustomerSuccess={() => setAssignCsOpen(true)}
             onCreateInShopify={() => setShopifyDialogOpen(true)}
             onResolveCase={() => setResolveOpen(true)}
             onTasksChanged={() => {
@@ -274,6 +277,27 @@ export function OpportunityDialog({ paramName = "opp" }: Props) {
         onSuccess={() => {
           setReassignOpen(false);
           setToast("Asesor de la oportunidad reasignado.");
+          setTimeout(() => setToast(null), 3500);
+          if (oppId) {
+            void loadOpportunityDetailForDialog({ opportunityId: oppId }).then((res) => {
+              if (res.ok) setBundle(res.bundle);
+            });
+          }
+          router.refresh();
+        }}
+      />
+
+      <AssignCustomerSuccessDialog
+        open={assignCsOpen}
+        opportunityId={bundle?.detail.opportunity.id ?? null}
+        currentMembershipId={
+          bundle?.detail.opportunity.customer_success_membership_id ?? null
+        }
+        options={bundle?.customerSuccessOptions ?? []}
+        onCancel={() => setAssignCsOpen(false)}
+        onSuccess={() => {
+          setAssignCsOpen(false);
+          setToast("Customer Success actualizado.");
           setTimeout(() => setToast(null), 3500);
           if (oppId) {
             void loadOpportunityDetailForDialog({ opportunityId: oppId }).then((res) => {

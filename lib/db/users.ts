@@ -1,5 +1,6 @@
 import "server-only";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
+import { CUSTOMER_SUCCESS_ROLE_KEY } from "@/lib/auth/capabilities";
 import type {
   MembershipRow,
   UserProfileRow,
@@ -137,6 +138,35 @@ export async function listActiveRealVendors(
     .eq("organization_id", organizationId)
     .eq("is_active", true)
     .eq("role", "vendedor")
+    .eq("profile.is_system_user", false)
+    .order("created_at", { ascending: true });
+  if (error) throw error;
+  return (data ?? []) as Array<MembershipRow & { profile: UserProfileRow }>;
+}
+
+/**
+ * Perfiles de Customer Success activos y reales de la organización (0047).
+ *
+ * Alimenta EXCLUSIVAMENTE la segunda ranura de Post-venta
+ * (`opportunities.customer_success_membership_id`) y su filtro en el
+ * pipeline. NO sustituye a `listActiveRealVendors`: el invariante de 0039
+ * ("solo los vendedores son asesores") sigue intacto — un Customer Success
+ * nunca entra al selector de asesor, ni al round-robin, ni al mapeo de tags,
+ * ni al mapeo de agentes de Whaapy.
+ *
+ * R10: el usuario sistema "Histórico" se excluye, igual que en el resto de
+ * los listados de asignación manual.
+ */
+export async function listActiveCustomerSuccess(
+  organizationId: UUID,
+): Promise<Array<MembershipRow & { profile: UserProfileRow }>> {
+  const supabase = getSupabaseAdminClient();
+  const { data, error } = await supabase
+    .from("memberships")
+    .select("*, profile:user_profiles!inner(*)")
+    .eq("organization_id", organizationId)
+    .eq("is_active", true)
+    .eq("role", CUSTOMER_SUCCESS_ROLE_KEY)
     .eq("profile.is_system_user", false)
     .order("created_at", { ascending: true });
   if (error) throw error;

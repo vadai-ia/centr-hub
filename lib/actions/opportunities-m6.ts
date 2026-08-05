@@ -1,7 +1,10 @@
 "use server";
 import { z } from "zod";
 import { getSession } from "@/lib/auth/session";
-import { canSeeAllData } from "@/lib/auth/capabilities";
+import {
+  canAssignCustomerSuccess,
+  canSeeAllData,
+} from "@/lib/auth/capabilities";
 import { withTenantContext } from "@/lib/tenant/context";
 import {
   getOpportunityDetail,
@@ -13,7 +16,11 @@ import {
 } from "@/lib/services/timeline";
 import { getOpportunityById } from "@/lib/db/opportunities";
 import { listPipelineStages } from "@/lib/db/pipeline";
-import { getMembership, listActiveRealVendors } from "@/lib/db/users";
+import {
+  getMembership,
+  listActiveCustomerSuccess,
+  listActiveRealVendors,
+} from "@/lib/db/users";
 import {
   createTask,
   deleteTask,
@@ -72,6 +79,13 @@ export interface OpportunityDialogBundle {
   canManageTasks: boolean;
   /** Solo admin reasigna. */
   canReassign: boolean;
+  /** Customer Success activos de la org (0047) — pueblan el selector de la
+   *  segunda ranura. Vacío fuera de Post-venta (la ranura no aplica). */
+  customerSuccessOptions: AdvisorOption[];
+  /** Post-venta + rol que puede designar CS (admin/superadmin/SDR o el
+   *  propio Customer Success): habilita el selector. Un vendedor lo ve
+   *  pintado en el header pero sin botón. */
+  canAssignCustomerSuccess: boolean;
   /** Lead + (vendedor asignado o admin) habilita "Crear en Shopify". */
   canCreateInShopify: boolean;
   /** Post-venta en "Caso problemático" + no resuelto + (asignado o admin):
@@ -170,11 +184,18 @@ export async function loadOpportunityDetailForDialog(
       }
     }
 
-    const [timeline, vendors, tasks, org] = await Promise.all([
+    const isPostventa = detail.opportunity.funnel === "post_venta";
+
+    const [timeline, vendors, tasks, org, customerSuccess] = await Promise.all([
       getOpportunityTimeline(parsed.data.opportunityId),
       listActiveRealVendors(orgId),
       listTasksForOpportunity(parsed.data.opportunityId),
       getOrganizationById(orgId),
+      // La segunda ranura solo existe en Post-venta: fuera de ahí ni se
+      // consulta (una query menos en cada apertura de opp de Venta).
+      isPostventa
+        ? listActiveCustomerSuccess(orgId)
+        : Promise.resolve([] as Awaited<ReturnType<typeof listActiveCustomerSuccess>>),
     ]);
 
     const canAct = isAdmin || detail.opportunity.assigned_advisor_id === membership?.id;
@@ -288,6 +309,14 @@ export async function loadOpportunityDetailForDialog(
           fullName: v.profile.full_name,
           color: v.profile.color,
         })),
+        customerSuccessOptions: customerSuccess.map((c) => ({
+          membershipId: c.id,
+          userId: c.user_id,
+          fullName: c.profile.full_name,
+          color: c.profile.color,
+        })),
+        canAssignCustomerSuccess:
+          isPostventa && canAssignCustomerSuccess(session.data.activeRole),
       },
     } as const;
   }, { source: "user_session" });

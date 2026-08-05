@@ -17,7 +17,11 @@ import { reopenOpportunityIntoProblemCase } from "@/lib/services/opportunity-reo
 import { collapseReopenResults } from "@/lib/services/reopen-search";
 import { listPendingTaskCountsByOpportunity, recordAuditEvent } from "@/lib/db/operational";
 import { listLossReasons, listPipelineStages } from "@/lib/db/pipeline";
-import { getMembership, listActiveRealVendors } from "@/lib/db/users";
+import {
+  getMembership,
+  listActiveCustomerSuccess,
+  listActiveRealVendors,
+} from "@/lib/db/users";
 import { getOrganizationById, updateOrganization } from "@/lib/db/organizations";
 import {
   moveOpportunityStage,
@@ -150,6 +154,10 @@ const loadPageSchema = z.object({
   resolvedScope: z.enum(["active", "resolved"]).optional(),
   /** Corte por canal (Todo/Outbound/Inbound). Default sin corte. */
   channel: z.enum(["all", "outbound", "inbound"]).optional(),
+  /** Filtro por Customer Success (0047). Debe viajar también aquí: sin él,
+   *  la primera página respetaría el filtro y las siguientes traerían opps
+   *  de otros CS al hacer scroll. */
+  customerSuccessId: z.string().uuid().optional(),
 });
 
 /**
@@ -247,6 +255,10 @@ export async function loadKanbanPageAction(
       resolvedSinceIso,
       minEffectiveIso: readPipelineMinDateIso(org?.config ?? null),
       channel: input.channel,
+      customerSuccessId:
+        input.funnel === "post_venta"
+          ? (input.customerSuccessId as UUID | undefined)
+          : undefined,
     });
     const hasMore = items.length > PIPELINE_PAGE_SIZE;
     return {
@@ -449,6 +461,10 @@ export interface PipelineFilters {
   advisorId?: UUID;
   /** Búsqueda libre sobre display_reference y contact name/phone. */
   query?: string;
+  /** Filtra por Customer Success (0047, UUID de membership). Eje
+   *  INDEPENDIENTE de `advisorId`: si se pasan ambos, se AND-ean. Solo
+   *  aplica en Post-venta. */
+  customerSuccessId?: UUID;
   /** Vista "Casos resueltos" (Post-venta): "resolved" muestra solo el
    *  archivo de casos cerrados; default excluye los resueltos. */
   resolvedScope?: "active" | "resolved";
@@ -516,12 +532,25 @@ export async function loadInitialPipelineState(opts: {
         ? await searchContactIdsForQuery(filterQuery)
         : null;
 
-    const [allStages, vendors, lossReasons, org] = await Promise.all([
-      listPipelineStages(opts.funnel),
-      listActiveRealVendors(orgId),
-      listLossReasons({ activeOnly: true }),
-      getOrganizationById(orgId),
-    ]);
+    // La segunda ranura (Customer Success) solo existe en Post-venta: en los
+    // otros funnels ni se consulta ni se filtra por ella.
+    const isPostventa = opts.funnel === "post_venta";
+    const filterCustomerSuccessId = isPostventa
+      ? opts.filters?.customerSuccessId
+      : undefined;
+
+    const [allStages, vendors, lossReasons, org, customerSuccess] =
+      await Promise.all([
+        listPipelineStages(opts.funnel),
+        listActiveRealVendors(orgId),
+        listLossReasons({ activeOnly: true }),
+        getOrganizationById(orgId),
+        isPostventa
+          ? listActiveCustomerSuccess(orgId)
+          : Promise.resolve(
+              [] as Awaited<ReturnType<typeof listActiveCustomerSuccess>>,
+            ),
+      ]);
     const activeStages = allStages.filter((s) => s.is_active);
 
     // Auto-ocultar cerradas (Fix de pipeline P1): umbral global de la
@@ -549,6 +578,7 @@ export async function loadInitialPipelineState(opts: {
         resolvedSinceIso,
         minEffectiveIso,
         channel: filterChannel,
+        customerSuccessId: filterCustomerSuccessId,
       }),
       Promise.all(
         activeStages.map(async (stage) => {
@@ -566,6 +596,7 @@ export async function loadInitialPipelineState(opts: {
             resolvedSinceIso,
             minEffectiveIso,
             channel: filterChannel,
+            customerSuccessId: filterCustomerSuccessId,
           });
           return { stageId: stage.id, items };
         }),
@@ -614,6 +645,12 @@ export async function loadInitialPipelineState(opts: {
           userId: v.user_id,
           fullName: v.profile.full_name,
           color: v.profile.color,
+        })),
+        customerSuccess: customerSuccess.map((c) => ({
+          membershipId: c.id,
+          userId: c.user_id,
+          fullName: c.profile.full_name,
+          color: c.profile.color,
         })),
         lossReasons: lossReasons.map((lr) => ({ id: lr.id, name: lr.name })),
       },

@@ -33,6 +33,29 @@ export function resolveAdvisor(
   return { fullName: found.fullName, color: found.color, isUnassigned: false };
 }
 
+/**
+ * Display del Customer Success de una opp de Post-venta (0047). Igual que
+ * `resolveAdvisor` pero con su propio catálogo y su propio fallback: si el
+ * membership ya no está en la lista de CS activos, la etiqueta correcta es
+ * "Customer Success inactivo", no "Asesor histórico" (son ejes distintos y
+ * confundirlos hace ilegible la card).
+ */
+export function resolveCustomerSuccess(
+  membershipId: UUID | null,
+  options: AdvisorOption[],
+): AdvisorDisplay {
+  if (!membershipId) return UNASSIGNED;
+  const found = options.find((o) => o.membershipId === membershipId);
+  if (!found) {
+    return {
+      fullName: "Customer Success inactivo",
+      color: "#9CA3AF",
+      isUnassigned: false,
+    };
+  }
+  return { fullName: found.fullName, color: found.color, isUnassigned: false };
+}
+
 /** Campos mínimos que el helper de display necesita. */
 export interface ContactNameShape {
   id: UUID;

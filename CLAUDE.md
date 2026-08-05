@@ -410,6 +410,35 @@ El motor mueve solo las oportunidades de Post-venta por sus 4 primeras etapas se
 
 Un caso cancelado/reembolsado aterriza en "Caso problemático" (sumidero del motor). Una persona lo resuelve desde el detalle de la opp (botón "Marcar caso como resuelto", visible solo ahí, para asesor asignado o admin): setea `resolved_at` **sin cambiar la etapa** (flag ortogonal, patrón "cancelado ≠ perdido"). El caso se archiva de las vistas activas pero sigue consultable en la vista "Casos resueltos" (toggle del toolbar, solo Post-venta) y por búsqueda de orden/contacto. Sin reopen en MVP — el flag permite des-setear en V2 si Centr lo pide.
 
+## Customer Success en Post-venta — segunda ranura de asignación (migración 0047)
+
+Una oportunidad de Post-venta tiene **dos personas**, no una: el **asesor** (`assigned_advisor_id`, el vendedor que cerró la venta — se hereda de la F1 y NO se toca) y el **Customer Success** (`customer_success_membership_id`, quien atiende el caso). Son ejes independientes: el CS se **suma**, nunca reemplaza al asesor.
+
+**Un solo Customer Success por oportunidad es estructural**, no una regla a hacer cumplir: la ranura es UNA columna, así que asignar otro sustituye al anterior por construcción. Semántica exclusiva de Post-venta — en Venta y Outbound la columna queda NULL y el servicio rechaza la asignación (`not_postventa`).
+
+**El invariante de 0039 sigue intacto.** "Solo los vendedores son asesores" no cambió: `listActiveRealVendors`/`listRealVendorsForMapping` siguen filtrando `role='vendedor'`, y un Customer Success NUNCA entra al selector de asesor, al round-robin de leads, al mapeo de tags ni al mapeo de agentes de Whaapy. La ranura nueva tiene su propio catálogo, `listActiveCustomerSuccess`, cableado al rol `customer-success`.
+
+**Auto-asignación — vive en un trigger de BD a propósito.** Las opps de Post-venta nacen por cuatro vías y una es SQL puro (el trigger F1→F2 de 0027, al pagarse la orden); las otras tres son el webhook de Whaapy Post-venta, la reapertura de casos y el backfill. `tg_opportunity_default_customer_success` (BEFORE INSERT OR UPDATE OF funnel) las cubre todas con una sola regla, y **solo rellena cuando la columna viene NULL** — jamás pisa una asignación manual ni el CS que hereda una reapertura.
+
+**Quién es el CS por defecto:** se ancla por `membership_id` estable en `organizations.config.postventa.customer_success_membership_id` (mismo patrón que `postventa.resolver_user_id`). Editar nombre o email de la persona NO cambia el ancla. Precedencia de `default_customer_success_membership_id(org)`: ancla válida (membership activo con `role='customer-success'`) → CS activo más antiguo de la org → NULL (una org sin el rol, como Rustr, no recibe nada). **Cambiar de persona es un UPDATE, no un deploy:**
+
+```sql
+UPDATE organizations
+SET config = jsonb_set(config, '{postventa,customer_success_membership_id}',
+                       to_jsonb('<membership_id>'::text))
+WHERE slug = 'centr';
+```
+
+**Permisos:** asignan/cambian el CS los roles con `data_scope='all'` (admin/superadmin/SDR) y el propio rol `customer-success` (`canAssignCustomerSuccess` en `lib/auth/capabilities.ts`). Un vendedor lo VE en la card y en el detalle, pero no lo cambia. Audit obligatorio `opportunity_customer_success_assigned`. **NO** reusar `opportunity_reassigned`: ese evento es el contrato "reasignación manual del asesor" que los hooks 0022/0023 leen para no pisar la atribución.
+
+**Dónde se ve:** badge "CS" en la card del kanban (todos los roles), línea en el header del detalle de la oportunidad, botón "Asignar/Cambiar Customer Success" en el pie del detalle, y filtro "Todos los Customer Success" en la barra del pipeline (solo en Post-venta y para roles que ven toda la org). El filtro se limpia al cambiar de funnel — si no, quedaría un filtro activo invisible que vacía el tablero.
+
+**Acoplamiento a vigilar:** la key `'customer-success'` está hardcodeada en TS (`CUSTOMER_SUCCESS_ROLE_KEY`) y en SQL (0047). Renombrar el rol de un solo lado desconecta la feature en silencio; lo cubre el guard `tests/customer-success-sql-contract.test.ts`.
+
+### Paso operativo obligatorio (NO es código del repo)
+
+**Aplicar la migración 0047.** Además de crear la columna, el trigger y la función, la migración **siembra el ancla** con el Customer Success activo más antiguo de cada org (en Centr, Elías) y **backfillea todas las opps de Post-venta existentes** que no tengan CS. No requiere script aparte ni pasos manuales posteriores. Es idempotente y no destructivo: nunca pisa un ancla ya puesto ni un CS ya asignado.
+
 ## Admin → Integraciones (migración 0046)
 
 Pantalla admin-only que gestiona las TRES conexiones externas —**Shopify**, **Whaapy Venta** y **Whaapy Post-venta**— sin tocar código, `.env.local`, Vercel env ni SQL: capturar/rotar credenciales, editar el identificador de cada sistema, probar la conexión, desconectar y reemplazar. Los dos Whaapy siguen siendo proveedores **separados** (namespace de Vault, discriminador y endpoint propios).
