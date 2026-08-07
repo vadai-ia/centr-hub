@@ -150,3 +150,52 @@ export async function bootstrapOrganization(input: {
   if (!data) throw new Error("bootstrap_organization no devolvió id");
   return data as UUID;
 }
+
+/**
+ * Crea la organización CON su primer miembro en una sola transacción SQL
+ * (0048). Es la vía que usa Admin → Organizaciones: `bootstrapOrganization`
+ * a secas deja un tenant sin nadie que pueda entrar (su única membership es
+ * la del usuario sistema "Histórico", inactiva), y rescatarlo exigiría SQL
+ * manual — justo lo que la pantalla existe para evitar.
+ */
+export async function bootstrapOrganizationWithOwner(input: {
+  name: string;
+  slug: string;
+  ownerUserId: UUID;
+  ownerRole?: string;
+}): Promise<UUID> {
+  const supabase = getSupabaseAdminClient();
+  const { data, error } = await supabase.rpc("bootstrap_organization_with_owner", {
+    p_name: input.name,
+    p_slug: input.slug,
+    p_owner_user: input.ownerUserId,
+    p_owner_role: input.ownerRole ?? "admin",
+  });
+  if (error) throw error;
+  if (!data) throw new Error("bootstrap_organization_with_owner no devolvió id");
+  return data as UUID;
+}
+
+/**
+ * Organizaciones por lista de ids, en el orden en que se pidieron. Lectura
+ * cross-tenant por diseño (Admin → Organizaciones lista las orgs donde el
+ * usuario es miembro); la autorización vive en la capa de actions.
+ */
+export async function listOrganizationsByIds(
+  ids: UUID[],
+): Promise<OrganizationRow[]> {
+  if (ids.length === 0) return [];
+  const supabase = getSupabaseAdminClient();
+  const { data, error } = await supabase
+    .from("organizations")
+    .select("*")
+    .in("id", ids);
+  if (error) throw error;
+  const byId = new Map((data ?? []).map((o) => [o.id, o]));
+  return ids.map((id) => byId.get(id)).filter((o): o is OrganizationRow => !!o);
+}
+
+/** ¿El slug ya está tomado? `slug` es citext, así que la comparación ignora mayúsculas. */
+export async function slugExists(slug: string): Promise<boolean> {
+  return (await getOrganizationBySlug(slug)) !== null;
+}

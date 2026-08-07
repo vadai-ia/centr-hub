@@ -715,6 +715,16 @@ export interface Database {
         };
         Returns: UUID;
       };
+      /** 0048 — org + membresía de quien la crea, en una sola transacción. */
+      bootstrap_organization_with_owner: {
+        Args: {
+          p_name: string;
+          p_slug: string;
+          p_owner_user: UUID;
+          p_owner_role?: string;
+        };
+        Returns: UUID;
+      };
       current_organization_id: {
         Args: Record<string, never>;
         Returns: UUID | null;

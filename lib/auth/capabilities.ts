@@ -52,6 +52,7 @@ export const TAB_REGISTRY: readonly TabDef[] = [
   { key: "admin-webhooks", label: "Webhooks de leads", href: "/admin/webhooks", section: "admin" },
   { key: "admin-agentes-whaapy", label: "Agentes Whaapy", href: "/admin/agentes-whaapy", section: "admin" },
   { key: "admin-integraciones", label: "Integraciones", href: "/admin/integraciones", section: "admin" },
+  { key: "admin-organizaciones", label: "Organizaciones", href: "/admin/organizaciones", section: "admin" },
   { key: "admin-roles", label: "Roles y permisos", href: "/admin/roles", section: "admin" },
 ] as const;
 

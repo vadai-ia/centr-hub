@@ -172,3 +172,36 @@ export type DeactivateUserResult =
       reason: "forbidden" | "not_found" | "last_admin" | "internal_error";
       message: string;
     };
+
+/**
+ * Fila del listado de Admin → Organizaciones (0048). Solo se listan las
+ * organizaciones donde el usuario tiene membresía activa con la pestaña
+ * `admin-organizaciones` — la pantalla NO es un directorio global de
+ * tenants.
+ */
+export interface OrganizationAdminView {
+  id: UUID;
+  /** Nombre visible — es lo ÚNICO editable desde la pantalla. */
+  name: string;
+  /** Identificador interno inmutable (webhook de Post-venta + `--org-slug`). */
+  slug: string;
+  /** true si es la organización activa en la sesión que mira la pantalla. */
+  isActive: boolean;
+  /** Rol del usuario en esa organización (label visible). */
+  roleLabel: string;
+  /** Miembros activos, excluido el usuario sistema "Histórico". */
+  memberCount: number;
+  /** Discriminadores de integración — null = aún sin conectar. */
+  shopifyStoreDomain: string | null;
+  whaapyBusinessId: string | null;
+  createdAt: string;
+}
+
+export type OrganizationsActionResult =
+  | { ok: true; organizations: OrganizationAdminView[] }
+  | { ok: false; message: string };
+
+/** Creación: además del listado, devuelve la org nueva para el mensaje de éxito. */
+export type CreateOrganizationResult =
+  | { ok: true; organizations: OrganizationAdminView[]; created: { id: UUID; name: string; slug: string } }
+  | { ok: false; message: string };

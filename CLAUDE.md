@@ -474,6 +474,22 @@ Los getters del Vault (`getShopifyClientId`, `getWhaapyApiKey`, …) **ya no cae
 
 El endpoint de Shopify ahora persiste cada request en `whaapy_raw_webhooks` (`endpoint='shopify'`) con `exit_reason` por cada camino de salida, igual que Whaapy desde M4. La tarjeta de cada proveedor muestra eventos recibidos y rechazados de las últimas 24 h — un dominio mal escrito deja de ser un 200 silencioso. Los headers con credencial se redactan al persistir.
 
+## Admin → Organizaciones (migración 0048)
+
+Pantalla admin que **da de alta una organización nueva** (una tienda más) y **cambia el nombre visible** de una existente, sin SQL. Hasta 0048, `bootstrap_organization` existía desde M0 pero **no tenía ni un solo caller**: crear un tenant era una llamada RPC manual.
+
+**Qué se crea:** la organización con todos sus seeds (4 roles — superadmin/admin/vendedor/SDR —, las 3 filas de `integration_connections` en `not_configured`, el usuario sistema "Histórico", 9 etapas de Venta + 7 de Post-venta + 3 de Outbound, 6 motivos de pérdida, 6 reglas plantilla) **más la membresía admin de quien la crea**, todo en una transacción. Nace **sin conectar** a Shopify ni a Whaapy: las credenciales y los discriminadores se capturan después en Admin → Integraciones, que ya tiene sus propias guardas (0046). El rol `customer-success` no se siembra (se crea desde Admin → Roles, igual que hoy).
+
+**El `slug` es inmutable — renombrar cambia SOLO `organizations.name`.** El slug es el discriminador que la automation del Whaapy de Post-venta manda en el body (`{"org": "<slug>"}`), el `--org-slug` de todos los scripts y el que congela el email del usuario "Histórico". Se elige una única vez al crear (derivado del nombre por `lib/services/organization-slug.ts`, módulo PURO compartido por el modal y la server action) y desde ahí se muestra como solo-lectura. Renombrar **no mueve ningún dato de negocio**: oportunidades, pedidos, contactos, usuarios y atribución quedan intactos. Ver `ERRORES.md` ("El `slug` de una organización no es un nombre").
+
+**Autorización por-organización, no por org activa.** Es la única pantalla que opera cruzando tenants, así que NO usa `resolveAdminContext` (que resuelve contra la org ACTIVA): `authorizedOrgs()` resuelve las capacidades de CADA membresía del usuario y solo lista/permite tocar aquellas cuyo rol incluye la pestaña `admin-organizaciones`. Ser admin en Centr no autoriza a renombrar Rustr si ahí no eres nada. La pestaña la tienen admin y superadmin. Audits: `organization_created` (en la org nueva) y `organization_renamed`.
+
+**Lo que la pantalla deliberadamente NO hace:** borrar organizaciones (un tenant con datos no se borra desde una UI), editar el slug, ni capturar credenciales o ids externos.
+
+### Paso operativo obligatorio (NO es código del repo)
+
+**Aplicar la migración 0048.** Agrega la pestaña `admin-organizaciones` a los roles admin/superadmin **existentes** (sin este backfill, Centr y Rustr nunca la ven), re-CREA `bootstrap_organization` desde la VIGENTE (0046) con esa key añadida, y crea `bootstrap_organization_with_owner`. Es idempotente y no destructivo.
+
 ## Cambios al stack
 
 Cualquier modificación al stack documentado en `package.json` (agregar dependencia, subir versión mayor, cambiar provider externo) requiere aprobación explícita del operador antes de comitearse. Razón: el stack está fijado por experiencias previas (Kibah, FindMed, Hemenesy) y cualquier desviación inesperada introduce riesgo operacional.
