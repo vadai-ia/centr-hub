@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import {
   TAB_REGISTRY,
   type RoleCapabilities,
@@ -23,17 +23,12 @@ export function Sidebar({ role }: Props) {
   const onAdminRoute = pathname.startsWith(ADMIN_PREFIX);
 
   /** El bloque de administración es un desplegable: colapsado por
-   *  defecto para que el menú no abra con una docena de opciones. Nace
-   *  abierto solo si ya estamos dentro de /admin — si no, la pestaña
-   *  activa quedaría escondida. */
-  const [adminOpen, setAdminOpen] = useState(onAdminRoute);
-
-  /** Navegar a /admin desde fuera (link directo, redirect, landing del
-   *  rol) despliega el grupo; salir de /admin NO lo cierra — cerrar es
-   *  decisión del usuario. */
-  useEffect(() => {
-    if (onAdminRoute) setAdminOpen(true);
-  }, [onAdminRoute]);
+   *  defecto para que el menú no abra con una docena de opciones.
+   *  Colapsado SIEMPRE al montar, incluso estando ya dentro de /admin —
+   *  abrirlo es decisión explícita del usuario. Con el grupo cerrado
+   *  sobre una ruta de admin, la cabecera se pinta con el estilo activo
+   *  para no perder la referencia de dónde estás. */
+  const [adminOpen, setAdminOpen] = useState(false);
 
   const allowed = TAB_REGISTRY.filter((t) => role.allowedTabs.includes(t.key));
   const generalTabs = allowed.filter((t) => t.section === "general");
