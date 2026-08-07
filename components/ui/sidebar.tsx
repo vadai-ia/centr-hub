@@ -1,11 +1,13 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
 import {
   TAB_REGISTRY,
   type RoleCapabilities,
   type TabDef,
 } from "@/lib/auth/capabilities";
+import { IconChevronDown, IconSettings, TabIcon } from "./nav-icons";
 
 interface Props {
   /** Capacidades del rol activo (0039). La nav se renderiza desde
@@ -14,8 +16,24 @@ interface Props {
   role: RoleCapabilities;
 }
 
+const ADMIN_PREFIX = "/admin";
+
 export function Sidebar({ role }: Props) {
   const pathname = usePathname();
+  const onAdminRoute = pathname.startsWith(ADMIN_PREFIX);
+
+  /** El bloque de administración es un desplegable: colapsado por
+   *  defecto para que el menú no abra con una docena de opciones. Nace
+   *  abierto solo si ya estamos dentro de /admin — si no, la pestaña
+   *  activa quedaría escondida. */
+  const [adminOpen, setAdminOpen] = useState(onAdminRoute);
+
+  /** Navegar a /admin desde fuera (link directo, redirect, landing del
+   *  rol) despliega el grupo; salir de /admin NO lo cierra — cerrar es
+   *  decisión del usuario. */
+  useEffect(() => {
+    if (onAdminRoute) setAdminOpen(true);
+  }, [onAdminRoute]);
 
   const allowed = TAB_REGISTRY.filter((t) => role.allowedTabs.includes(t.key));
   const generalTabs = allowed.filter((t) => t.section === "general");
@@ -24,7 +42,7 @@ export function Sidebar({ role }: Props) {
   function linkClass(href: string) {
     const active = pathname === href || pathname.startsWith(href + "/");
     return [
-      "flex items-center px-3 py-2 rounded-md text-sm transition-colors",
+      "group flex items-center gap-2.5 px-3 py-2 rounded-md text-sm transition-colors",
       active
         ? "bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 font-medium"
         : "text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-gray-900 dark:hover:text-gray-100",
@@ -34,7 +52,8 @@ export function Sidebar({ role }: Props) {
   function renderTab(tab: TabDef) {
     return (
       <Link key={tab.href} href={tab.href} className={linkClass(tab.href)}>
-        {tab.label}
+        <TabIcon tabKey={tab.key} className="h-[18px] w-[18px] flex-shrink-0" />
+        <span className="truncate">{tab.label}</span>
       </Link>
     );
   }
@@ -48,10 +67,33 @@ export function Sidebar({ role }: Props) {
 
       {adminTabs.length > 0 && (
         <div className="border-t border-gray-200 dark:border-gray-700 mt-1 p-3">
-          <p className="px-3 py-1 text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-1">
-            Administración
-          </p>
-          <nav className="space-y-1">{adminTabs.map(renderTab)}</nav>
+          <button
+            type="button"
+            onClick={() => setAdminOpen((open) => !open)}
+            aria-expanded={adminOpen}
+            aria-controls="sidebar-admin-tabs"
+            className={[
+              "w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-sm transition-colors",
+              onAdminRoute && !adminOpen
+                ? "bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 font-medium"
+                : "text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-gray-900 dark:hover:text-gray-100",
+            ].join(" ")}
+          >
+            <IconSettings className="h-[18px] w-[18px] flex-shrink-0" />
+            <span className="flex-1 text-left truncate">Administración</span>
+            <IconChevronDown
+              className={[
+                "h-4 w-4 flex-shrink-0 transition-transform duration-200",
+                adminOpen ? "rotate-180" : "",
+              ].join(" ")}
+            />
+          </button>
+
+          {adminOpen && (
+            <nav id="sidebar-admin-tabs" className="mt-1 space-y-1">
+              {adminTabs.map(renderTab)}
+            </nav>
+          )}
         </div>
       )}
 
