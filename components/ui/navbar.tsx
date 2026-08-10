@@ -1,4 +1,3 @@
-import { ThemeToggle } from "./theme-toggle";
 import { UserMenu } from "./user-menu";
 import { OrgSelector } from "./org-selector";
 import type { SessionData } from "@/lib/auth/session";
@@ -21,8 +20,6 @@ export function Navbar({ session }: Props) {
       {session.orgs.length > 1 && (
         <OrgSelector orgs={session.orgs} activeOrgId={session.activeOrg.id} />
       )}
-
-      <ThemeToggle />
 
       <UserMenu email={session.email} displayName={session.displayName} />
     </header>

@@ -23,16 +23,14 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  /* Tema único: oscuro. La clase `dark` va fija en el HTML servido — no
+     hay toggle, ni lectura de localStorage, ni de la preferencia del
+     sistema. Al ser estática desde el servidor tampoco hay flash en el
+     primer paint (era lo que resolvía el script inline previo). Las
+     utilidades `dark:` del resto de la app siguen vigentes: es esta
+     clase la que las activa. */
   return (
-    <html lang="es" suppressHydrationWarning>
-      <head>
-        {/* Prevents dark mode flash before first paint */}
-        <script
-          dangerouslySetInnerHTML={{
-            __html: `(function(){try{var t=localStorage.getItem('theme');if(t==='dark'||(t===null&&window.matchMedia('(prefers-color-scheme: dark)').matches)){document.documentElement.classList.add('dark')}}catch(e){}})()`,
-          }}
-        />
-      </head>
+    <html lang="es" className="dark">
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased bg-background text-foreground`}
       >

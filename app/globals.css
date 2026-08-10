@@ -2,14 +2,15 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Tema único: oscuro. No hay paleta clara ni override por `.dark` — la
+   clase `dark` sigue fija en el <html> (app/layout.tsx) porque es la que
+   activa las utilidades `dark:` de Tailwind, pero las variables base ya
+   no dependen de ella. */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-.dark {
   --background: #0a0a0a;
   --foreground: #ededed;
+  /* Widgets nativos (selects, inputs date/time, autofill) en oscuro. */
+  color-scheme: dark;
 }
 
 body {
@@ -32,16 +33,13 @@ body {
  * `*` cubre la barra default del browser de forma menos invasiva.
  *
  * Webkit: customizable. Firefox: scrollbar-color + scrollbar-width.
- * En dark mode tomamos las variables apropiadas (gray-600 thumb sobre
- * track casi transparente).
+ * Valores del tema oscuro (gray-600 thumb sobre track transparente);
+ * la variante clara se retiró junto con el modo claro.
  * --------------------------------------------------------------- */
 @layer base {
   /* Default: aplicar a TODA superficie con scroll (browser-wide). */
   * {
     scrollbar-width: thin;
-    scrollbar-color: rgba(156, 163, 175, 0.5) transparent;
-  }
-  .dark * {
     scrollbar-color: rgba(75, 85, 99, 0.7) transparent;
   }
   *::-webkit-scrollbar {
@@ -52,18 +50,12 @@ body {
     background: transparent;
   }
   *::-webkit-scrollbar-thumb {
-    background-color: rgba(156, 163, 175, 0.5);
+    background-color: rgba(75, 85, 99, 0.7);
     border-radius: 9999px;
     border: 2px solid transparent;
     background-clip: padding-box;
   }
   *::-webkit-scrollbar-thumb:hover {
-    background-color: rgba(107, 114, 128, 0.7);
-  }
-  .dark *::-webkit-scrollbar-thumb {
-    background-color: rgba(75, 85, 99, 0.7);
-  }
-  .dark *::-webkit-scrollbar-thumb:hover {
     background-color: rgba(107, 114, 128, 0.9);
   }
   *::-webkit-scrollbar-corner {
