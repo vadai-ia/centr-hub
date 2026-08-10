@@ -26,7 +26,19 @@ export default async function DashboardLayout({
       <Navbar session={data} />
       <div className="flex flex-1 min-h-0 overflow-hidden">
         <Sidebar role={data.activeRole} />
-        <main className="flex-1 min-w-0 min-h-0 overflow-y-auto p-6">
+        {/* `key` por organización activa — NO es cosmético. Las pantallas
+            siembran su estado desde props del servidor (`useState(initial…)`),
+            que solo se leen AL MONTAR. Tras cambiar de organización, el
+            `router.refresh()` del selector re-renderiza el servidor y baja
+            props de la org nueva, pero ese `useState` los ignora: la vista
+            seguiría mostrando datos de la org anterior hasta recargar a mano.
+            Al cambiar la key, React desmonta y vuelve a montar el contenido,
+            así que todo re-siembra con la organización correcta. Cubre también
+            las pantallas futuras que repitan el patrón. */}
+        <main
+          key={data.activeOrg.id}
+          className="flex-1 min-w-0 min-h-0 overflow-y-auto p-6"
+        >
           {children}
         </main>
       </div>
