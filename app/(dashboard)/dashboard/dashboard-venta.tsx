@@ -10,7 +10,7 @@ import {
   WonVsLostChart,
 } from "./dashboard-charts";
 import { formatAmount } from "@/lib/format/money";
-import { DASH, formatCount, formatDays, formatPercent } from "@/lib/format/dashboard";
+import { DASH, formatCivilDate, formatCount, formatDays, formatPercent } from "@/lib/format/dashboard";
 import { DEFAULT_CURRENCY } from "@/lib/constants";
 import type { AdvisorBreakdownRow, VentaMetrics } from "@/lib/types/dashboard";
 
@@ -51,6 +51,19 @@ const TT = {
     "De las oportunidades que pasaron por cada etapa en el periodo, % que después avanzó a una etapa posterior no perdida. Llegar a Ganada cuenta; llegar a Perdida no.",
 } as const;
 
+/**
+ * Con corte configurado, las dos frases que los tooltips del snapshot dan
+ * por ciertas ("coincide con el pipeline", "no depende de fechas") dejan
+ * de serlo a medias: sigue sin responder al filtro, pero está acotado.
+ * Se declara ahí mismo en vez de dejar un tooltip que miente.
+ */
+function withCutoffNote(base: string, snapshotSince: string | null): string {
+  if (!snapshotSince) return base;
+  return `${base} Acotado por configuración a lo creado desde el ${formatCivilDate(
+    snapshotSince,
+  )}: puede ser menor que lo que muestra el pipeline, que no aplica ese corte.`;
+}
+
 function SubGroup({ title, children }: { title: string; children: ReactNode }) {
   return (
     <div className="space-y-2">
@@ -68,7 +81,13 @@ function SubGroup({ title, children }: { title: string; children: ReactNode }) {
  * periodo (recuadro propio + chip "Foto del momento") para que quede
  * claro que ignoran el rango de fechas — esa confusión originó el ajuste.
  */
-function EstadoActualGroup({ children }: { children: ReactNode }) {
+function EstadoActualGroup({
+  children,
+  snapshotSince,
+}: {
+  children: ReactNode;
+  snapshotSince: string | null;
+}) {
   return (
     <div className="space-y-2.5 rounded-xl border border-dashed border-gray-300 dark:border-gray-600 bg-gray-50/60 dark:bg-gray-800/40 p-4">
       <div className="flex flex-wrap items-center gap-2">
@@ -78,6 +97,14 @@ function EstadoActualGroup({ children }: { children: ReactNode }) {
         <span className="inline-flex items-center gap-1 rounded-full bg-gray-200/80 dark:bg-gray-700/80 px-2 py-0.5 text-[10px] font-medium text-gray-600 dark:text-gray-300">
           <span aria-hidden>📸</span> Foto del momento · no depende del filtro de fecha
         </span>
+        {/* Con corte configurado el snapshot deja de coincidir con el
+            kanban: hay que declararlo o el número se lee como el total. */}
+        {snapshotSince ? (
+          <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 dark:bg-amber-900/40 px-2 py-0.5 text-[10px] font-medium text-amber-800 dark:text-amber-200">
+            <span aria-hidden>✂️</span> Solo lo creado desde el {formatCivilDate(snapshotSince)} · el
+            pipeline muestra todo
+          </span>
+        ) : null}
       </div>
       {children}
     </div>
@@ -87,27 +114,29 @@ function EstadoActualGroup({ children }: { children: ReactNode }) {
 export function DashboardVenta({
   m,
   breakdown,
+  snapshotSince,
 }: {
   m: VentaMetrics;
   breakdown: AdvisorBreakdownRow[] | null;
+  snapshotSince: string | null;
 }) {
   return (
     <DashboardSection tone="venta" title="Venta" subtitle="Pipeline comercial y cierre">
-      <EstadoActualGroup>
+      <EstadoActualGroup snapshotSince={snapshotSince}>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <KpiCard
             label="Activas (con cotización)"
             value={formatCount(m.activeWithDraft)}
             accent="pipeline"
-            tooltip={TT.active}
+            tooltip={withCutoffNote(TT.active, snapshotSince)}
           />
           <KpiCard
             label="Pipeline $ actual"
             value={formatAmount(m.pipelineGrossNow, CCY) ?? DASH}
             accent="pipeline"
             icon={<IconPipeline />}
-            hint="Bruto · vivas ahora"
-            tooltip={TT.pipelineNow}
+            hint={snapshotSince ? "Bruto · vivas ahora · acotado" : "Bruto · vivas ahora"}
+            tooltip={withCutoffNote(TT.pipelineNow, snapshotSince)}
           />
         </div>
       </EstadoActualGroup>
@@ -172,7 +201,9 @@ export function DashboardVenta({
       </SubGroup>
 
       {/* Desglose por vendedor — posición prominente (#4) */}
-      {breakdown ? <AdvisorBreakdown rows={breakdown} funnel="venta" /> : null}
+      {breakdown ? (
+        <AdvisorBreakdown rows={breakdown} funnel="venta" snapshotSince={snapshotSince} />
+      ) : null}
 
       {/* Gráficas */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">

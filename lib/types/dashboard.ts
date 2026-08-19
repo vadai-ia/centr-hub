@@ -154,4 +154,12 @@ export interface DashboardData {
   /** Drilldown por vendedor — solo admin y solo cuando no hay asesor filtrado. */
   ventaBreakdown: AdvisorBreakdownRow[] | null;
   postventaBreakdown: AdvisorBreakdownRow[] | null;
+  /**
+   * Corte por antigüedad aplicado al SNAPSHOT ("Activas" y "Pipeline $
+   * actual"), en `YYYY-MM-DD`, o null si la organización no tiene corte.
+   * La UI DEBE declararlo cuando no es null: el snapshot recortado ya no
+   * coincide con el kanban, y un número acotado que no se anuncia se lee
+   * como el total. Ver `dashboard-snapshot-window.ts`.
+   */
+  pipelineSnapshotSince: string | null;
 }

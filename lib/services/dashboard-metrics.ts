@@ -19,6 +19,8 @@ import {
 } from "@/lib/db/dashboard";
 import { listLossReasons } from "@/lib/db/pipeline";
 import { listRealVendorsForMapping } from "@/lib/db/users";
+import { getOrganizationById } from "@/lib/db/organizations";
+import { resolvePipelineSnapshotWindow } from "@/lib/services/dashboard-snapshot-window";
 import {
   resolvePostventaStages,
   resolveVentaStageBoundaries,
@@ -171,7 +173,10 @@ function monthsToSeries(map: Map<string, number>): MonthValue[] {
 // Funnel Venta
 // ============================================================
 
-async function fetchVentaRaw(period: ResolvedPeriod): Promise<VentaRaw> {
+async function fetchVentaRaw(
+  period: ResolvedPeriod,
+  snapshotSinceUtc: string | null,
+): Promise<VentaRaw> {
   const boundaries = await resolveVentaStageBoundaries();
   const lostStageId = boundaries.lostStage?.id ?? null;
 
@@ -189,7 +194,7 @@ async function fetchVentaRaw(period: ResolvedPeriod): Promise<VentaRaw> {
       listDraftOppsCreatedInPeriod(period.startUtc, period.endUtc),
       listWonOppsInPeriod(period.startUtc, period.endUtc),
       listLivePipelineOpps(period.startUtc, period.endUtc),
-      listLivePipelineSnapshot(),
+      listLivePipelineSnapshot(snapshotSinceUtc),
       lostStageId
         ? listLostEntriesInPeriod(lostStageId, period.startUtc, period.endUtc)
         : Promise.resolve([] as LostEntryRow[]),
@@ -492,8 +497,14 @@ export async function computeDashboardData(input: ComputeDashboardInput): Promis
   const channel: Channel = input.channel ?? "all";
   const wantBreakdown = input.isAdmin && input.scope === undefined;
 
+  // Corte por antigüedad del snapshot (config por organización). Se lee
+  // aquí y no en el data layer para que la fecha aplicada viaje a la UI:
+  // un número recortado que no se declara se lee como si fuera el total.
+  const org = await getOrganizationById(input.organizationId);
+  const snapshotWindow = resolvePipelineSnapshotWindow(org?.config ?? null);
+
   const [ventaRaw, postventaRaw] = await Promise.all([
-    fetchVentaRaw(input.period),
+    fetchVentaRaw(input.period, snapshotWindow.sinceUtc),
     fetchPostventaRaw(input.period),
   ]);
 
@@ -534,6 +545,7 @@ export async function computeDashboardData(input: ComputeDashboardInput): Promis
     postventaByChannel,
     ventaBreakdown,
     postventaBreakdown,
+    pipelineSnapshotSince: snapshotWindow.sinceDate,
   };
 }
 

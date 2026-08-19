@@ -28,3 +28,22 @@ export function formatDays(days: number | null): string {
   const rounded = Math.round(days * 10) / 10;
   return `${numberFmt.format(rounded)} días`;
 }
+
+/**
+ * Fecha civil `YYYY-MM-DD` → "1 de mayo de 2026". Se formatea a mano
+ * (sin `new Date()`) para que no dependa del huso del navegador: la
+ * fecha ya viene resuelta en CDMX desde el servidor.
+ */
+const MONTHS_ES = [
+  "enero", "febrero", "marzo", "abril", "mayo", "junio",
+  "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre",
+] as const;
+
+export function formatCivilDate(isoDate: string | null): string {
+  if (!isoDate) return DASH;
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(isoDate.trim());
+  if (!m) return isoDate;
+  const month = MONTHS_ES[Number(m[2]) - 1];
+  if (!month) return isoDate;
+  return `${Number(m[3])} de ${month} de ${m[1]}`;
+}

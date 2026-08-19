@@ -138,7 +138,11 @@ export function DashboardScreen({
         postventa={data.postventaByChannel}
       />
 
-      <DashboardVenta m={data.venta} breakdown={data.ventaBreakdown} />
+      <DashboardVenta
+        m={data.venta}
+        breakdown={data.ventaBreakdown}
+        snapshotSince={data.pipelineSnapshotSince}
+      />
       <DashboardPostventa m={data.postventa} breakdown={data.postventaBreakdown} />
 
       {exportOpen ? (

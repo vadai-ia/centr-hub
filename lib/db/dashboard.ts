@@ -205,17 +205,28 @@ export async function listLivePipelineOpps(
  * tampoco filtra por fecha de creación por default). Resuelve la
  * inconsistencia "kanban 4 vs dashboard 2" (Ajuste métricas estado vs
  * periodo). `won_at IS NULL` excluye ganadas en SQL.
+ *
+ * `sinceUtc` (opcional) acota el snapshot a lo creado DESDE esa fecha —
+ * corte por antigüedad configurable por organización
+ * (`config.dashboard.pipeline_snapshot_since`, ver
+ * `dashboard-snapshot-window.ts`). Es un corte SOLO del dashboard: el
+ * kanban no lo aplica, así que con la config puesta las dos vistas
+ * divergen a propósito. Sin `sinceUtc` la query queda idéntica a la
+ * original y ambas vistas vuelven a coincidir.
  */
-export async function listLivePipelineSnapshot(): Promise<LivePipelineRow[]> {
+export async function listLivePipelineSnapshot(
+  sinceUtc?: string | null,
+): Promise<LivePipelineRow[]> {
   const { supabase, organizationId } = getTenantScopedClient();
-  const { data, error } = await supabase
+  let query = supabase
     .from("opportunities")
     .select("assigned_advisor_id, is_outbound, stage_id, shopify_draft_order_id, actual_amount, estimated_amount")
     .eq("organization_id", organizationId)
     .eq("funnel", "venta")
     .is("cancelled_at", null)
-    .is("won_at", null)
-    .limit(ROW_CAP);
+    .is("won_at", null);
+  if (sinceUtc) query = query.gte("effective_created_at", sinceUtc);
+  const { data, error } = await query.limit(ROW_CAP);
   if (error) throw error;
   return (data ?? []) as LivePipelineRow[];
 }

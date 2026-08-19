@@ -43,7 +43,8 @@
     "maintenance:backfill-order-delivery-status": "tsx --tsconfig scripts/tsconfig.json scripts/maintenance/backfill-order-delivery-status.ts",
     "maintenance:backfill-order-is-outbound": "tsx --tsconfig scripts/tsconfig.json scripts/maintenance/backfill-order-is-outbound.ts",
     "maintenance:adopt-env-credentials": "tsx --tsconfig scripts/tsconfig.json scripts/maintenance/adopt-env-credentials.ts",
-    "maintenance:clone-org-team": "tsx --tsconfig scripts/tsconfig.json scripts/maintenance/clone-org-team.ts"
+    "maintenance:clone-org-team": "tsx --tsconfig scripts/tsconfig.json scripts/maintenance/clone-org-team.ts",
+    "maintenance:set-dashboard-snapshot-since": "tsx --tsconfig scripts/tsconfig.json scripts/maintenance/set-dashboard-snapshot-since.ts"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.1.0",

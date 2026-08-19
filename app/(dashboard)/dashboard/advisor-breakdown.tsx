@@ -1,5 +1,5 @@
 import { formatAmount } from "@/lib/format/money";
-import { DASH, formatCount, formatPercent } from "@/lib/format/dashboard";
+import { DASH, formatCivilDate, formatCount, formatPercent } from "@/lib/format/dashboard";
 import { DEFAULT_CURRENCY } from "@/lib/constants";
 import type { AdvisorBreakdownRow } from "@/lib/types/dashboard";
 import type { Funnel } from "@/lib/types/database";
@@ -15,9 +15,12 @@ const CCY = DEFAULT_CURRENCY;
 export function AdvisorBreakdown({
   rows,
   funnel,
+  snapshotSince = null,
 }: {
   rows: AdvisorBreakdownRow[];
   funnel: Funnel;
+  /** Corte del snapshot (solo Venta): acota "Pipeline $ actual". */
+  snapshotSince?: string | null;
 }) {
   if (rows.length === 0) return null;
   const isVenta = funnel === "venta";
@@ -30,6 +33,13 @@ export function AdvisorBreakdown({
           El usuario &quot;Histórico&quot; no se lista; su aporte sí cuenta en los totales de la
           organización.
         </p>
+        {isVenta && snapshotSince ? (
+          <p className="text-xs text-amber-700 dark:text-amber-300 mt-1">
+            <span aria-hidden>✂️</span> &quot;Pipeline $ actual&quot; solo cuenta oportunidades
+            creadas desde el {formatCivilDate(snapshotSince)}. El tablero del pipeline no aplica
+            este corte, así que muestra más.
+          </p>
+        ) : null}
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
