@@ -35,9 +35,9 @@ export function AdvisorBreakdown({
         </p>
         {isVenta && snapshotSince ? (
           <p className="text-xs text-amber-700 dark:text-amber-300 mt-1">
-            <span aria-hidden>✂️</span> &quot;Pipeline $ actual&quot; solo cuenta oportunidades
-            creadas desde el {formatCivilDate(snapshotSince)}. El tablero del pipeline no aplica
-            este corte, así que muestra más.
+            <span aria-hidden>✂️</span> En &quot;Sin asignar&quot;, el pipeline actual solo cuenta
+            oportunidades creadas desde el {formatCivilDate(snapshotSince)}. Las de cada vendedor se
+            muestran completas. El tablero del pipeline no aplica este corte, así que muestra más.
           </p>
         ) : null}
       </div>

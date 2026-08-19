@@ -206,10 +206,13 @@ export async function listLivePipelineOpps(
  * inconsistencia "kanban 4 vs dashboard 2" (Ajuste métricas estado vs
  * periodo). `won_at IS NULL` excluye ganadas en SQL.
  *
- * `sinceUtc` (opcional) acota el snapshot a lo creado DESDE esa fecha —
- * corte por antigüedad configurable por organización
+ * `sinceUtc` (opcional) descarta las opps **SIN asesor** creadas antes de
+ * esa fecha — corte por antigüedad configurable por organización
  * (`config.dashboard.pipeline_snapshot_since`, ver
- * `dashboard-snapshot-window.ts`). Es un corte SOLO del dashboard: el
+ * `dashboard-snapshot-window.ts`). El corte NO toca a las opps asignadas:
+ * el pipeline real de cada vendedor se muestra completo sin importar su
+ * edad; lo que se poda es el arrastre histórico de "Sin asignar", que es
+ * lo que nadie va a trabajar. Es además un corte SOLO del dashboard — el
  * kanban no lo aplica, así que con la config puesta las dos vistas
  * divergen a propósito. Sin `sinceUtc` la query queda idéntica a la
  * original y ambas vistas vuelven a coincidir.
@@ -225,7 +228,13 @@ export async function listLivePipelineSnapshot(
     .eq("funnel", "venta")
     .is("cancelled_at", null)
     .is("won_at", null);
-  if (sinceUtc) query = query.gte("effective_created_at", sinceUtc);
+  // "tiene asesor" OR "es reciente" — el complemento exacto de
+  // "sin asesor Y vieja", que es lo único que se descarta.
+  if (sinceUtc) {
+    query = query.or(
+      `assigned_advisor_id.not.is.null,effective_created_at.gte.${sinceUtc}`,
+    );
+  }
   const { data, error } = await query.limit(ROW_CAP);
   if (error) throw error;
   return (data ?? []) as LivePipelineRow[];

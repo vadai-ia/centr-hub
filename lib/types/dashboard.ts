@@ -157,9 +157,11 @@ export interface DashboardData {
   /**
    * Corte por antigüedad aplicado al SNAPSHOT ("Activas" y "Pipeline $
    * actual"), en `YYYY-MM-DD`, o null si la organización no tiene corte.
-   * La UI DEBE declararlo cuando no es null: el snapshot recortado ya no
-   * coincide con el kanban, y un número acotado que no se anuncia se lee
-   * como el total. Ver `dashboard-snapshot-window.ts`.
+   * Descarta ÚNICAMENTE las oportunidades sin asesor anteriores a esa
+   * fecha; las asignadas se cuentan completas. La UI DEBE declararlo
+   * cuando no es null: el snapshot recortado ya no coincide con el
+   * kanban, y un número acotado que no se anuncia se lee como el total.
+   * Ver `dashboard-snapshot-window.ts`.
    */
   pipelineSnapshotSince: string | null;
 }

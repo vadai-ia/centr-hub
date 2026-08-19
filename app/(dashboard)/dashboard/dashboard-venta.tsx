@@ -52,16 +52,15 @@ const TT = {
 } as const;
 
 /**
- * Con corte configurado, las dos frases que los tooltips del snapshot dan
- * por ciertas ("coincide con el pipeline", "no depende de fechas") dejan
- * de serlo a medias: sigue sin responder al filtro, pero está acotado.
- * Se declara ahí mismo en vez de dejar un tooltip que miente.
+ * Con corte configurado, la frase que el tooltip de "Activas" da por
+ * cierta ("coincide con lo que muestra el pipeline") deja de serlo. Se
+ * aclara ahí mismo en vez de dejar un tooltip que miente.
  */
 function withCutoffNote(base: string, snapshotSince: string | null): string {
   if (!snapshotSince) return base;
-  return `${base} Acotado por configuración a lo creado desde el ${formatCivilDate(
+  return `${base} Por configuración de la organización, las oportunidades SIN asesor anteriores al ${formatCivilDate(
     snapshotSince,
-  )}: puede ser menor que lo que muestra el pipeline, que no aplica ese corte.`;
+  )} no se cuentan aquí (las de cada vendedor sí, sin importar su antigüedad). El pipeline no aplica ese corte, así que muestra más.`;
 }
 
 function SubGroup({ title, children }: { title: string; children: ReactNode }) {
@@ -101,8 +100,8 @@ function EstadoActualGroup({
             kanban: hay que declararlo o el número se lee como el total. */}
         {snapshotSince ? (
           <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 dark:bg-amber-900/40 px-2 py-0.5 text-[10px] font-medium text-amber-800 dark:text-amber-200">
-            <span aria-hidden>✂️</span> Solo lo creado desde el {formatCivilDate(snapshotSince)} · el
-            pipeline muestra todo
+            <span aria-hidden>✂️</span> Sin asignar: solo desde el {formatCivilDate(snapshotSince)} ·
+            el pipeline muestra todo
           </span>
         ) : null}
       </div>
@@ -135,7 +134,9 @@ export function DashboardVenta({
             value={formatAmount(m.pipelineGrossNow, CCY) ?? DASH}
             accent="pipeline"
             icon={<IconPipeline />}
-            hint={snapshotSince ? "Bruto · vivas ahora · acotado" : "Bruto · vivas ahora"}
+            hint={
+              snapshotSince ? "Bruto · vivas ahora · sin asignar acotado" : "Bruto · vivas ahora"
+            }
             tooltip={withCutoffNote(TT.pipelineNow, snapshotSince)}
           />
         </div>

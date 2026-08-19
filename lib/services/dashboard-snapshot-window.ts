@@ -12,12 +12,18 @@ import { TIMEZONE } from "@/lib/constants";
  *
  * En Centr eso hace que el snapshot arrastre cotizaciones de años
  * anteriores que nadie cerró, y "Sin asignar" domina el tablero con una
- * cifra que no representa nada operable. La organización puede acotar el
- * snapshot a lo creado DESDE una fecha:
+ * cifra que no representa nada operable. La organización puede podar ese
+ * arrastre:
  *
  *   organizations.config.dashboard.pipeline_snapshot_since = "2026-05-01"
  *
- * **El corte es SOLO del dashboard.** El kanban sigue mostrando todo, así
+ * **El corte descarta ÚNICAMENTE las opps SIN asesor anteriores a esa
+ * fecha.** El pipeline de cada vendedor se muestra completo sin importar
+ * la edad de sus oportunidades: una opp vieja pero asignada es trabajo de
+ * alguien, y recortársela le falsearía su propio tablero. Lo que se poda
+ * es el montón que nadie reclama.
+ *
+ * **Y es un corte SOLO del dashboard.** El kanban sigue mostrando todo, así
  * que las dos vistas divergen a propósito — decisión del operador. Por eso
  * `DashboardData` expone la fecha aplicada: la UI debe declararla, o el
  * lector interpreta un número recortado como si fuera el total.

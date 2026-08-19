@@ -8,6 +8,11 @@
  * desglose por vendedor. Revenue, cotizaciones, ganadas, perdidas y win
  * rate NO se tocan: esas ya responden al selector de periodo.
  *
+ * **Y dentro de esas dos, solo se descartan las oportunidades SIN
+ * asesor** anteriores a la fecha. El renglón de cada vendedor se muestra
+ * completo sin importar la antigüedad de sus opps — una opp vieja pero
+ * asignada es trabajo de alguien; lo que se poda es lo que nadie reclama.
+ *
  * **El corte es SOLO del dashboard.** El kanban del pipeline sigue
  * mostrando todo, así que con el corte puesto las dos vistas divergen a
  * propósito. La UI lo declara con un chip; ver
