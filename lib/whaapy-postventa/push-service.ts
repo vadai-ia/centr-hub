@@ -1,6 +1,7 @@
 import "server-only";
 import { getOpportunityById } from "@/lib/db/opportunities";
 import { getContactById } from "@/lib/db/contacts";
+import { findOrderByShopifyOrderId } from "@/lib/db/orders";
 import { recordAuditEvent } from "@/lib/db/operational";
 import { normalizePhone } from "@/lib/services/identity-matching";
 import {
@@ -105,11 +106,26 @@ export async function pushPostventaStage(
     return { ok: false, skipped: "stage_unresolved" };
   }
 
+  // `orderRef` es CARA AL CLIENTE (va en la variable del template de
+  // WhatsApp), así que tiene que ser el nombre del PEDIDO (#1759), no el
+  // del borrador. `display_reference` guarda el del draft (#D903) y el
+  // cliente nunca lo vio: su confirmación de compra dice el otro número.
+  // Se resuelve desde la orden enlazada; si no hay orden, queda null antes
+  // que mandar un número que el cliente no reconoce.
+  const orderRef = await resolveCustomerFacingOrderRef(opp.shopify_order_id);
   const customFields = {
     [WHAAPY_POSTVENTA_CUSTOM_FIELDS.opportunityId]: opportunityId,
-    [WHAAPY_POSTVENTA_CUSTOM_FIELDS.orderRef]: opp.display_reference ?? null,
+    [WHAAPY_POSTVENTA_CUSTOM_FIELDS.orderRef]: orderRef,
     [WHAAPY_POSTVENTA_CUSTOM_FIELDS.orderId]: opp.shopify_order_id ?? null,
   };
+  if (!orderRef) {
+    // Visible en el audit: la variable del template saldrá vacía.
+    await audit(opportunityId, "postventa_whaapy_order_ref_missing", {
+      target,
+      shopify_order_id: opp.shopify_order_id ?? null,
+      display_reference: opp.display_reference ?? null,
+    });
+  }
 
   // Match por teléfono. Si existe → PATCH custom_fields. Si NO existe →
   // CREAR el contacto (con custom_fields) — el Whaapy de Post-venta arranca
@@ -155,9 +171,28 @@ export async function pushPostventaStage(
     stage_id: stageId,
     whaapy_contact_id: contactId,
     created,
-    order_ref: opp.display_reference ?? null,
+    order_ref: orderRef,
   });
   return { ok: true, moved: true, created, whaapyContactId: contactId };
+}
+
+/**
+ * Referencia del pedido tal como el CLIENTE la conoce (`#1759`), leída de
+ * `orders.shopify_name`. Devuelve null si la opp no tiene orden enlazada o
+ * la orden no está en la base: preferimos una variable vacía en el mensaje
+ * a mandarle al cliente el número del borrador (`#D903`), que nunca vio.
+ *
+ * Mismo malentendido que reportó Post-venta al buscar casos por número:
+ * el borrador y el pedido son identificadores distintos y solo el segundo
+ * es público.
+ */
+async function resolveCustomerFacingOrderRef(
+  shopifyOrderId: string | null,
+): Promise<string | null> {
+  if (!shopifyOrderId) return null;
+  const order = await findOrderByShopifyOrderId(shopifyOrderId);
+  const name = order?.shopify_name?.trim();
+  return name && name.length > 0 ? name : null;
 }
 
 async function audit(

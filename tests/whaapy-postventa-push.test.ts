@@ -46,10 +46,21 @@ function seedOpp(overrides: Record<string, unknown> = {}) {
       organization_id: ORG,
       funnel: "post_venta",
       contact_id: "contact-1",
-      display_reference: "#1234",
+      display_reference: "#D903",
       shopify_order_id: "gid://shopify/Order/999",
       last_modified_at: "2026-06-01T00:00:00Z",
       ...overrides,
+    },
+  ]);
+}
+
+function seedOrder(shopifyName: string | null = "#1759") {
+  fake.setTable("orders", [
+    {
+      id: "order-1",
+      organization_id: ORG,
+      shopify_order_id: "gid://shopify/Order/999",
+      shopify_name: shopifyName,
     },
   ]);
 }
@@ -74,7 +85,7 @@ function auditTypes(): string[] {
 
 const CUSTOM_FIELDS = {
   centrhub_opportunity_id: "opp-1",
-  centrhub_order_ref: "#1234",
+  centrhub_order_ref: "#1759",
   centrhub_order_id: "gid://shopify/Order/999",
 };
 
@@ -87,6 +98,7 @@ beforeEach(() => {
 describe("pushPostventaStage", () => {
   it("contacto EXISTE: PATCH custom_fields + move", async () => {
     seedOpp();
+    seedOrder();
     seedContact("+525512345678");
     mock(findPostventaContactByPhone).mockResolvedValue({ contactId: "wc-1", currentStageId: "otra" });
 
@@ -101,6 +113,7 @@ describe("pushPostventaStage", () => {
 
   it("anti-bucle capa 2: contacto existente ya en la etapa destino → NO mueve", async () => {
     seedOpp();
+    seedOrder();
     seedContact("+525512345678");
     mock(findPostventaContactByPhone).mockResolvedValue({ contactId: "wc-1", currentStageId: STAGE });
 
@@ -112,6 +125,7 @@ describe("pushPostventaStage", () => {
 
   it("contacto NO existe → lo CREA (name+phone+email+custom_fields) y luego mueve", async () => {
     seedOpp();
+    seedOrder();
     seedContact("+525512345678");
     mock(findPostventaContactByPhone).mockResolvedValue(null);
     mock(createPostventaContact).mockResolvedValue("wc-new");
@@ -148,6 +162,7 @@ describe("pushPostventaStage", () => {
 
   it("etapa no resuelta en Whaapy → stage_unresolved, sin buscar contacto", async () => {
     seedOpp();
+    seedOrder();
     seedContact("+525512345678");
     mock(resolvePostventaStageIdByKey).mockResolvedValue(null);
 
@@ -155,5 +170,47 @@ describe("pushPostventaStage", () => {
 
     expect(r).toEqual({ ok: false, skipped: "stage_unresolved" });
     expect(findPostventaContactByPhone).not.toHaveBeenCalled();
+  });
+
+  // --- Referencia CARA AL CLIENTE (variable {{2}} del template) -------
+  // El borrador (#D903) y el pedido (#1759) son identificadores distintos
+  // y solo el segundo es público: el cliente nunca vio el del borrador.
+
+  it("orderRef usa el nombre del PEDIDO, nunca el del borrador", async () => {
+    seedOpp({ display_reference: "#D903" });
+    seedOrder("#1759");
+    seedContact("+525512345678");
+    mock(findPostventaContactByPhone).mockResolvedValue({ contactId: "wc-1", currentStageId: "otra" });
+
+    await push();
+
+    const [, , fields] = mock(patchPostventaContactCustomFields).mock.calls[0];
+    expect((fields as Record<string, unknown>).centrhub_order_ref).toBe("#1759");
+    expect((fields as Record<string, unknown>).centrhub_order_ref).not.toBe("#D903");
+  });
+
+  it("sin orden enlazada: orderRef queda null y se audita (no se filtra el borrador)", async () => {
+    seedOpp({ shopify_order_id: null, display_reference: "#D903" });
+    seedContact("+525512345678");
+    mock(findPostventaContactByPhone).mockResolvedValue({ contactId: "wc-1", currentStageId: "otra" });
+
+    await push();
+
+    const [, , fields] = mock(patchPostventaContactCustomFields).mock.calls[0];
+    expect((fields as Record<string, unknown>).centrhub_order_ref).toBeNull();
+    expect(auditTypes()).toContain("postventa_whaapy_order_ref_missing");
+  });
+
+  it("orden sin shopify_name: mismo trato que sin orden", async () => {
+    seedOpp({ display_reference: "#D903" });
+    seedOrder(null);
+    seedContact("+525512345678");
+    mock(findPostventaContactByPhone).mockResolvedValue({ contactId: "wc-1", currentStageId: "otra" });
+
+    await push();
+
+    const [, , fields] = mock(patchPostventaContactCustomFields).mock.calls[0];
+    expect((fields as Record<string, unknown>).centrhub_order_ref).toBeNull();
+    expect(auditTypes()).toContain("postventa_whaapy_order_ref_missing");
   });
 });
