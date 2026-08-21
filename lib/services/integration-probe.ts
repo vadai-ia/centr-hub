@@ -116,6 +116,22 @@ interface StagesResponse {
   stages?: Array<{ id?: string; name?: string }>;
 }
 
+/**
+ * Nombres del funnel remoto tal cual vinieron, entrecomillados. El match de
+ * etapas es por igualdad EXACTA de string (ver `resolvePostventaStageIdByKey`),
+ * así que el admin necesita ver acentos, mayúsculas y espacios de más para
+ * distinguir "no existe" de "se llama casi igual". Sin esto, "Etapas
+ * encontradas: 4" obliga a correr un script para diagnosticar lo que la
+ * tarjeta ya tenía en la mano. No son secretos: son nombres de funnel, la
+ * misma clase de dato que los agentes que ya lista el probe de Venta.
+ */
+function formatStageNames(names: string[]): string {
+  if (names.length === 0) return "ninguna";
+  const MAX = 8;
+  const shown = names.slice(0, MAX).map((n) => `"${n}"`).join(", ");
+  return names.length > MAX ? `${shown}, +${names.length - MAX} más` : shown;
+}
+
 async function probeWhaapyPostventa(organizationId: UUID): Promise<ProbeResult> {
   const res = await whaapyPostventaRest<StagesResponse>(
     organizationId,
@@ -131,15 +147,17 @@ async function probeWhaapyPostventa(organizationId: UUID): Promise<ProbeResult> 
   if (missing.length > 0) {
     return {
       ok: false,
-      message: `Conecta, pero faltan etapas con el nombre exacto: ${missing.join(", ")}. Renómbralas en Whaapy o la sincronización de post-venta queda muda.`,
-      details: [`Etapas encontradas: ${names.length}`],
+      message: `Conecta, pero faltan etapas con el nombre exacto: ${missing.join(", ")}. Créalas o renómbralas en Whaapy (el match es por nombre exacto: acentos y mayúsculas cuentan) o la sincronización de post-venta queda muda.`,
+      details: [
+        `Etapas encontradas (${names.length}): ${formatStageNames(names)}`,
+      ],
     };
   }
   return {
     ok: true,
     message: "Conexión verificada con Whaapy Post-venta.",
     details: [
-      `Etapas del funnel: ${names.length}`,
+      `Etapas del funnel (${names.length}): ${formatStageNames(names)}`,
       `Etapas requeridas presentes: ${expected.join(", ")}`,
     ],
   };
