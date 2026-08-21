@@ -161,6 +161,24 @@ export interface WhaapyPostventaStagePushEnvelope {
   reason: string;
 }
 
+/**
+ * Envelope del MENSAJE 1 de Post-venta: confirmación de entrega enviada
+ * desde el número de VENTAS.
+ *
+ * Va por un evento propio y no por `stage_push_requested` porque apunta a
+ * OTRA instancia de Whaapy (otra api_key, otro funnel, otra WABA) y tiene
+ * su propio kill switch. Mezclarlos haría que un toggle apagara los dos.
+ */
+export interface VentaDeliveryMessageEnvelope {
+  organizationId: UUID;
+  opportunityId: UUID;
+  /** Origen del disparo (traza + diagnóstico). */
+  reason: string;
+}
+
+export const VENTA_DELIVERY_MESSAGE_EVENT =
+  "whaapy/venta.delivery_message_requested" as const;
+
 export const WHAAPY_POSTVENTA_STAGE_PUSH_EVENT =
   "whaapy/postventa.stage_push_requested" as const;
 

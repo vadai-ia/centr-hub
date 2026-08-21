@@ -1,7 +1,7 @@
 import "server-only";
 import { getOpportunityById } from "@/lib/db/opportunities";
 import { getContactById } from "@/lib/db/contacts";
-import { findOrderByShopifyOrderId } from "@/lib/db/orders";
+import { resolveCustomerFacingOrderRef } from "@/lib/services/order-reference";
 import { recordAuditEvent } from "@/lib/db/operational";
 import { normalizePhone } from "@/lib/services/identity-matching";
 import {
@@ -174,25 +174,6 @@ export async function pushPostventaStage(
     order_ref: orderRef,
   });
   return { ok: true, moved: true, created, whaapyContactId: contactId };
-}
-
-/**
- * Referencia del pedido tal como el CLIENTE la conoce (`#1759`), leída de
- * `orders.shopify_name`. Devuelve null si la opp no tiene orden enlazada o
- * la orden no está en la base: preferimos una variable vacía en el mensaje
- * a mandarle al cliente el número del borrador (`#D903`), que nunca vio.
- *
- * Mismo malentendido que reportó Post-venta al buscar casos por número:
- * el borrador y el pedido son identificadores distintos y solo el segundo
- * es público.
- */
-async function resolveCustomerFacingOrderRef(
-  shopifyOrderId: string | null,
-): Promise<string | null> {
-  if (!shopifyOrderId) return null;
-  const order = await findOrderByShopifyOrderId(shopifyOrderId);
-  const name = order?.shopify_name?.trim();
-  return name && name.length > 0 ? name : null;
 }
 
 async function audit(

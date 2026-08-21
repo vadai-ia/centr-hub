@@ -1,10 +1,13 @@
 import "server-only";
 import {
   getInngestClient,
+  VENTA_DELIVERY_MESSAGE_EVENT,
   WHAAPY_POSTVENTA_STAGE_PUSH_EVENT,
+  type VentaDeliveryMessageEnvelope,
   type WhaapyPostventaStagePushEnvelope,
 } from "@/lib/inngest/client";
 import { isPostventaWhaapySyncEnabled } from "@/lib/whaapy-postventa/config";
+import { isVentaDeliveryMessageEnabled } from "@/lib/whaapy/config";
 import type { PipelineStageRow, UUID } from "@/lib/types/database";
 
 /**
@@ -17,6 +20,31 @@ import type { PipelineStageRow, UUID } from "@/lib/types/database";
  *   - El worker vuelve a chequear kill switch + backfill; acá solo evitamos
  *     encolar de más.
  */
+
+/**
+ * Encolado del MENSAJE 1 (confirmación de entrega desde VENTAS).
+ *
+ * Mismo contrato non-fatal que `enqueue`: si el encolado falla, el cambio de
+ * etapa de la opp NO se rompe. Gate propio (`VENTA_DELIVERY_MESSAGE_ENABLED`)
+ * para poder encender/apagar este mensaje sin tocar la sincronización de
+ * Post-venta.
+ */
+async function enqueueVentaDelivery(
+  envelope: VentaDeliveryMessageEnvelope,
+): Promise<void> {
+  if (!isVentaDeliveryMessageEnabled()) return;
+  try {
+    await getInngestClient().send({
+      name: VENTA_DELIVERY_MESSAGE_EVENT,
+      data: envelope as unknown as Record<string, unknown>,
+    });
+  } catch (err) {
+    console.error(
+      `[venta-delivery] enqueue falló (opp ${envelope.opportunityId}):`,
+      (err as Error).message,
+    );
+  }
+}
 
 async function enqueue(
   envelope: WhaapyPostventaStagePushEnvelope,
@@ -49,7 +77,11 @@ export async function dispatchPostventaPushForMove(args: {
   opportunityId: UUID;
   targetStage: PipelineStageRow;
 }): Promise<void> {
-  if (!isPostventaWhaapySyncEnabled()) return;
+  // Este hook alimenta DOS destinos con kill switches independientes (el
+  // mensaje de entrega sale de Venta; los casos, de Post-venta). Salir por
+  // uno solo apagaría el otro en silencio, así que solo se corta cuando los
+  // dos están OFF; cada `enqueue*` vuelve a checar el suyo.
+  if (!isPostventaWhaapySyncEnabled() && !isVentaDeliveryMessageEnabled()) return;
   if (args.targetStage.funnel !== "post_venta") return;
   try {
     const { resolvePostventaEngineStages } = await import(
@@ -62,6 +94,16 @@ export async function dispatchPostventaPushForMove(args: {
     let target: WhaapyPostventaStagePushEnvelope["target"] | null = null;
     if (entregado && args.targetStage.id === entregado.id) {
       target = "entregado";
+      // MENSAJE 1: la confirmación de entrega sale del número de VENTAS
+      // (ahí está aprobada la plantilla y es el número con el que el cliente
+      // cotizó). Va por su propio evento y su propio kill switch porque
+      // apunta a otra instancia de Whaapy. El de 7 días saldrá del de
+      // Post-venta — están separados a propósito.
+      await enqueueVentaDelivery({
+        organizationId: args.organizationId,
+        opportunityId: args.opportunityId,
+        reason: "move:entregado",
+      });
     } else if (args.targetStage.id === stages.problematicStage.id) {
       target = "casoProblematico";
     }

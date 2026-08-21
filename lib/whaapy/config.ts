@@ -39,3 +39,39 @@ export const WHAAPY_DELIVERY_ID_HEADER = "x-webhook-delivery-id" as const;
 
 /** Campo custom usado para marcar escrituras outbound (R11 capa A). */
 export const WHAAPY_OUTBOUND_MARKER_FIELD = "last_platform_write_at" as const;
+
+/**
+ * Etapas del funnel del Whaapy de VENTA que la plataforma acciona.
+ *
+ * Match por nombre EXACTO contra `GET /funnel/v1/stages` (acentos y
+ * mayúsculas cuentan), mismo contrato que `WHAAPY_POSTVENTA_STAGE_NAMES`.
+ *
+ * Por qué el funnel de VENTA y no el de Post-venta: el mensaje de
+ * confirmación de entrega debe salir del NÚMERO DE VENTAS, el mismo con el
+ * que el cliente cotizó. Las plantillas de WhatsApp pertenecen a la WABA de
+ * cada instancia, así que el disparador tiene que vivir donde vive la
+ * plantilla. El mensaje de seguimiento a 7 días sale del número de
+ * Post-venta y usa el funnel de aquella instancia — están separados a
+ * propósito.
+ *
+ * Hoy solo hay una: la plataforma no gestiona el funnel comercial de Whaapy
+ * (ese lo operan los vendedores por conversación), solo empuja esta etapa
+ * para disparar su Automation.
+ */
+export const WHAAPY_VENTA_STAGE_NAMES = {
+  /** Confirmación de entrega — dispara el template ya aprobado en Venta. */
+  entregado: "Entregado",
+} as const;
+
+export type WhaapyVentaStageKey = keyof typeof WHAAPY_VENTA_STAGE_NAMES;
+
+/**
+ * Kill switch de los push al funnel de VENTA (mensaje de entrega). Default
+ * OFF, mismo patrón que `isPostventaWhaapySyncEnabled`: sin
+ * `VENTA_DELIVERY_MESSAGE_ENABLED=true` no se mueve ningún contacto y el
+ * deploy es inerte. Se lee de `process.env` directo para que togglear en
+ * Vercel no requiera redeploy.
+ */
+export function isVentaDeliveryMessageEnabled(): boolean {
+  return process.env.VENTA_DELIVERY_MESSAGE_ENABLED === "true";
+}

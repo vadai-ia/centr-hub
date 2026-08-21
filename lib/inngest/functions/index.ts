@@ -7,6 +7,7 @@ import { whaapyContactFunctions } from "./whaapy-contacts";
 import { whaapyConversationFunctions } from "./whaapy-conversations";
 import { whaapyOutboundFunctions } from "./whaapy-outbound";
 import { whaapyPostventaFunctions } from "./whaapy-postventa";
+import { ventaDeliveryFunctions } from "./venta-delivery";
 import { whaapyPostventaInboundFunctions } from "./whaapy-postventa-inbound";
 import { shopifyOutboundFunctions } from "./shopify-outbound";
 import { tagReprocessFunctions } from "./tag-reprocess";
@@ -33,6 +34,7 @@ export const allFunctions = [
   ...whaapyConversationFunctions,
   ...whaapyOutboundFunctions,
   ...whaapyPostventaFunctions,
+  ...ventaDeliveryFunctions,
   ...whaapyPostventaInboundFunctions,
   ...shopifyOutboundFunctions,
   ...tagReprocessFunctions,

@@ -47,7 +47,8 @@
     "maintenance:adopt-env-credentials": "tsx --tsconfig scripts/tsconfig.json scripts/maintenance/adopt-env-credentials.ts",
     "maintenance:clone-org-team": "tsx --tsconfig scripts/tsconfig.json scripts/maintenance/clone-org-team.ts",
     "maintenance:set-dashboard-snapshot-since": "tsx --tsconfig scripts/tsconfig.json scripts/maintenance/set-dashboard-snapshot-since.ts",
-    "whaapy:harness-postventa-message": "tsx --tsconfig scripts/tsconfig.json scripts/whaapy/harness-postventa-message.ts"
+    "whaapy:harness-postventa-message": "tsx --tsconfig scripts/tsconfig.json scripts/whaapy/harness-postventa-message.ts",
+    "whaapy:harness-venta-delivery": "tsx --tsconfig scripts/tsconfig.json scripts/whaapy/harness-venta-delivery.ts"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.1.0",
