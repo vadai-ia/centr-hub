@@ -18,6 +18,26 @@
  */
 import { z } from "zod";
 
+/**
+ * Opcional que además TOLERA la cadena vacía.
+ *
+ * `z.string().min(1).optional()` no es "ausente o no vacío": `.optional()`
+ * admite `undefined`, pero una línea `VARIABLE=` en `.env.local` llega como
+ * `""` — presente — así que aplica el `.min(1)` y el arranque revienta con
+ * un error que no dice nada del archivo. Lo mismo con `.url()`.
+ *
+ * Este preprocesador convierte `""` (y solo espacios) en `undefined` ANTES
+ * de validar, así se conserva la validación real para valores reales y una
+ * línea vacía se comporta igual que una línea ausente. Ver ERRORES.md
+ * "Validador de env falla por variables opcionales vacías".
+ */
+function optionalEnv<T extends z.ZodTypeAny>(schema: T) {
+  return z.preprocess(
+    (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
+    schema.optional(),
+  );
+}
+
 const clientSchema = z.object({
   NEXT_PUBLIC_SUPABASE_URL: z.string().url(),
   NEXT_PUBLIC_SUPABASE_ANON_KEY: z.string().min(1),
@@ -27,15 +47,15 @@ const clientSchema = z.object({
    * por Whaapy). Override por organización futura vive en Vault si V2
    * lo requiere; en MVP single-org un env var es suficiente.
    */
-  NEXT_PUBLIC_WHAAPY_DASHBOARD_URL: z.string().url().optional(),
+  NEXT_PUBLIC_WHAAPY_DASHBOARD_URL: optionalEnv(z.string().url()),
 });
 
 const serverSchema = clientSchema.extend({
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1),
-  INNGEST_EVENT_KEY: z.string().min(1).optional(),
-  INNGEST_SIGNING_KEY: z.string().min(1).optional(),
-  UPSTASH_REDIS_REST_URL: z.string().url().optional(),
-  UPSTASH_REDIS_REST_TOKEN: z.string().min(1).optional(),
+  INNGEST_EVENT_KEY: optionalEnv(z.string().min(1)),
+  INNGEST_SIGNING_KEY: optionalEnv(z.string().min(1)),
+  UPSTASH_REDIS_REST_URL: optionalEnv(z.string().url()),
+  UPSTASH_REDIS_REST_TOKEN: optionalEnv(z.string().min(1)),
   // Shopify Dev Dashboard (flujo post 1-ene-2026). Requeridas desde
   // M3 — pero se aceptan vacías en el schema para no romper arranque
   // de milestones anteriores. Los helpers getShopifyClientId/Secret
