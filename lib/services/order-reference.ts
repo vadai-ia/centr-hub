@@ -25,3 +25,20 @@ export async function resolveCustomerFacingOrderRef(
   const name = order?.shopify_name?.trim();
   return name && name.length > 0 ? name : null;
 }
+
+/**
+ * Valor listo para una VARIABLE de template de WhatsApp: sin el `#`.
+ *
+ * Las plantillas aprobadas traen el símbolo en el texto fijo
+ * (`tu pedido #{{2}} ha sido entregado`), así que pasar `#1759` renderiza
+ * `pedido ##1759`. El `#` es del template, no del dato.
+ *
+ * Se separa de `resolveCustomerFacingOrderRef` a propósito: ahí `#1759` es
+ * la forma canónica (la que se ve en Shopify y en la plataforma). Esta
+ * normalización aplica SOLO al cruzar hacia un parámetro de template.
+ */
+export function toTemplateOrderParam(ref: string | null): string | null {
+  if (!ref) return null;
+  const stripped = ref.trim().replace(/^#+/, "");
+  return stripped.length > 0 ? stripped : null;
+}

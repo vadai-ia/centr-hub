@@ -10,7 +10,10 @@ import {
   patchVentaContactCustomFields,
   resolveVentaStageIdByKey,
 } from "@/lib/whaapy/funnel";
-import { resolveCustomerFacingOrderRef } from "@/lib/services/order-reference";
+import {
+  resolveCustomerFacingOrderRef,
+  toTemplateOrderParam,
+} from "@/lib/services/order-reference";
 import type { Json, UUID } from "@/lib/types/database";
 
 /**
@@ -114,8 +117,11 @@ export async function pushVentaDeliveryMessage(input: {
     });
   }
 
+  // Sin el `#`: la plantilla aprobada ya lo trae en su texto fijo
+  // ("tu pedido #{{2}} ha sido entregado"), así que mandar "#1759" saldría
+  // como "pedido ##1759".
   await patchVentaContactCustomFields(organizationId, whaapyContactId, {
-    centrhub_order_ref: orderRef,
+    centrhub_order_ref: toTemplateOrderParam(orderRef),
     centrhub_opportunity_id: opportunityId,
   });
 

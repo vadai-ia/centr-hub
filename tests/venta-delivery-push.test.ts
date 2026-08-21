@@ -108,8 +108,10 @@ describe("pushVentaDeliveryMessage", () => {
 
     expect(r).toEqual({ ok: true, moved: true, whaapyContactId: WHAAPY_ID });
     const [, , fields] = mock(patchVentaContactCustomFields).mock.calls[0];
-    expect((fields as Record<string, unknown>).centrhub_order_ref).toBe("#1759");
+    expect((fields as Record<string, unknown>).centrhub_order_ref).toBe("1759");
     expect((fields as Record<string, unknown>).centrhub_order_ref).not.toBe("#D903");
+    // sin "#": la plantilla ya lo trae en su texto fijo
+    expect((fields as Record<string, unknown>).centrhub_order_ref).not.toBe("#1759");
     expect(moveVentaContactToStage).toHaveBeenCalledWith(ORG, WHAAPY_ID, STAGE);
     expect(auditTypes()).toContain("venta_delivery_message_pushed");
   });

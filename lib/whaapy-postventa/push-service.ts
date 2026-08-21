@@ -1,7 +1,10 @@
 import "server-only";
 import { getOpportunityById } from "@/lib/db/opportunities";
 import { getContactById } from "@/lib/db/contacts";
-import { resolveCustomerFacingOrderRef } from "@/lib/services/order-reference";
+import {
+  resolveCustomerFacingOrderRef,
+  toTemplateOrderParam,
+} from "@/lib/services/order-reference";
 import { recordAuditEvent } from "@/lib/db/operational";
 import { normalizePhone } from "@/lib/services/identity-matching";
 import {
