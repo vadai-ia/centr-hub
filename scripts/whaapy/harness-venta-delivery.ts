@@ -7,25 +7,43 @@
  * "Entregado": escribe el nº de pedido en el contacto de Venta y lo mueve a la
  * etapa "Entregado" de ese funnel. El mensaje lo manda la Automation de Whaapy.
  *
- * ⚠️ MANDA UN WHATSAPP REAL al cliente de la oportunidad que elijas. Para
- * probar sin molestar a nadie, usa una opp cuyo contacto sea tu propio número.
+ * ⚠️ MANDA UN WHATSAPP REAL. Sin banderas NO ejecuta nada: lista candidatas.
  *
- * Sin `--opportunity-id` NO ejecuta nada: lista candidatas para que elijas.
+ * Dos modos:
+ *
+ *   `--phone` — MODO SEGURO. Prueba contra tu propio número sin tocar a
+ *   ningún cliente. No usa una oportunidad: escribe los mismos custom_fields
+ *   que escribe producción y mueve el contacto a la etapa, que es lo único
+ *   que la Automation observa. Es el modo para validar plantilla y variables.
+ *
+ *   `--opportunity-id` — camino de PRODUCCIÓN. Invoca el mismo servicio que
+ *   corre en vivo (`pushVentaDeliveryMessage`), incluido el rescate del
+ *   contacto por teléfono. Le manda el mensaje al cliente REAL de esa opp.
  *
  * Uso:
  *   npm run whaapy:harness-venta-delivery -- --org-slug centr
+ *   npm run whaapy:harness-venta-delivery -- --org-slug centr --phone +52TUNUMERO --dry-run
+ *   npm run whaapy:harness-venta-delivery -- --org-slug centr --phone +52TUNUMERO
  *   npm run whaapy:harness-venta-delivery -- --org-slug centr --opportunity-id <uuid> --dry-run
- *   npm run whaapy:harness-venta-delivery -- --org-slug centr --opportunity-id <uuid>
  */
 import { config as loadDotenv } from "dotenv";
 import { resolve } from "node:path";
 import { getOrganizationBySlug } from "@/lib/db/organizations";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 import { withTenantContext } from "@/lib/tenant/context";
-import { resolveVentaStageIdByKey } from "@/lib/whaapy/funnel";
+import {
+  findVentaContactByPhone,
+  moveVentaContactToStage,
+  patchVentaContactCustomFields,
+  resolveVentaStageIdByKey,
+} from "@/lib/whaapy/funnel";
+import { normalizePhone } from "@/lib/services/identity-matching";
 import { pushVentaDeliveryMessage } from "@/lib/whaapy/venta-delivery-push";
 import { WHAAPY_VENTA_STAGE_NAMES } from "@/lib/whaapy/config";
-import { resolveCustomerFacingOrderRef } from "@/lib/services/order-reference";
+import {
+  resolveCustomerFacingOrderRef,
+  toTemplateOrderParam,
+} from "@/lib/services/order-reference";
 import type { UUID } from "@/lib/types/database";
 
 loadDotenv({ path: resolve(process.cwd(), ".env.local") });
@@ -67,6 +85,70 @@ async function listCandidates(organizationId: UUID) {
   console.log("");
 }
 
+/**
+ * Prueba contra un teléfono arbitrario (el tuyo). No usa una oportunidad:
+ * escribe los mismos `custom_fields` que escribe producción y mueve el
+ * contacto a la etapa, que es lo único que la Automation observa. Sirve
+ * para validar plantilla + variables sin mandarle nada a un cliente.
+ */
+async function runPhoneTest(
+  organizationId: UUID,
+  rawPhone: string,
+  stageId: string,
+): Promise<void> {
+  const phone = normalizePhone(rawPhone);
+  if (!phone) {
+    console.error(
+      `✗ Teléfono inválido: "${rawPhone}". Formato E.164 y sin el 1 de México: +525512345678`,
+    );
+    process.exit(1);
+  }
+
+  const orderRefRaw = arg("--order-ref") ?? "#1759";
+  const orderParam = toTemplateOrderParam(orderRefRaw);
+
+  const match = await findVentaContactByPhone(organizationId, phone);
+  console.log(`\n  MODO PRUEBA con tu número`);
+  console.log(`  teléfono      : ${phone}`);
+  console.log(
+    `  en Whaapy     : ${match ? `✓ ${match.contactId} (etapa actual: ${match.currentStageId ?? "ninguna"})` : "✗ NO EXISTE"}`,
+  );
+  console.log(`  {{2}} llevará : ${orderParam ?? "(vacío)"}`);
+
+  if (!match) {
+    console.error(
+      `\n✗ Tu número no existe como contacto en el Whaapy de VENTA.\n` +
+        `  Mándale un WhatsApp cualquiera al número comercial desde tu celular\n` +
+        `  y vuelve a correr esto — el contacto se crea solo al escribir.\n` +
+        `  (El harness NO lo crea a propósito: Venta es la base maestra.)`,
+    );
+    process.exit(1);
+  }
+
+  if (match.currentStageId === stageId) {
+    console.error(
+      `\n⚠  Ya estás en la etapa "Entregado": Whaapy no re-dispara (el trigger\n` +
+        `   es ENTRAR). Muévete a otra etapa desde el dashboard y repite.`,
+    );
+    process.exit(1);
+  }
+
+  if (DRY_RUN) {
+    console.log(`\n(dry run) Nada enviado. Quitá --dry-run para disparar el mensaje.\n`);
+    return;
+  }
+
+  await patchVentaContactCustomFields(organizationId, match.contactId, {
+    centrhub_order_ref: orderParam,
+    centrhub_opportunity_id: "harness-prueba",
+  });
+  await moveVentaContactToStage(organizationId, match.contactId, stageId);
+  console.log(`\n✓ Movido a "Entregado". Revisa tu WhatsApp.`);
+  console.log(`\nSi NO llega nada: falta la Automation, o no está activa.`);
+  console.log(`Si llega con el hueco vacío ("tu pedido # ha sido entregado"),`);
+  console.log(`la Automation no logró leer el custom field centrhub_order_ref.`);
+}
+
 async function main() {
   const slug = arg("--org-slug");
   const opportunityId = arg("--opportunity-id");
@@ -104,8 +186,21 @@ async function main() {
         `  kill switch VENTA_DELIVERY_MESSAGE_ENABLED: ${process.env.VENTA_DELIVERY_MESSAGE_ENABLED === "true" ? "ON" : "OFF (no afecta a este harness — llama al servicio directo)"}`,
       );
 
+      // Modo SEGURO: probar contra tu propio número, sin tocar a ningún
+      // cliente real. Reproduce lo que hace el servicio (escribir el
+      // contexto del pedido + mover de etapa) sin depender de una opp.
+      const testPhone = arg("--phone");
+      if (testPhone) {
+        await runPhoneTest(orgId, testPhone, stageId);
+        return;
+      }
+
       if (!opportunityId) {
         await listCandidates(orgId);
+        console.log(
+          `  Para probar con TU número sin tocar a un cliente real:\n` +
+            `    npm run whaapy:harness-venta-delivery -- --org-slug ${slug} --phone +52TUNUMERO --dry-run\n`,
+        );
         return;
       }
 
