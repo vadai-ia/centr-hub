@@ -20,6 +20,7 @@ vi.mock("@/lib/supabase/admin", () => ({ getSupabaseAdminClient: () => fake }));
 vi.mock("@/lib/whaapy/funnel", () => ({
   resolveVentaStageIdByKey: vi.fn(),
   getVentaContactStageId: vi.fn(),
+  findVentaContactByPhone: vi.fn(),
   patchVentaContactCustomFields: vi.fn().mockResolvedValue(undefined),
   moveVentaContactToStage: vi.fn().mockResolvedValue(undefined),
 }));
@@ -29,6 +30,7 @@ import { pushVentaDeliveryMessage } from "@/lib/whaapy/venta-delivery-push";
 import {
   resolveVentaStageIdByKey,
   getVentaContactStageId,
+  findVentaContactByPhone,
   patchVentaContactCustomFields,
   moveVentaContactToStage,
 } from "@/lib/whaapy/funnel";
@@ -127,17 +129,6 @@ describe("pushVentaDeliveryMessage", () => {
     expect(auditTypes()).toContain("venta_delivery_already_in_stage");
   });
 
-  it("sin whaapy_contact_id → skip sin lanzar (nunca se sincronizó a Venta)", async () => {
-    seedOpp();
-    seedOrder();
-    seedContact(null);
-
-    const r = await push();
-
-    expect(r).toEqual({ ok: false, skipped: "missing_whaapy_contact_id" });
-    expect(resolveVentaStageIdByKey).not.toHaveBeenCalled();
-    expect(moveVentaContactToStage).not.toHaveBeenCalled();
-  });
 
   it("etapa inexistente en el funnel de Venta → skip + audit (config pendiente)", async () => {
     seedOpp();
@@ -171,5 +162,65 @@ describe("pushVentaDeliveryMessage", () => {
     const r = await push();
 
     expect(r).toEqual({ ok: false, skipped: "contact_not_found" });
+  });
+
+  // --- Rescate por teléfono ---------------------------------------------
+  // Solo el 13% de los contactos trae whaapy_contact_id, así que esta rama
+  // NO es un caso borde: es el camino habitual.
+
+  it("sin id local: lo busca por teléfono, lo enlaza y mueve", async () => {
+    seedOpp();
+    seedOrder("#1759");
+    seedContact(null);
+    mock(findVentaContactByPhone).mockResolvedValue({ contactId: "wc-hallado", currentStageId: null });
+
+    const r = await push();
+
+    expect(r).toEqual({ ok: true, moved: true, whaapyContactId: "wc-hallado" });
+    expect(findVentaContactByPhone).toHaveBeenCalledWith(ORG, "+525512345678");
+    expect(moveVentaContactToStage).toHaveBeenCalledWith(ORG, "wc-hallado", STAGE);
+    // backfill: la próxima entrega ya no paga la búsqueda
+    const saved = fake.getTable("contacts")[0] as Record<string, unknown>;
+    expect(saved.whaapy_contact_id).toBe("wc-hallado");
+    expect(auditTypes()).toContain("venta_delivery_contact_linked_by_phone");
+  });
+
+  it("rescate: la búsqueda ya trae la etapa → anti-duplicado sin GET extra", async () => {
+    seedOpp();
+    seedOrder();
+    seedContact(null);
+    mock(findVentaContactByPhone).mockResolvedValue({ contactId: "wc-hallado", currentStageId: STAGE });
+
+    const r = await push();
+
+    expect(r).toEqual({ ok: true, moved: false, whaapyContactId: "wc-hallado" });
+    expect(getVentaContactStageId).not.toHaveBeenCalled();
+    expect(moveVentaContactToStage).not.toHaveBeenCalled();
+  });
+
+  it("no existe en Whaapy: skip con motivo propio y NO lo crea", async () => {
+    seedOpp();
+    seedOrder();
+    seedContact(null);
+    mock(findVentaContactByPhone).mockResolvedValue(null);
+
+    const r = await push();
+
+    expect(r).toEqual({ ok: false, skipped: "contact_not_in_whaapy" });
+    expect(moveVentaContactToStage).not.toHaveBeenCalled();
+    expect(auditTypes()).toContain("venta_delivery_contact_not_in_whaapy");
+  });
+
+  it("sin id local NI teléfono: skip por missing_phone, sin buscar", async () => {
+    seedOpp();
+    seedOrder();
+    fake.setTable("contacts", [
+      { id: "contact-1", organization_id: ORG, phone: null, full_name: "X", email: null, whaapy_contact_id: null },
+    ]);
+
+    const r = await push();
+
+    expect(r).toEqual({ ok: false, skipped: "missing_phone" });
+    expect(findVentaContactByPhone).not.toHaveBeenCalled();
   });
 });

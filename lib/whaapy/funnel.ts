@@ -18,9 +18,12 @@ import type { UUID } from "@/lib/types/database";
  *
  * Espejo de `lib/whaapy-postventa/api.ts`, con dos diferencias que importan:
  *
- *  1. **El contact_id ya lo tenemos.** Venta es la instancia maestra: su id
- *     vive en `contacts.whaapy_contact_id`. No hace falta buscar por
- *     teléfono como en Post-venta (instancia independiente).
+ *  1. **El contact_id lo tenemos a veces.** Venta es la instancia maestra y
+ *     su id vive en `contacts.whaapy_contact_id`, pero medido en producción
+ *     solo el 13% de los contactos lo tiene poblado (el resto entró por
+ *     Shopify o backfill y nunca guardó el id, aunque el contacto SÍ exista
+ *     del otro lado). Por eso hay rescate por teléfono, igual que en
+ *     Post-venta — sin él el mensaje se saltaría a la mayoría.
  *
  *  2. **Esta instancia SÍ tiene webhooks suscritos.** Todo PATCH de aquí
  *     rebota como `contact.updated`. Por eso el marker R11
@@ -161,4 +164,47 @@ export async function moveVentaContactToStage(
     `/funnel/v1/contacts/${whaapyContactId}/move`,
     { stage_id: stageId },
   );
+}
+
+// ============================================================
+// Contacto: match por teléfono (rescate cuando falta el id local)
+// ============================================================
+
+interface WhaapySearchResponse {
+  contacts?: Array<{
+    id?: string;
+    funnel_stage?: { id?: string } | null;
+  }>;
+}
+
+export interface VentaContactMatch {
+  contactId: string;
+  currentStageId: string | null;
+}
+
+/**
+ * Busca el contacto en el Whaapy de VENTA por teléfono (E.164).
+ *
+ * Existe porque `contacts.whaapy_contact_id` está poblado solo en una
+ * minoría de los contactos (los que pasaron por el sync outbound de M4);
+ * el resto entró por Shopify o por backfill y nunca guardó el id, aunque
+ * el contacto SÍ exista del otro lado. Sin este rescate el mensaje de
+ * entrega se saltaría a la mayoría de los clientes.
+ *
+ * Devuelve también la etapa actual, así el caller no paga un GET extra
+ * para el chequeo anti-duplicado.
+ */
+export async function findVentaContactByPhone(
+  organizationId: UUID,
+  phoneE164: string,
+): Promise<VentaContactMatch | null> {
+  const res = await whaapyRest<WhaapySearchResponse>(
+    { organizationId },
+    "POST",
+    "/contacts/v1/search",
+    { filters: { phone_number: { eq: phoneE164 } }, limit: 1 },
+  );
+  const first = res?.contacts?.[0];
+  if (!first?.id) return null;
+  return { contactId: first.id, currentStageId: first.funnel_stage?.id ?? null };
 }

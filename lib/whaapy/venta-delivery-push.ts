@@ -1,8 +1,10 @@
 import "server-only";
 import { getOpportunityById } from "@/lib/db/opportunities";
-import { getContactById } from "@/lib/db/contacts";
+import { getContactById, updateContact } from "@/lib/db/contacts";
 import { recordAuditEvent } from "@/lib/db/operational";
+import { normalizePhone } from "@/lib/services/identity-matching";
 import {
+  findVentaContactByPhone,
   getVentaContactStageId,
   moveVentaContactToStage,
   patchVentaContactCustomFields,
@@ -27,9 +29,15 @@ import type { Json, UUID } from "@/lib/types/database";
  * seguimiento a 7 días sí sale del número de Post-venta — van separados a
  * propósito (decisión del operador).
  *
+ * A quién mover: `contacts.whaapy_contact_id` cuando está poblado y, si no,
+ * búsqueda por teléfono en esa instancia (con backfill del id local). En
+ * producción solo el 13% de los contactos trae el id, así que el rescate NO
+ * es un caso borde: es el camino habitual.
+ *
  * Contrato de errores, igual que `pushPostventaStage`:
- *   - Casos "no aplica" (sin contacto, sin id de Whaapy, etapa inexistente)
- *     NO lanzan: auditan y devuelven `skipped`. Reintentar no ayuda.
+ *   - Casos "no aplica" (sin contacto, sin teléfono, contacto ausente en
+ *     Whaapy, etapa inexistente) NO lanzan: auditan y devuelven `skipped`
+ *     con el motivo exacto. Reintentar no ayuda.
  *   - Fallos de red/HTTP de Whaapy SÍ lanzan → Inngest reintenta → DLQ. La
  *     opp ya movió antes de encolar, así que la operación de plataforma
  *     nunca se rompe por esto.
@@ -46,7 +54,8 @@ export type VentaDeliveryPushResult =
 export type VentaDeliveryPushSkipReason =
   | "opportunity_not_found"
   | "contact_not_found"
-  | "missing_whaapy_contact_id"
+  | "missing_phone"
+  | "contact_not_in_whaapy"
   | "stage_unresolved";
 
 export async function pushVentaDeliveryMessage(input: {
@@ -71,18 +80,6 @@ export async function pushVentaDeliveryMessage(input: {
     return { ok: false, skipped: "contact_not_found" };
   }
 
-  // Venta es la instancia MAESTRA: su contact_id ya vive en la BD local, no
-  // hace falta buscar por teléfono. Sin él, el contacto nunca se sincronizó
-  // hacia allá y no hay a quién mover.
-  const whaapyContactId = contact.whaapy_contact_id;
-  if (!whaapyContactId) {
-    await audit(opportunityId, "venta_delivery_push_skipped", {
-      reason: "missing_whaapy_contact_id",
-      contact_id: contact.id,
-    });
-    return { ok: false, skipped: "missing_whaapy_contact_id" };
-  }
-
   const stageId = await resolveVentaStageIdByKey(organizationId, "entregado");
   if (!stageId) {
     // Configuración pendiente: la etapa no existe en el funnel de Venta.
@@ -92,9 +89,14 @@ export async function pushVentaDeliveryMessage(input: {
     return { ok: false, skipped: "stage_unresolved" };
   }
 
+  // Resolver a quién mover. `whaapy_contact_id` solo está poblado en ~13% de
+  // los contactos, así que el camino normal es el rescate por teléfono.
+  const resolved = await resolveVentaContact(organizationId, contact, opportunityId);
+  if (!resolved.ok) return { ok: false, skipped: resolved.reason };
+  const { contactId: whaapyContactId, currentStageId } = resolved;
+
   // Anti-duplicado ANTES de escribir: si ya está en la etapa, ni siquiera
   // vale la pena tocar los custom_fields (ese PATCH rebotaría por webhook).
-  const currentStageId = await getVentaContactStageId(organizationId, whaapyContactId);
   if (currentStageId === stageId) {
     await audit(opportunityId, "venta_delivery_already_in_stage", {
       whaapy_contact_id: whaapyContactId,
@@ -124,6 +126,63 @@ export async function pushVentaDeliveryMessage(input: {
     order_ref: orderRef,
   });
   return { ok: true, moved: true, whaapyContactId };
+}
+
+/**
+ * Resuelve el contacto en el Whaapy de Venta, por dos vías:
+ *
+ *  1. `contacts.whaapy_contact_id` si está poblado (cuesta un GET para saber
+ *     su etapa actual).
+ *  2. Si no, búsqueda por teléfono — que además devuelve la etapa, así que
+ *     el camino de rescate cuesta UNA llamada, no dos. Al encontrarlo se
+ *     **backfillea el id local**: la próxima entrega de ese cliente ya no
+ *     paga la búsqueda, y el resto del sistema hereda la identidad enlazada.
+ *
+ * Devuelve null (con audit) cuando no hay teléfono o el contacto no existe
+ * del otro lado. NO lo crea: Venta es la base conversacional maestra y su
+ * creación la gobiernan las reglas de sincronización asimétrica, no un
+ * mensaje de entrega.
+ */
+type ResolvedVentaContact =
+  | { ok: true; contactId: string; currentStageId: string | null }
+  | { ok: false; reason: VentaDeliveryPushSkipReason };
+
+async function resolveVentaContact(
+  organizationId: UUID,
+  contact: { id: UUID; phone: string | null; whaapy_contact_id: string | null },
+  opportunityId: UUID,
+): Promise<ResolvedVentaContact> {
+  if (contact.whaapy_contact_id) {
+    const currentStageId = await getVentaContactStageId(
+      organizationId,
+      contact.whaapy_contact_id,
+    );
+    return { ok: true, contactId: contact.whaapy_contact_id, currentStageId };
+  }
+
+  const phone = normalizePhone(contact.phone);
+  if (!phone) {
+    await audit(opportunityId, "venta_delivery_push_skipped", {
+      reason: "missing_phone",
+      contact_id: contact.id,
+    });
+    return { ok: false, reason: "missing_phone" };
+  }
+
+  const match = await findVentaContactByPhone(organizationId, phone);
+  if (!match) {
+    await audit(opportunityId, "venta_delivery_contact_not_in_whaapy", {
+      contact_id: contact.id,
+    });
+    return { ok: false, reason: "contact_not_in_whaapy" };
+  }
+
+  await updateContact(contact.id, { whaapy_contact_id: match.contactId });
+  await audit(opportunityId, "venta_delivery_contact_linked_by_phone", {
+    contact_id: contact.id,
+    whaapy_contact_id: match.contactId,
+  });
+  return { ok: true, ...match };
 }
 
 async function audit(
