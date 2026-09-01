@@ -1,5 +1,5 @@
 import "server-only";
-import { getOpportunityById } from "@/lib/db/opportunities";
+import { getOpportunityById, updateOpportunity } from "@/lib/db/opportunities";
 import { getContactById, updateContact } from "@/lib/db/contacts";
 import { recordAuditEvent } from "@/lib/db/operational";
 import { normalizePhone } from "@/lib/services/identity-matching";
@@ -126,6 +126,17 @@ export async function pushVentaDeliveryMessage(input: {
   });
 
   await moveVentaContactToStage(organizationId, whaapyContactId, stageId);
+
+  // Sello del ANCLA: el mensaje 2 ("7 dias") se cuenta desde AQUÍ, no desde
+  // la fecha de entrega. Se escribe después del move — si el move falla,
+  // Inngest reintenta y no queremos un ancla de un mensaje que no salió.
+  // Solo la primera vez: un re-push no debe correr el reloj del seguimiento.
+  if (!opp.delivery_message_sent_at) {
+    await updateOpportunity(opportunityId, {
+      delivery_message_sent_at: new Date().toISOString(),
+    });
+  }
+
   await audit(opportunityId, "venta_delivery_message_pushed", {
     whaapy_contact_id: whaapyContactId,
     stage_id: stageId,

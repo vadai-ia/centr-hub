@@ -219,7 +219,7 @@ describe("computePostventaMetrics", () => {
         { assigned_advisor_id: null, is_outbound: false, shopify_created_at: "2026-05-13T18:00:00.000Z" },
       ],
       problematicOpps: [{ assigned_advisor_id: A, is_outbound: false }, { assigned_advisor_id: B, is_outbound: false }],
-      postventaStages: { problematicStage: null, terminalStageIds: TERMINAL },
+      postventaStages: { problematicStage: null, followupStage: null, terminalStageIds: TERMINAL },
       // Pedidos activos ahora = órdenes DISTINTAS con opp post-venta viva.
       liveOpps: [
         { id: "p1", assigned_advisor_id: A, is_outbound: false, stage_id: "pv-open", shopify_order_id: "O1" },

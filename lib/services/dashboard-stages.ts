@@ -85,10 +85,19 @@ function medianPosition(stages: PipelineStageRow[]): number {
 }
 
 const PROBLEMATIC_STAGE_NAME = "Caso problemático";
+/**
+ * Destino del mensaje 2 de Post-venta (seguimiento "7 dias"). Ancla por
+ * NOMBRE, sin fallback posicional a propósito: mandar un mensaje al cliente
+ * y mover la opp a una etapa adivinada es peor que no moverla. Si el admin
+ * renombra la etapa, el mensaje sigue saliendo y la opp se queda donde está.
+ */
+const FOLLOWUP_STAGE_NAME = "Seguimiento post-entrega";
 
 export interface PostventaStageInfo {
   /** Etapa "Caso problemático" (snapshot de casos). */
   problematicStage: PipelineStageRow | null;
+  /** Etapa "Seguimiento post-entrega" — destino del mensaje 2 (0049). */
+  followupStage: PipelineStageRow | null;
   /** IDs de etapas terminales (ganada/perdida) del funnel post-venta. */
   terminalStageIds: Set<UUID>;
 }
@@ -106,10 +115,11 @@ export async function resolvePostventaStages(): Promise<PostventaStageInfo> {
     stages.filter((s) => s.is_won || s.is_lost).map((s) => s.id),
   );
   if (stages.length === 0) {
-    return { problematicStage: null, terminalStageIds };
+    return { problematicStage: null, followupStage: null, terminalStageIds };
   }
   const byName = stages.find((s) => s.name === PROBLEMATIC_STAGE_NAME);
   const problematicStage =
     byName ?? stages.reduce((max, s) => (s.position > max.position ? s : max), stages[0]);
-  return { problematicStage, terminalStageIds };
+  const followupStage = stages.find((s) => s.name === FOLLOWUP_STAGE_NAME) ?? null;
+  return { problematicStage, followupStage, terminalStageIds };
 }

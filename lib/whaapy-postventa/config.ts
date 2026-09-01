@@ -25,6 +25,14 @@ export const WHAAPY_POSTVENTA_STAGE_NAMES = {
   casoProblematico: "Caso Problemático",
   /** Destino del webhook 4 y filtro del webhook 3 entrante (resolución). */
   casoResuelto: "Caso Resuelto",
+  /**
+   * MENSAJE 2 — seguimiento "7 dias". Lo empuja el cron 7 días después de
+   * que salió el mensaje 1 (que va desde el número de VENTA). La Automation
+   * de ESTA instancia manda el template, así que el cliente lo recibe del
+   * número de post-venta: los dos mensajes salen de números distintos a
+   * propósito.
+   */
+  seguimiento: "Seguimiento post-entrega",
 } as const;
 
 export type WhaapyPostventaStageKey = keyof typeof WHAAPY_POSTVENTA_STAGE_NAMES;
@@ -58,3 +66,18 @@ export const WHAAPY_POSTVENTA_CUSTOM_FIELDS = {
 export function isPostventaWhaapySyncEnabled(): boolean {
   return process.env.POSTVENTA_WHAAPY_SYNC_ENABLED === "true";
 }
+
+/**
+ * Kill switch del MENSAJE 2 (seguimiento "7 dias"). Independiente del de la
+ * sincronización general: es un mensaje de categoría MARKETING que sale solo,
+ * por cron, días después de cualquier acción humana — poder apagarlo sin
+ * apagar la sincronización de casos es un requisito operativo, no un lujo.
+ *
+ * Default OFF: el deploy no manda nada hasta que el operador lo habilite.
+ */
+export function isPostventaFollowupMessageEnabled(): boolean {
+  return process.env.POSTVENTA_FOLLOWUP_MESSAGE_ENABLED === "true";
+}
+
+/** Días entre el mensaje 1 (entrega) y el 2 (seguimiento). */
+export const POSTVENTA_FOLLOWUP_DELAY_DAYS = 7;

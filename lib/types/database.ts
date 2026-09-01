@@ -236,6 +236,17 @@ export interface OpportunityRow {
   // desde el botón "+". Flag de procedencia (badge "Reabierto"), ortogonal
   // al estado de archivado. La reapertura limpia cancelled/won/lost/resolved.
   reopened_at: ISODateString | null;
+  /**
+   * Sellos de los dos mensajes al cliente tras la entrega (0049). Salen de
+   * instancias DISTINTAS de Whaapy: el 1 desde el número de Venta al entrar
+   * a "Entregado"; el 2 ("7 dias") desde el de Post-venta, 7 días DESPUÉS
+   * del envío del 1 — el ancla es ese envío, no la fecha de entrega.
+   *
+   * `followup_message_sent_at` es el candado de idempotencia del cron: el
+   * mensaje 2 es MARKETING y duplicarlo es peor que no mandarlo.
+   */
+  delivery_message_sent_at: ISODateString | null;
+  followup_message_sent_at: ISODateString | null;
   // Atribución de origen del lead (0038). Se sella al crear la opp "Lead
   // nuevo" desde el camino canónico de creación de leads: "manual" |
   // "webhook". NULL = nacida por otra vía (draft Shopify, R12, reapertura).
@@ -614,6 +625,8 @@ export interface Database {
           | "is_outbound"
           | "overridden_tag_advisor_id"
           | "customer_success_membership_id"
+          | "delivery_message_sent_at"
+          | "followup_message_sent_at"
         > &
           Partial<
             Pick<
@@ -627,6 +640,8 @@ export interface Database {
               | "is_outbound"
               | "overridden_tag_advisor_id"
               | "customer_success_membership_id"
+              | "delivery_message_sent_at"
+              | "followup_message_sent_at"
             >
           >;
         Update: Omit<Updatable<OpportunityRow>, "effective_created_at">;

@@ -8,6 +8,7 @@ import { whaapyConversationFunctions } from "./whaapy-conversations";
 import { whaapyOutboundFunctions } from "./whaapy-outbound";
 import { whaapyPostventaFunctions } from "./whaapy-postventa";
 import { ventaDeliveryFunctions } from "./venta-delivery";
+import { postventaFollowupFunctions } from "./postventa-followup-cron";
 import { whaapyPostventaInboundFunctions } from "./whaapy-postventa-inbound";
 import { shopifyOutboundFunctions } from "./shopify-outbound";
 import { tagReprocessFunctions } from "./tag-reprocess";
@@ -35,6 +36,7 @@ export const allFunctions = [
   ...whaapyOutboundFunctions,
   ...whaapyPostventaFunctions,
   ...ventaDeliveryFunctions,
+  ...postventaFollowupFunctions,
   ...whaapyPostventaInboundFunctions,
   ...shopifyOutboundFunctions,
   ...tagReprocessFunctions,
