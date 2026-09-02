@@ -26,6 +26,8 @@
  *   npm run whaapy:harness-postventa-message -- --org-slug centr --phone +5215512345678 --dry-run
  *   npm run whaapy:harness-postventa-message -- --org-slug centr --phone +5215512345678 \
  *     --order-ref "#1728" --name "Jorge Prueba" --stage entregado
+ *   # repetir la prueba con el contacto ya en la etapa (lo saca y lo re-mete):
+ *   npm run whaapy:harness-postventa-message -- --org-slug centr --phone +52...  *     --stage seguimiento --rearm
  */
 import { config as loadDotenv } from "dotenv";
 import { resolve } from "node:path";
@@ -33,6 +35,7 @@ import { getOrganizationBySlug } from "@/lib/db/organizations";
 import { withTenantContext } from "@/lib/tenant/context";
 import {
   createPostventaContact,
+  detachPostventaContactFromStage,
   findPostventaContactByPhone,
   movePostventaContactToStage,
   patchPostventaContactCustomFields,
@@ -120,16 +123,26 @@ async function main() {
         `  contacto      : ${match ? `existe (${match.contactId}), etapa actual ${match.currentStageId ?? "ninguna"}` : "NO existe → se creará"}`,
       );
 
-      // Whaapy no re-dispara la automatización si el contacto ya está en la
-      // etapa destino: el trigger es ENTRAR, no estar. Sin este aviso, la
-      // prueba "no manda nada" y parece que la Automation está rota.
+      // Whaapy dispara al ENTRAR a la etapa, no por estar en ella: para
+      // repetir una prueba el contacto tiene que salir primero. `--rearm` lo
+      // saca de TODAS las etapas (stage_id: null) en vez de pasarlo por otra,
+      // que podría tener su propia Automation.
+      const rearm = process.argv.includes("--rearm");
       if (match && match.currentStageId === stageId) {
-        console.log(
-          `\n⚠  El contacto YA está en "${stageName}". Whaapy no vuelve a disparar la\n` +
-            `   automatización (el trigger es ENTRAR a la etapa). Muévelo a otra etapa\n` +
-            `   desde el dashboard y vuelve a correr esto.`,
-        );
-        return;
+        if (!rearm) {
+          console.log(
+            `\n⚠  El contacto YA está en "${stageName}". Whaapy no vuelve a disparar la\n` +
+              `   automatización (el trigger es ENTRAR a la etapa).\n` +
+              `   Agregá --rearm para sacarlo del funnel y volver a meterlo de una vez.`,
+          );
+          return;
+        }
+        if (DRY_RUN) {
+          console.log(`\n(dry run) --rearm lo sacaría del funnel y lo volvería a meter.\n`);
+          return;
+        }
+        await detachPostventaContactFromStage(orgId, match.contactId);
+        console.log(`\n✓ sacado del funnel (--rearm) para poder re-disparar`);
       }
 
       if (DRY_RUN) {
@@ -160,6 +173,10 @@ async function main() {
       console.log(`  2. ¿Su acción send_template apunta al template correcto y está APROBADO?`);
       console.log(`  3. Si llega pero con la variable vacía, la Automation no está leyendo`);
       console.log(`     el custom field "${WHAAPY_POSTVENTA_CUSTOM_FIELDS.orderRef}".`);
+      console.log(`  4. Mira el Inbox de Whaapy: un envío rechazado aparece en ROJO con el`);
+      console.log(`     motivo. "La cuenta necesita un método de pago válido" = la WABA de`);
+      console.log(`     esa cuenta no tiene tarjeta en Meta — los templates se cobran, así`);
+      console.log(`     que Meta los rechaza. No es un problema de la plataforma.`);
     },
     { source: "script" },
   );

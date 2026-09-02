@@ -263,3 +263,27 @@ export async function movePostventaContactToStage(
     { stage_id: stageId },
   );
 }
+
+/**
+ * Saca al contacto de TODAS las etapas del funnel (`stage_id: null`).
+ *
+ * Existe solo para los harness de prueba: el trigger de Whaapy es ENTRAR a
+ * la etapa, así que repetir una prueba exige que el contacto salga primero.
+ * Se deja sin etapa —en vez de pasarlo por otra— porque cualquier etapa
+ * intermedia podría tener su propia Automation y dispararía algo que nadie
+ * pidió (p. ej. la de "Caso Resuelto", que llama de vuelta a la plataforma).
+ *
+ * NO se usa en el flujo productivo: ahí los contactos siempre van hacia una
+ * etapa concreta.
+ */
+export async function detachPostventaContactFromStage(
+  organizationId: UUID,
+  contactId: string,
+): Promise<void> {
+  await whaapyPostventaRest<unknown>(
+    organizationId,
+    "POST",
+    `/funnel/v1/contacts/${contactId}/move`,
+    { stage_id: null },
+  );
+}
