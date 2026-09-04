@@ -405,3 +405,106 @@ describe("createLead — canal Outbound (Fase 2)", () => {
     expect(opps.some((o) => o.funnel === "outbound" && o.is_outbound === true)).toBe(true);
   });
 });
+
+describe("createLead — mensaje del formulario de origen", () => {
+  it("aterriza como nota de la opp nueva y como actividad `lead_message`", async () => {
+    vi.mocked(matchLeadIdentity).mockResolvedValue({
+      recommendation: "create_new",
+      match: null,
+      normalizedPhone: PHONE,
+      normalizedEmail: null,
+    });
+
+    const res = await withTenantContext(ORG, () =>
+      createLead({
+        fullName: "Visitante Web",
+        phone: PHONE,
+        assignment: { mode: "round_robin" },
+        source: "webhook",
+        inboundWebhookSourceId: "src-1",
+        message: "  Quiero cotizar una cocina integral  ",
+        actorUserId: null,
+      }),
+    );
+
+    const opps = fake.getTable("opportunities");
+    expect(opps).toHaveLength(1);
+    // Trim aplicado; el vendedor ve el contexto al abrir la card.
+    expect(opps[0].note).toBe("Quiero cotizar una cocina integral");
+
+    const activities = fake.getTable("activities");
+    expect(activities).toHaveLength(1);
+    expect(activities[0].activity_type).toBe("lead_message");
+    expect(activities[0].description).toBe("Quiero cotizar una cocina integral");
+    expect(activities[0].contact_id).toBe(res.contactId);
+    expect(activities[0].opportunity_id).toBe(res.opportunityId);
+  });
+
+  it("registra la actividad AUNQUE se deduplique sin opp nueva (mensaje no se pierde)", async () => {
+    const ex = existingContact({ id: "ex-msg", assigned_advisor_id: ADV });
+    fake.setTable("contacts", [{ ...ex }]);
+    fake.setTable("opportunities", [
+      {
+        id: "opp-active",
+        organization_id: ORG,
+        contact_id: "ex-msg",
+        funnel: "venta",
+        stage_id: "stage-cotizacion",
+        won_at: null,
+        lost_at: null,
+        cancelled_at: null,
+      },
+    ]);
+    vi.mocked(matchLeadIdentity).mockResolvedValue({
+      recommendation: "link_existing",
+      match: ex,
+      normalizedPhone: PHONE,
+      normalizedEmail: null,
+    });
+
+    const res = await withTenantContext(ORG, () =>
+      createLead({
+        fullName: "Visitante Web",
+        phone: PHONE,
+        assignment: { mode: "round_robin" },
+        source: "webhook",
+        inboundWebhookSourceId: "src-1",
+        message: "Ya les había escrito, sigo esperando",
+        actorUserId: null,
+      }),
+    );
+
+    expect(res.opportunityCreated).toBe(false);
+    expect(res.skipReason).toBe("active_opportunity_exists");
+
+    const activities = fake.getTable("activities");
+    expect(activities).toHaveLength(1);
+    expect(activities[0].activity_type).toBe("lead_message");
+    expect(activities[0].contact_id).toBe("ex-msg");
+    expect(activities[0].opportunity_id).toBeNull();
+  });
+
+  it("sin mensaje (o solo espacios) no crea actividad ni ensucia la nota", async () => {
+    vi.mocked(matchLeadIdentity).mockResolvedValue({
+      recommendation: "create_new",
+      match: null,
+      normalizedPhone: PHONE,
+      normalizedEmail: null,
+    });
+
+    await withTenantContext(ORG, () =>
+      createLead({
+        fullName: "Sin Mensaje",
+        phone: PHONE,
+        assignment: { mode: "round_robin" },
+        source: "webhook",
+        inboundWebhookSourceId: "src-1",
+        message: "   ",
+        actorUserId: null,
+      }),
+    );
+
+    expect(fake.getTable("opportunities")[0].note).toBeNull();
+    expect(fake.getTable("activities")).toHaveLength(0);
+  });
+});

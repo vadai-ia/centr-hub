@@ -76,6 +76,21 @@ describe("parseLeadWebhookPayload", () => {
   it("rechaza email con formato inválido", () => {
     expect(() => parseLeadWebhookPayload({ name: "A", phone: "1", email: "no-es-email" })).toThrow();
   });
+
+  it("acepta `message` opcional y lo recorta; ausente o vacío queda null", () => {
+    expect(
+      parseLeadWebhookPayload({ name: "A", phone: "1", message: "  Quiero cotizar  " })
+        .message,
+    ).toBe("Quiero cotizar");
+    expect(parseLeadWebhookPayload({ name: "A", phone: "1" }).message).toBeNull();
+    expect(parseLeadWebhookPayload({ name: "A", phone: "1", message: "   " }).message).toBeNull();
+  });
+
+  it("rechaza un `message` desmedido (tope 2000)", () => {
+    expect(() =>
+      parseLeadWebhookPayload({ name: "A", phone: "1", message: "x".repeat(2001) }),
+    ).toThrow();
+  });
 });
 
 describe("selectRoundRobin", () => {

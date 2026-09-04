@@ -62,12 +62,16 @@ e incluir el token como credencial.
 | `email` | No | Correo del lead | `"maria@ejemplo.com"` |
 | `address` | No | Dirección. Puede ser un texto simple o un objeto con campos. | ver abajo |
 | `external_id` | No | Identificador único del envío (evita duplicados si se reintenta). | `"form-abc-123"` |
+| `message` | No | Lo que escribió el visitante. Queda como nota de la oportunidad y en la historia del contacto. | `"Quiero cotizar una cocina"` |
 
 **Notas importantes:**
 
 - **El teléfono es obligatorio y debe ser un número real** (con lada). Es lo que
   usamos para no duplicar contactos y para crear la conversación en WhatsApp.
 - **`email` y `address` son opcionales**: el lead se crea perfectamente sin ellos.
+- **`message` es opcional pero muy recomendable**: es el contexto con el que el
+  vendedor abre la oportunidad. Si el contacto ya existía y tenía una
+  oportunidad activa, el mensaje igual queda registrado en su historia.
 - La **dirección** puede enviarse de dos maneras:
   - Como texto simple: `"address": "Av. Reforma 123, CDMX"`
   - Como objeto con campos: `"address": { "address1": "Av. Reforma 123", "city": "CDMX", "province": "CDMX", "zip": "06600", "country": "México" }`
@@ -88,6 +92,7 @@ curl -X POST "https://TU-DOMINIO/api/webhooks/leads/UNCODIGOLARGO" \
     "phone": "+52 55 1234 5678",
     "email": "maria@ejemplo.com",
     "address": "Av. Reforma 123, CDMX",
+    "message": "Quiero cotizar una cocina integral",
     "external_id": "form-2026-000123"
   }'
 ```
@@ -137,3 +142,19 @@ plataforma. Este webhook solo crea el lead y su contacto de WhatsApp.
 En **Admin → Webhooks de leads**: “Revocar” la desactiva (deja de aceptar
 envíos) y “Rotar token” genera una credencial nueva. Cada fuente es
 independiente.
+
+**¿Puedo llamarlo desde el JavaScript de mi página (no desde un servidor)?**
+Sí. El endpoint acepta peticiones desde el navegador, incluso de otro dominio.
+Ten en cuenta que **el token queda a la vista** en el código de la página, como
+en cualquier formulario público. Por eso, para ese uso:
+
+- Crea una **fuente dedicada** para esa página (no reutilices la de Zapier ni la
+  de otro formulario). Si alguien la usa para mandar basura, la revocas sin
+  afectar nada más.
+- El endpoint sólo puede **crear leads** y está limitado a **120 envíos por
+  minuto** por fuente.
+- Conviene incluir un **campo trampa** oculto en el formulario (los bots lo
+  llenan, las personas no) y descartar el envío si viene lleno.
+
+Ejemplo de referencia listo para pegar en un tema de Shopify:
+`docs/widget-chat-shopify.liquid`.

@@ -1,0 +1,270 @@
+{% comment %}
+============================================================
+  CHAT WIDGET CENTR — versión que SÍ registra el lead
+============================================================
+  Reemplaza al bloque anterior en layout/theme.liquid (justo antes de
+  </body>). Diferencia con la versión previa: además de abrir WhatsApp,
+  manda el lead al webhook de Centr Hub, así que entra al pipeline de Venta
+  en "Lead nuevo" AUNQUE el visitante nunca llegue a mandar el WhatsApp.
+
+  ANTES DE PEGARLO — sustituye las dos constantes del script:
+    CENTR_ENDPOINT  → la URL que da Admin → Webhooks de leads
+    CENTR_TOKEN     → el token de esa misma fuente (se muestra una sola vez)
+
+  Sobre el token: queda visible en el código del tema, como en cualquier
+  formulario público. Por eso usa una fuente DEDICADA ("Widget web Shopify"):
+  el endpoint sólo puede crear leads, está limitado a 120 envíos/minuto y la
+  fuente se revoca con un clic desde Admin → Webhooks de leads.
+============================================================
+{% endcomment %}
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/intl-tel-input/17.0.19/css/intlTelInput.min.css">
+<style>
+  #cw-centr, #cw-centr * { box-sizing: border-box; margin: 0; font-family: Roboto, "Helvetica Neue", Arial, sans-serif; }
+  #cw-centr { position: fixed; right: 20px; bottom: 20px; z-index: 2147483000; font-size: 14px; }
+
+  /* Burbuja flotante */
+  #cw-bubble { width: 64px; height: 64px; border: none; border-radius: 50%; background: #FFB000; cursor: pointer;
+    display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 14px rgba(0,0,0,.35); transition: transform .15s; }
+  #cw-bubble:hover { transform: scale(1.06); }
+
+  /* Panel */
+  #cw-panel { display: none; position: fixed; right: 20px; bottom: 96px; width: 400px; max-width: calc(100vw - 24px);
+    max-height: min(680px, calc(100vh - 120px)); background: #fff; border-radius: 12px; overflow: hidden;
+    box-shadow: 0 8px 32px rgba(0,0,0,.35); flex-direction: column; }
+  #cw-centr.cw-open #cw-panel { display: flex; }
+
+  /* Header */
+  #cw-header { background: #000; color: #fff; padding: 14px 16px; display: flex; align-items: center; gap: 12px; }
+  #cw-header img { width: 44px; height: 44px; border-radius: 50%; border: 2px solid #FFB000; object-fit: cover; }
+  #cw-header h3 { font-size: 17px; font-weight: 700; flex: 1; }
+  #cw-close { background: none; border: none; cursor: pointer; padding: 4px; display: flex; align-items: center; }
+
+  /* Cuerpo */
+  #cw-body { padding: 16px; overflow-y: auto; flex: 1; background: #fff; }
+  #cw-centr .cw-row { display: flex; gap: 8px; margin-bottom: 14px; }
+  #cw-centr .cw-row img { width: 28px; height: 28px; border-radius: 50%; object-fit: cover; flex-shrink: 0; }
+  #cw-centr .cw-msg { background: #EFEFEF; color: #333; border-radius: 10px; padding: 12px 14px; line-height: 1.45; max-width: 85%; }
+  #cw-centr .cw-msg strong { display: block; font-size: 15px; margin-bottom: 2px; }
+  #cw-centr .cw-msg-user { background: #FFB000; color: #fff; border-radius: 10px; padding: 12px 14px; line-height: 1.5;
+    margin: 0 0 14px auto; max-width: 85%; word-break: break-word; }
+  #cw-centr .cw-check { width: 28px; height: 28px; flex-shrink: 0; border-radius: 50%; background: #22A75D; color: #fff;
+    display: flex; align-items: center; justify-content: center; font-size: 15px; }
+
+  /* Formulario */
+  #cw-form { background: #fff; border: 1px solid #E6E6E6; border-radius: 12px; padding: 16px; box-shadow: 0 1px 6px rgba(0,0,0,.08); }
+  #cw-form input, #cw-form textarea { width: 100%; border: 1px solid #D9D9D9; border-radius: 8px; padding: 12px 14px;
+    margin-bottom: 12px; font-size: 14px; color: #333; outline: none; }
+  #cw-form input:focus, #cw-form textarea:focus { border-color: #FFB000; }
+  #cw-form textarea { min-height: 110px; resize: vertical; }
+  /* Trampa anti-bots: invisible para personas, tentadora para scripts. */
+  #cw-website-wrap { position: absolute; left: -9999px; width: 1px; height: 1px; overflow: hidden; }
+  /* intl-tel-input — estilos incrustados (funcionan aunque el CSS externo no cargue) */
+  #cw-centr .iti { position: relative; display: block; width: 100%; margin-bottom: 12px; }
+  #cw-centr .iti input { margin-bottom: 0 !important; padding-left: 92px !important; }
+  #cw-centr .iti__hide { display: none !important; }
+  #cw-centr .iti__flag-container { position: absolute; top: 0; bottom: 0; left: 0; padding: 1px; }
+  #cw-centr .iti__selected-flag { display: flex; align-items: center; gap: 6px; height: 100%;
+    padding: 0 10px 0 12px; cursor: pointer; background: rgba(0,0,0,.05); border-radius: 8px 0 0 8px; }
+  #cw-centr .iti__selected-dial-code { font-size: 14px; color: #333; }
+  #cw-centr .iti__arrow { width: 0; height: 0; margin-left: 4px; border-left: 4px solid transparent;
+    border-right: 4px solid transparent; border-top: 5px solid #555; }
+  #cw-centr .iti__arrow--up { border-top: none; border-bottom: 5px solid #555; }
+  #cw-centr .iti__country-list { position: absolute; z-index: 2147483001; list-style: none; padding: 0;
+    margin: 2px 0 0; background: #fff; border: 1px solid #D9D9D9; border-radius: 8px;
+    box-shadow: 0 6px 18px rgba(0,0,0,.18); max-height: 200px; overflow-y: auto; width: 330px; max-width: 80vw;
+    -webkit-overflow-scrolling: touch; }
+  #cw-centr .iti__country { display: flex; align-items: center; gap: 8px; padding: 8px 12px; cursor: pointer;
+    outline: none; font-size: 14px; }
+  #cw-centr .iti__country:hover, #cw-centr .iti__country.iti__highlight { background: #F4F4F4; }
+  #cw-centr .iti__country-name { color: #333; }
+  #cw-centr .iti__dial-code { color: #888; }
+  #cw-centr .iti__divider { border-bottom: 1px solid #E6E6E6; margin: 4px 0; padding: 0; }
+  #cw-centr .iti__flag { width: 20px; height: 15px; flex-shrink: 0; border-radius: 2px; background: #ECECEC center/cover no-repeat; }
+
+  /* Consentimiento */
+  #cw-consent { background: #EFEFEF; border-radius: 10px; padding: 12px 14px; display: flex; gap: 10px;
+    align-items: flex-start; margin-top: 12px; color: #444; line-height: 1.4; font-size: 13px; }
+  #cw-consent input { width: 18px; height: 18px; accent-color: #FFB000; flex-shrink: 0; margin-top: 1px; }
+
+  /* Botón enviar */
+  #cw-send { display: block; width: 60%; margin: 16px auto 0; background: #FFB000; color: #fff; border: none;
+    border-radius: 8px; padding: 13px 0; font-size: 15px; font-weight: 700; letter-spacing: .5px; cursor: pointer; }
+  #cw-send:hover { filter: brightness(1.05); }
+  #cw-send:disabled { opacity: .5; cursor: not-allowed; }
+
+  /* Footer */
+  #cw-footer { text-align: center; padding: 10px; font-size: 12px; color: #777; background: #fff; }
+  #cw-footer b { color: #FFB000; font-weight: 700; }
+
+  #cw-thanks { display: none; }
+  @media (max-width: 480px) { #cw-panel { right: 12px; bottom: 90px; } }
+</style>
+
+<div id="cw-centr">
+  <div id="cw-panel" role="dialog" aria-label="Chat CENTR">
+    <div id="cw-header">
+      <img src="https://assets.cdn.filesafe.space/uthuL8ECL4Ex0ZQZfJQr/media/67d095ae61a2461c9c97fc93.png" alt="CENTR">
+      <h3>&iquest;Tienes alguna pregunta?</h3>
+      <button id="cw-close" aria-label="Cerrar">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+      </button>
+    </div>
+    <div id="cw-body">
+      <div class="cw-row">
+        <img src="https://assets.cdn.filesafe.space/uthuL8ECL4Ex0ZQZfJQr/media/67d095ae61a2461c9c97fc93.png" alt="">
+        <div class="cw-msg">Escribe tu pregunta abajo y un asesor CENTR se pondr&aacute; en contacto contigo a la brevedad.</div>
+      </div>
+
+      <div id="cw-form">
+        <input type="text" id="cw-nombre" placeholder="Nombre" autocomplete="name">
+        <input type="tel" id="cw-tel" placeholder="Tel&eacute;fono" autocomplete="tel">
+        <input type="email" id="cw-email" placeholder="Correo electr&oacute;nico" autocomplete="email">
+        <textarea id="cw-mensaje" placeholder="Escribe tu mensaje..."></textarea>
+        <div id="cw-website-wrap" aria-hidden="true">
+          <label for="cw-website">No llenar</label>
+          <input type="text" id="cw-website" tabindex="-1" autocomplete="off">
+        </div>
+      </div>
+
+      <div id="cw-consent">
+        <input type="checkbox" id="cw-acepto" checked>
+        <label for="cw-acepto">Al enviar, aceptas recibir Whatsapp o correos electr&oacute;nicos a trav&eacute;s del canal proporcionado.</label>
+      </div>
+
+      <button id="cw-send">ENVIAR &#x27A4;</button>
+
+      <div id="cw-thanks">
+        <div class="cw-msg-user" id="cw-resumen"></div>
+        <div class="cw-row">
+          <div class="cw-check">&#x2713;</div>
+          <div class="cw-msg"><strong>&iexcl;GRACIAS!</strong>Uno de nuestros asesores se pondr&aacute; en contacto contigo en breve.</div>
+        </div>
+      </div>
+    </div>
+    <div id="cw-footer">Powered by <b>VADAI</b></div>
+  </div>
+
+  <button id="cw-bubble" aria-label="Abrir chat">
+    <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path>
+    </svg>
+  </button>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/intl-tel-input/17.0.19/js/intlTelInput.min.js"></script>
+<script>
+(function () {
+  // ---- CONFIGURACIÓN — sustituir por los valores de Admin → Webhooks de leads
+  var CENTR_ENDPOINT = 'https://TU-DOMINIO/api/webhooks/leads/PEGA-AQUI-EL-SLUG';
+  var CENTR_TOKEN    = 'PEGA-AQUI-EL-TOKEN';
+  var WHATSAPP       = '525599630882'; // 55 9963 0882
+
+  var root = document.getElementById('cw-centr');
+
+  var iti = window.intlTelInput(document.getElementById('cw-tel'), {
+    initialCountry: 'mx',
+    preferredCountries: ['mx', 'us'],
+    separateDialCode: true,
+    utilsScript: 'https://cdnjs.cloudflare.com/ajax/libs/intl-tel-input/17.0.19/js/utils.js'
+  });
+
+  // Banderas: imágenes individuales de flagcdn.com (no dependen del CSS de la librería)
+  var telInput = document.getElementById('cw-tel');
+  function flagUrl(code) { return 'url(https://flagcdn.com/w20/' + code.toLowerCase() + '.png)'; }
+  root.querySelectorAll('.iti__country').forEach(function (li) {
+    var code = li.getAttribute('data-country-code');
+    var flag = li.querySelector('.iti__flag');
+    if (code && flag) flag.style.backgroundImage = flagUrl(code);
+  });
+  function updateSelectedFlag() {
+    var c = iti.getSelectedCountryData();
+    var flag = root.querySelector('.iti__selected-flag .iti__flag');
+    if (c && c.iso2 && flag) flag.style.backgroundImage = flagUrl(c.iso2);
+  }
+  telInput.addEventListener('countrychange', updateSelectedFlag);
+  updateSelectedFlag();
+
+  document.getElementById('cw-bubble').addEventListener('click', function () {
+    root.classList.toggle('cw-open');
+  });
+  document.getElementById('cw-close').addEventListener('click', function () {
+    root.classList.remove('cw-open');
+  });
+
+  // Id único del envío: si la red falla y reintentamos, Centr Hub lo dedupea
+  // en vez de crear dos leads.
+  function envioId() {
+    return 'shopify-widget-' + Date.now() + '-' + Math.random().toString(36).slice(2);
+  }
+
+  // Manda el lead a Centr Hub. `keepalive` hace que la petición sobreviva
+  // aunque el visitante cierre la pestaña justo después de dar ENVIAR. Un solo
+  // reintento a los 2s si falla la RED; si el servidor respondió (4xx) no se
+  // reintenta — eso no se arregla insistiendo.
+  function enviarACentr(payload, intento) {
+    return fetch(CENTR_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-centrhub-token': CENTR_TOKEN },
+      body: JSON.stringify(payload),
+      keepalive: true,
+      mode: 'cors'
+    })['catch'](function (err) {
+      if (!intento) setTimeout(function () { enviarACentr(payload, 1); }, 2000);
+      throw err;
+    });
+  }
+
+  document.getElementById('cw-send').addEventListener('click', function () {
+    var nombre  = document.getElementById('cw-nombre').value.trim();
+    var telRaw  = document.getElementById('cw-tel').value.trim();
+    var tel     = (iti && typeof iti.getNumber === 'function' && iti.getNumber()) ? iti.getNumber() : telRaw;
+    var email   = document.getElementById('cw-email').value.trim();
+    var mensaje = document.getElementById('cw-mensaje').value.trim();
+    var acepto  = document.getElementById('cw-acepto').checked;
+    var trampa  = document.getElementById('cw-website').value;
+
+    if (!nombre || !tel || !mensaje) { alert('Por favor completa tu nombre, teléfono y mensaje.'); return; }
+    if (!acepto) { alert('Debes aceptar el aviso para poder contactarte.'); return; }
+
+    // 1. Registrar el lead en Centr Hub. Va PRIMERO y sin esperar respuesta:
+    //    el lead queda capturado aunque el visitante nunca mande el WhatsApp.
+    //    Un bot que llenó el campo trampa se descarta en silencio.
+    if (!trampa) {
+      var payload = {
+        name: nombre,
+        phone: tel,
+        message: mensaje,
+        external_id: envioId()
+      };
+      if (email) payload.email = email;
+      enviarACentr(payload, 0)['catch'](function () { /* ya reintentó; no molestar al visitante */ });
+    }
+
+    // Resumen estilo burbuja del usuario
+    var resumen = document.getElementById('cw-resumen');
+    resumen.textContent = '';
+    [nombre, tel, email, mensaje].forEach(function (line) {
+      if (!line) return;
+      var d = document.createElement('div');
+      d.textContent = line;
+      resumen.appendChild(d);
+    });
+
+    // Ocultar formulario y mostrar GRACIAS
+    document.getElementById('cw-form').style.display = 'none';
+    document.getElementById('cw-consent').style.display = 'none';
+    document.getElementById('cw-send').style.display = 'none';
+    document.getElementById('cw-thanks').style.display = 'block';
+
+    // 2. Abrir WhatsApp con el lead. SÍNCRONO dentro del click: si se hiciera
+    //    después de esperar la respuesta del fetch, el navegador lo trataría
+    //    como popup y lo bloquearía.
+    var texto = 'Hola, soy ' + nombre + '.\n' +
+      'Teléfono: ' + tel + '\n' +
+      (email ? 'Correo: ' + email + '\n' : '') +
+      'Mensaje: ' + mensaje;
+    window.open('https://wa.me/' + WHATSAPP + '?text=' + encodeURIComponent(texto), '_blank');
+  });
+})();
+</script>
+{% comment %} FIN CHAT WIDGET CENTR {% endcomment %}

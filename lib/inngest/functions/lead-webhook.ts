@@ -49,6 +49,7 @@ export async function processLeadWebhook(env: LeadWebhookEnvelope): Promise<unkn
       phone: env.payload.phone,
       email: env.payload.email,
       address: (env.payload.address ?? null) as Partial<StructuredAddress> | null,
+      message: env.payload.message ?? null,
       assignment: { mode: "round_robin" },
       source: "webhook",
       inboundWebhookSourceId: env.inboundWebhookSourceId,

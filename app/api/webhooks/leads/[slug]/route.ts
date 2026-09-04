@@ -41,7 +41,44 @@ const TOKEN_HEADER = "x-centrhub-token";
 const RATE_LIMIT_PER_MIN = 120;
 const DEDUP_TTL_SECONDS = 24 * 60 * 60;
 
+/**
+ * CORS: el endpoint se invoca también desde el NAVEGADOR (widget de chat del
+ * tema de Shopify, formularios embebidos en otros dominios). Un POST con
+ * `Content-Type: application/json` + header de token dispara preflight; sin
+ * estas cabeceras el navegador bloquea la petición ANTES de que llegue al
+ * handler y el lead se pierde sin dejar rastro.
+ *
+ * `*` es correcto aquí: la autorización es el TOKEN de la fuente, no el
+ * origen, y no se usan cookies ni credenciales (sin `Allow-Credentials`, que
+ * además es incompatible con `*`).
+ */
+const CORS_HEADERS: Record<string, string> = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Allow-Headers": `Content-Type, Authorization, ${TOKEN_HEADER}`,
+  "Access-Control-Max-Age": "86400",
+};
+
+export async function OPTIONS(): Promise<NextResponse> {
+  return new NextResponse(null, { status: 204, headers: CORS_HEADERS });
+}
+
+/**
+ * Envuelve el handler para sellar las cabeceras CORS en TODAS las salidas.
+ * Sin ellas en la respuesta real (no solo en el preflight), el navegador
+ * descarta el resultado y el formulario cree que falló aunque el lead haya
+ * entrado — y reintenta.
+ */
 export async function POST(
+  req: NextRequest,
+  ctx: { params: { slug: string } },
+): Promise<NextResponse> {
+  const res = await handlePost(req, ctx);
+  for (const [k, v] of Object.entries(CORS_HEADERS)) res.headers.set(k, v);
+  return res;
+}
+
+async function handlePost(
   req: NextRequest,
   { params }: { params: { slug: string } },
 ): Promise<NextResponse> {
@@ -136,6 +173,7 @@ export async function POST(
       phone: parsed.phone,
       email: parsed.email,
       address: parsed.address,
+      message: parsed.message,
     },
   };
 

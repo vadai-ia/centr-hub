@@ -227,6 +227,7 @@ export interface LeadWebhookEnvelope {
     phone: string;
     email: string | null;
     address: Record<string, string> | null;
+    message: string | null;
   };
 }
 

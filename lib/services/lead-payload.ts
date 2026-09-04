@@ -8,11 +8,13 @@ import { z } from "zod";
  *
  * Módulo puro (Zod): testeable sin BD; consumido por el endpoint y el doc.
  *
- * Obligatorios: name, phone. Opcionales: email, address, external_id.
+ * Obligatorios: name, phone. Opcionales: email, address, external_id, message.
  *   - `address` acepta un string simple (una línea) o un objeto con campos
  *     estructurados — lo que sea más fácil para el generador de formularios.
  *   - `external_id` (opcional) sirve como clave de idempotencia/dedup y
  *     para atribución fina; si falta, el endpoint dedupea por hash del body.
+ *   - `message` (opcional): texto libre que escribió el visitante; aterriza en
+ *     la nota de la oportunidad y en la historia del contacto.
  */
 
 const addressObjectSchema = z
@@ -32,6 +34,7 @@ export const leadWebhookPayloadSchema = z.object({
   email: z.string().trim().email().max(200).optional().nullable(),
   address: z.union([z.string().max(500), addressObjectSchema]).optional().nullable(),
   external_id: z.string().trim().max(200).optional().nullable(),
+  message: z.string().trim().max(2000).optional().nullable(),
 });
 
 export interface ParsedLeadPayload {
@@ -40,6 +43,8 @@ export interface ParsedLeadPayload {
   email: string | null;
   address: Record<string, string> | null;
   externalId: string | null;
+  /** Mensaje libre que escribió el visitante en el formulario (opcional). */
+  message: string | null;
 }
 
 /**
@@ -68,5 +73,6 @@ export function parseLeadWebhookPayload(raw: unknown): ParsedLeadPayload {
     email: p.email ? p.email.trim().toLowerCase() : null,
     address,
     externalId: p.external_id ? p.external_id.trim() : null,
+    message: p.message ? p.message.trim() : null,
   };
 }

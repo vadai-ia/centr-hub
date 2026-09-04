@@ -49,6 +49,7 @@ export type TimelineKind =
   | "task_created"
   | "task_completed"
   | "manual_note"
+  | "lead_message"
   | "reassignment"
   | "contact_edited"
   | "contact_created_in_shopify"
@@ -505,7 +506,11 @@ async function fetchActivityEvents(
 
 function activityToEvent(row: ActivityRow): TimelineEvent {
   const kind: TimelineKind =
-    row.activity_type === "manual_note" ? "manual_note" : "other_activity";
+    row.activity_type === "manual_note"
+      ? "manual_note"
+      : row.activity_type === "lead_message"
+        ? "lead_message"
+        : "other_activity";
   return {
     id: `activities:${row.id}`,
     source: "activities",

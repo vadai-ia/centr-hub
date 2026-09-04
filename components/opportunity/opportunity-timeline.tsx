@@ -79,6 +79,14 @@ export function OpportunityTimeline({ events, showOpportunityReference }: Props)
                     <span className="text-gray-500 dark:text-gray-400 italic">Sistema</span>
                   </>
                 )}
+                {ev.kind === "lead_message" && (
+                  <>
+                    <span aria-hidden>·</span>
+                    <span className="text-gray-500 dark:text-gray-400 italic">
+                      Mensaje del formulario
+                    </span>
+                  </>
+                )}
               </div>
             </div>
           </li>
@@ -148,6 +156,17 @@ const KIND_CONFIG: Record<TimelineEvent["kind"], { bg: string; text: string; ico
     icon: (
       <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
         <polyline points="20 6 9 17 4 12"/>
+      </svg>
+    ),
+  },
+  lead_message: {
+    bg: "bg-amber-100 dark:bg-amber-500/15",
+    text: "text-amber-700 dark:text-amber-300",
+    icon: (
+      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+        <path d="M8 9h8"/>
+        <path d="M8 13h5"/>
       </svg>
     ),
   },

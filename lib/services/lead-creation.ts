@@ -20,6 +20,7 @@ import {
 } from "@/lib/db/contacts";
 import { listActiveRealVendors } from "@/lib/db/users";
 import {
+  recordActivity,
   recordAuditEvent,
   createNotification,
   listOrgAdminUserIds,
@@ -48,6 +49,9 @@ import type { ContactRow, Funnel, Json, UUID } from "@/lib/types/database";
  *      roba el asesor de un contacto que ya tiene dueño (R2).
  *   3. Oportunidad "Lead nuevo" en la etapa inicial de Funnel Venta, salvo
  *      que el contacto ya tenga una opp activa (se respeta — guard R12).
+ *      El `message` del formulario nace como nota de esa opp y como actividad
+ *      `lead_message` en la historia del contacto (esta última, incluso si se
+ *      dedupeó sin opp nueva).
  *   4. Atribución de origen (`opportunities.lead_source` +
  *      `inbound_webhook_source_id`) + audit `lead_created` (cubre incluso el
  *      caso deduplicado-sin-opp-nueva).
@@ -94,6 +98,13 @@ export interface CreateLeadInput {
    * opp Outbound nace sin asignar (el caller pasa assignment explícito null).
    */
   channel?: "venta" | "outbound";
+  /**
+   * Texto libre que escribió el lead en el formulario de origen (opcional).
+   * Aterriza como nota de la oportunidad nueva y como actividad en la historia
+   * del contacto — la actividad se registra AUNQUE se haya deduplicado sin opp
+   * nueva, para que el mensaje nunca se pierda.
+   */
+  message?: string | null;
 }
 
 export interface CreateLeadResult {
@@ -127,6 +138,8 @@ export async function createLead(input: CreateLeadInput): Promise<CreateLeadResu
   const addressJson: Json | null = input.address
     ? structuredAddressToJson(input.address)
     : null;
+  // Mensaje del formulario de origen: vacío o solo-espacios cuenta como ausente.
+  const leadMessage = input.message?.trim() || null;
 
   // 2. Resolver asesor (antes de tocar BD, para poder sellarlo en el contacto).
   let resolvedAdvisorId: UUID | null = null;
@@ -247,7 +260,9 @@ export async function createLead(input: CreateLeadInput): Promise<CreateLeadResu
         weighted_amount: null,
         loss_reason_id: null,
         invoice_url: null,
-        note: null,
+        // El mensaje del formulario nace como nota de la opp: es el contexto
+        // que el vendedor necesita al abrir la card.
+        note: leadMessage,
         shipping_address: null,
         last_modified_at: ts,
         last_modified_source: "platform",
@@ -272,6 +287,28 @@ export async function createLead(input: CreateLeadInput): Promise<CreateLeadResu
       });
       opportunityId = opp.id;
       opportunityCreated = true;
+    }
+  }
+
+  // 4.5 Mensaje del formulario → actividad en la historia. Se registra aunque
+  //     NO se haya creado opp (contacto deduplicado con opp activa): sin esto
+  //     el texto que escribió el lead se perdería justo en el caso en que el
+  //     vendedor más lo necesita. Non-fatal: el lead ya está persistido.
+  if (leadMessage) {
+    try {
+      await recordActivity({
+        contactId: contact.id,
+        opportunityId,
+        activityType: "lead_message",
+        description: leadMessage,
+        payload: {
+          source: input.source,
+          inbound_webhook_source_id: input.inboundWebhookSourceId ?? null,
+        } as Json,
+        triggeredByUserId: input.actorUserId ?? null,
+      });
+    } catch {
+      // no bloquear: el mensaje sigue en la nota de la opp.
     }
   }
 
