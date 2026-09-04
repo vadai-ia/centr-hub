@@ -197,16 +197,34 @@ export async function createLead(input: CreateLeadInput): Promise<CreateLeadResu
   // Asesor efectivo: NUNCA robar el asesor de un contacto que ya tiene
   // dueño (R2). Solo se setea el resuelto si el contacto no tenía asesor.
   const effectiveAdvisorId = contact.assigned_advisor_id ?? resolvedAdvisorId;
-  if (
-    !contactCreated &&
-    contact.assigned_advisor_id === null &&
-    effectiveAdvisorId !== null
-  ) {
-    contact = await updateContact(contact.id, {
-      assigned_advisor_id: effectiveAdvisorId,
-      last_modified_at: ts,
-      last_modified_source: "platform",
-    });
+  const filledFields: string[] = [];
+  if (!contactCreated) {
+    const patch: Parameters<typeof updateContact>[1] = {};
+    if (contact.assigned_advisor_id === null && effectiveAdvisorId !== null) {
+      patch.assigned_advisor_id = effectiveAdvisorId;
+    }
+    // Datos que trae el formulario y el maestro NO tiene: se RELLENAN huecos,
+    // nunca se pisa un valor existente. Un lead que vuelve y esta vez si deja
+    // su correo aporta el dato; pero lo que escribe un visitante en una web no
+    // tiene autoridad para sobrescribir lo que el maestro ya sabe (puede ser un
+    // telefono compartido, o un typo). Un campo vacio del formulario TAMPOCO
+    // borra: la propagacion de borrados intencionales (R3) pertenece al flujo
+    // de edicion, no a una captura publica.
+    if (!contact.email && normalizedEmail) {
+      patch.email = normalizedEmail;
+      filledFields.push("email");
+    }
+    if (isEmptyAddress(contact.address) && addressJson) {
+      patch.address = addressJson;
+      filledFields.push("address");
+    }
+    if (Object.keys(patch).length > 0) {
+      contact = await updateContact(contact.id, {
+        ...patch,
+        last_modified_at: ts,
+        last_modified_source: "platform",
+      });
+    }
   }
 
   // 3.5 Canal Outbound: marcar el contacto como outbound y propagar a sus
@@ -225,6 +243,10 @@ export async function createLead(input: CreateLeadInput): Promise<CreateLeadResu
   //    el MISMO funnel (un contacto puede tener opp de Venta y de Outbound).
   let opportunityId: UUID | null = null;
   let opportunityCreated = false;
+  // Opp activa que se respetó (R12). NO es "la opp creada" — se usa solo para
+  // colgar de ella el mensaje del formulario: el vendedor trabaja en la card,
+  // no en el detalle del contacto.
+  let blockingOpportunityId: UUID | null = null;
   let skipReason: CreateLeadResult["skipReason"];
 
   const initialStage = await getInitialStage(leadFunnel);
@@ -239,6 +261,7 @@ export async function createLead(input: CreateLeadInput): Promise<CreateLeadResu
     if (blocking) {
       // Respeta dónde está: no se crea opp duplicada en este funnel.
       skipReason = "active_opportunity_exists";
+      blockingOpportunityId = blocking.id;
     } else {
       const opp = await createOpportunity({
         funnel: leadFunnel,
@@ -293,12 +316,14 @@ export async function createLead(input: CreateLeadInput): Promise<CreateLeadResu
   // 4.5 Mensaje del formulario → actividad en la historia. Se registra aunque
   //     NO se haya creado opp (contacto deduplicado con opp activa): sin esto
   //     el texto que escribió el lead se perdería justo en el caso en que el
-  //     vendedor más lo necesita. Non-fatal: el lead ya está persistido.
+  //     vendedor más lo necesita. En ese caso se cuelga de la opp ACTIVA que se
+  //     respetó — colgarla solo del contacto la deja donde el vendedor no mira.
+  //     Non-fatal: el lead ya está persistido.
   if (leadMessage) {
     try {
       await recordActivity({
         contactId: contact.id,
-        opportunityId,
+        opportunityId: opportunityId ?? blockingOpportunityId,
         activityType: "lead_message",
         description: leadMessage,
         payload: {
@@ -326,6 +351,9 @@ export async function createLead(input: CreateLeadInput): Promise<CreateLeadResu
       assigned_advisor_id: effectiveAdvisorId,
       contact_created: contactCreated,
       contact_deduped: !contactCreated,
+      // Huecos del maestro que rellenó este formulario (trazabilidad: de dónde
+      // salió un dato que el contacto no tenía).
+      contact_fields_filled: filledFields,
       opportunity_id: opportunityId,
       opportunity_created: opportunityCreated,
       skip_reason: skipReason ?? null,
@@ -398,4 +426,16 @@ async function notifyAdminsEmptyAdvisorPool(
       completed_at: null,
     });
   }
+}
+
+/**
+ * `contacts.address` es jsonb sin shape forzado: puede venir null, `{}`, o un
+ * objeto con todos sus campos en blanco. Los tres significan "no hay dirección"
+ * — sin esto, un `{}` heredado bloquearía el relleno del hueco por ser truthy.
+ */
+function isEmptyAddress(address: Json | null): boolean {
+  if (!address || typeof address !== "object" || Array.isArray(address)) return true;
+  return !Object.values(address as Record<string, unknown>).some(
+    (v) => typeof v === "string" && v.trim() !== "",
+  );
 }

@@ -440,7 +440,7 @@ describe("createLead — mensaje del formulario de origen", () => {
     expect(activities[0].opportunity_id).toBe(res.opportunityId);
   });
 
-  it("registra la actividad AUNQUE se deduplique sin opp nueva (mensaje no se pierde)", async () => {
+  it("registra la actividad AUNQUE se deduplique sin opp nueva, colgada de la opp activa", async () => {
     const ex = existingContact({ id: "ex-msg", assigned_advisor_id: ADV });
     fake.setTable("contacts", [{ ...ex }]);
     fake.setTable("opportunities", [
@@ -481,7 +481,8 @@ describe("createLead — mensaje del formulario de origen", () => {
     expect(activities).toHaveLength(1);
     expect(activities[0].activity_type).toBe("lead_message");
     expect(activities[0].contact_id).toBe("ex-msg");
-    expect(activities[0].opportunity_id).toBeNull();
+    // Se cuelga de la opp que se respetó: es donde el vendedor la va a leer.
+    expect(activities[0].opportunity_id).toBe("opp-active");
   });
 
   it("sin mensaje (o solo espacios) no crea actividad ni ensucia la nota", async () => {
@@ -506,5 +507,125 @@ describe("createLead — mensaje del formulario de origen", () => {
 
     expect(fake.getTable("opportunities")[0].note).toBeNull();
     expect(fake.getTable("activities")).toHaveLength(0);
+  });
+});
+
+describe("createLead — lead conocido que vuelve por el formulario", () => {
+  function seedContactWithActiveOpp(overrides: Partial<ContactRow> = {}) {
+    const ex = existingContact({ id: "ex-back", assigned_advisor_id: ADV, ...overrides });
+    fake.setTable("contacts", [{ ...ex }]);
+    fake.setTable("opportunities", [
+      {
+        id: "opp-activa",
+        organization_id: ORG,
+        contact_id: "ex-back",
+        funnel: "venta",
+        stage_id: "stage-cotizacion",
+        won_at: null,
+        lost_at: null,
+        cancelled_at: null,
+      },
+    ]);
+    vi.mocked(matchLeadIdentity).mockResolvedValue({
+      recommendation: "link_existing",
+      match: ex,
+      normalizedPhone: PHONE,
+      normalizedEmail: null,
+    });
+    return ex;
+  }
+
+  it("cuelga el mensaje de la opp ACTIVA que respetó, no solo del contacto", async () => {
+    seedContactWithActiveOpp();
+
+    const res = await withTenantContext(ORG, () =>
+      createLead({
+        fullName: "Jorge Romero",
+        phone: PHONE,
+        assignment: { mode: "round_robin" },
+        source: "webhook",
+        inboundWebhookSourceId: "src-1",
+        message: "sigo interesado",
+        actorUserId: null,
+      }),
+    );
+
+    // No nace opp nueva (guard R12) …
+    expect(res.opportunityCreated).toBe(false);
+    expect(res.opportunityId).toBeNull();
+    // … pero el mensaje viaja a la card donde el vendedor sí lo va a ver.
+    const activities = fake.getTable("activities");
+    expect(activities).toHaveLength(1);
+    expect(activities[0].opportunity_id).toBe("opp-activa");
+    expect(activities[0].contact_id).toBe("ex-back");
+  });
+
+  it("rellena huecos del contacto con lo que trae el formulario", async () => {
+    seedContactWithActiveOpp({ email: null, address: null });
+
+    await withTenantContext(ORG, () =>
+      createLead({
+        fullName: "Jorge Romero",
+        phone: PHONE,
+        email: "Jorge@Ejemplo.com",
+        address: { address1: "Av. Reforma 123" },
+        assignment: { mode: "round_robin" },
+        source: "webhook",
+        inboundWebhookSourceId: "src-1",
+        actorUserId: null,
+      }),
+    );
+
+    const c = fake.getTable("contacts")[0];
+    expect(c.email).toBe("jorge@ejemplo.com");
+    expect(c.address).toEqual({ address1: "Av. Reforma 123" });
+
+    const audit = fake.getTable("audit_log").find((a) => a.event_type === "lead_created");
+    expect(audit?.payload.contact_fields_filled).toEqual(["email", "address"]);
+  });
+
+  it("NO pisa un dato que el maestro ya tenía", async () => {
+    seedContactWithActiveOpp({
+      email: "el.bueno@ejemplo.com",
+      address: { address1: "Domicilio real" } as Json,
+    });
+
+    await withTenantContext(ORG, () =>
+      createLead({
+        fullName: "Jorge Romero",
+        phone: PHONE,
+        email: "tecleado.mal@ejemplo.com",
+        address: { address1: "Lo que escribio en la web" },
+        assignment: { mode: "round_robin" },
+        source: "webhook",
+        inboundWebhookSourceId: "src-1",
+        actorUserId: null,
+      }),
+    );
+
+    const c = fake.getTable("contacts")[0];
+    expect(c.email).toBe("el.bueno@ejemplo.com");
+    expect(c.address).toEqual({ address1: "Domicilio real" });
+
+    const audit = fake.getTable("audit_log").find((a) => a.event_type === "lead_created");
+    expect(audit?.payload.contact_fields_filled).toEqual([]);
+  });
+
+  it("una dirección vacía heredada (`{}`) cuenta como hueco y se rellena", async () => {
+    seedContactWithActiveOpp({ address: {} as Json });
+
+    await withTenantContext(ORG, () =>
+      createLead({
+        fullName: "Jorge Romero",
+        phone: PHONE,
+        address: { address1: "Av. Reforma 123" },
+        assignment: { mode: "round_robin" },
+        source: "webhook",
+        inboundWebhookSourceId: "src-1",
+        actorUserId: null,
+      }),
+    );
+
+    expect(fake.getTable("contacts")[0].address).toEqual({ address1: "Av. Reforma 123" });
   });
 });
