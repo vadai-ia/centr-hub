@@ -268,10 +268,11 @@
     // 2. Abrir WhatsApp con el lead. SÍNCRONO dentro del click: si se hiciera
     //    después de esperar la respuesta del fetch, el navegador lo trataría
     //    como popup y lo bloquearía.
-    var texto = 'Hola, soy ' + nombre + '.\n' +
-      'Teléfono: ' + tel + '\n' +
-      (email ? 'Correo: ' + email + '\n' : '') +
-      'Mensaje: ' + mensaje;
+    // El texto lo manda el CLIENTE, no nosotros: tiene que sonar a persona.
+    // El volcado de campos sobra ahora que el lead ya vive en Centr Hub con
+    // esos datos, y ademas empuja al agente de Whaapy a contestar en jerga de
+    // tramite a alguien que no sabe que es un lead.
+    var texto = 'Hola, soy ' + nombre + '. Escribo desde la página: ' + mensaje;
     window.open('https://wa.me/' + WHATSAPP + '?text=' + encodeURIComponent(texto), '_blank');
   });
 })();
