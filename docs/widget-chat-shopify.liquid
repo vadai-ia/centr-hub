@@ -226,6 +226,15 @@
     if (!nombre || !tel || !mensaje) { alert('Por favor completa tu nombre, teléfono y mensaje.'); return; }
     if (!acepto) { alert('Debes aceptar el aviso para poder contactarte.'); return; }
 
+    // Un telefono incompleto pasa el filtro del navegador pero Centr Hub lo
+    // descarta despues (necesita E.164 valido): el visitante veria GRACIAS y el
+    // lead no existiria para nadie. Solo se exige si utils.js llego a cargar,
+    // para no bloquear envios validos si el CDN falla.
+    if (window.intlTelInputUtils && iti && typeof iti.isValidNumber === 'function' && !iti.isValidNumber()) {
+      alert('Revisa tu teléfono: parece incompleto. Escríbelo a 10 dígitos.');
+      return;
+    }
+
     // 1. Registrar el lead en Centr Hub. Va PRIMERO y sin esperar respuesta:
     //    el lead queda capturado aunque el visitante nunca mande el WhatsApp.
     //    Un bot que llenó el campo trampa se descarta en silencio.
