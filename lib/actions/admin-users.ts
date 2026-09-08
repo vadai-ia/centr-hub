@@ -20,6 +20,7 @@ import {
   setAuthUserEmail,
   setMembershipActive,
   setMembershipInLeadRotation,
+  setMembershipIsAdvisor,
   updateMembershipRole,
   updateUserProfile,
 } from "@/lib/db/users";
@@ -150,6 +151,7 @@ export async function buildManagedUsers(
       isSelf: m.user_id === selfUserId,
       activeOpportunities: activeOpps.get(m.id) ?? 0,
       inLeadRotation: m.in_lead_rotation,
+      isAdvisor: m.is_advisor,
     });
   }
   return users;
@@ -396,15 +398,97 @@ export async function updateUserRoleAction(
   );
 }
 
+const advisorSchema = z.object({
+  membershipId: z.string().uuid(),
+  isAdvisor: z.boolean(),
+});
+
+/**
+ * Enciende/apaga la ranura de ASESOR de un usuario (0050) — el eje que decide
+ * si opera cartera comercial, independiente del rol (que decide qué ve).
+ *
+ * Existe porque el rol NO es el puesto único de la persona: una vendedora que
+ * asciende a líder/admin sigue vendiendo, y una dirección puede cotizar sin
+ * ser vendedora de planta. Antes, cambiar el rol la sacaba en silencio del
+ * selector de asesor, del mapeo de tags y del desglose del dashboard.
+ *
+ * Dos guardas:
+ *  - El rol 'vendedor' la tiene SIEMPRE encendida (INV-1, lo fuerza el trigger
+ *    de BD): no es un toggle para vendedores, apagarla se rechaza aquí.
+ *  - Apagarla con cartera activa se rechaza: primero hay que reasignar, si no
+ *    quedarían oportunidades vivas de alguien que ya no es asignable.
+ */
+export async function updateUserAdvisorAction(
+  raw: unknown,
+): Promise<UsersActionResult> {
+  const parsed = advisorSchema.safeParse(raw);
+  if (!parsed.success) {
+    return { ok: false, message: "Parámetros inválidos." };
+  }
+  const admin = await resolveAdmin();
+  if (!admin.ok) return admin;
+
+  return withTenantContext(
+    admin.ctx.orgId,
+    async () => {
+      const rolesMap = await loadOrgRolesMap(admin.ctx.orgId);
+      const memberships = await listManageableMemberships(admin.ctx.orgId);
+      const target = memberships.find((m) => m.id === parsed.data.membershipId);
+      if (!target) {
+        return { ok: false, message: "El usuario ya no existe en la organización." };
+      }
+      // INV-1: el rol vendedor implica asesor. El trigger de BD lo re-encendería
+      // al siguiente cambio de rol, así que rechazamos aquí con un mensaje claro
+      // en vez de aceptar un cambio que no se sostiene.
+      if (target.role === "vendedor" && !parsed.data.isAdvisor) {
+        return {
+          ok: false,
+          message:
+            "Un vendedor siempre opera como asesor. Cámbiale el rol si ya no vende.",
+        };
+      }
+      if (target.is_advisor !== parsed.data.isAdvisor) {
+        if (!parsed.data.isAdvisor) {
+          const activeOpps = await listActiveOpportunitiesByAdvisor(target.id);
+          if (activeOpps.length > 0) {
+            return {
+              ok: false,
+              message:
+                `Tiene ${activeOpps.length} oportunidad(es) activa(s). Reasígnalas antes de quitarle la operación como asesor.`,
+            };
+          }
+        }
+        await setMembershipIsAdvisor(target.id, parsed.data.isAdvisor);
+        await recordAuditEvent({
+          actorUserId: admin.ctx.userId,
+          eventType: "user_advisor_slot_updated",
+          entityType: "membership",
+          entityId: target.id,
+          payload: { is_advisor: parsed.data.isAdvisor, role: target.role },
+        });
+        revalidatePath("/admin/usuarios");
+      }
+      const users = await buildManagedUsers(
+        admin.ctx.orgId,
+        admin.ctx.userId,
+        rolesMap,
+      );
+      return { ok: true, users };
+    },
+    { source: "user_session" },
+  );
+}
+
 const rotationSchema = z.object({
   membershipId: z.string().uuid(),
   inRotation: z.boolean(),
 });
 
 /**
- * Activa/desactiva la pertenencia de un vendedor al reparto round-robin de
+ * Activa/desactiva la pertenencia de un ASESOR al reparto round-robin de
  * leads por webhook (0045). Solo afecta ese pool — no cambia rol, acceso, ni
- * la asignabilidad manual del vendedor. Solo aplica a vendedores.
+ * la asignabilidad manual. Requiere la ranura de asesor (0050): quien no
+ * opera cartera no puede recibir leads automáticos.
  */
 export async function updateUserRotationAction(
   raw: unknown,
@@ -425,11 +509,14 @@ export async function updateUserRotationAction(
       if (!target) {
         return { ok: false, message: "El usuario ya no existe en la organización." };
       }
-      // La rotación es solo de vendedores — el admin nunca entra a la rotación.
-      if (target.role !== "vendedor") {
+      // La rotación es solo de ASESORES (0050) — quien no opera cartera no
+      // recibe leads. Antes se gateaba por rol, lo que excluía a un
+      // admin/líder que sigue vendiendo.
+      if (!target.is_advisor) {
         return {
           ok: false,
-          message: "Solo los vendedores participan en el reparto de leads.",
+          message:
+            "Solo quien opera oportunidades como asesor participa en el reparto de leads.",
         };
       }
       if (target.in_lead_rotation !== parsed.data.inRotation) {
@@ -838,12 +925,14 @@ export async function reassignActiveOpportunitiesAction(
           message: "No puedes reasignar a un asesor desactivado.",
         };
       }
-      // Solo vendedores son asesores asignables (0039): no reasignar a un
-      // SDR/admin (no es dueño de oportunidades).
-      if (to.role !== "vendedor") {
+      // Solo se reasigna a quien opera cartera (ranura de asesor, 0050).
+      // Antes se gateaba por `role='vendedor'`, lo que impedía pasarle
+      // oportunidades a un admin/líder que sigue vendiendo.
+      if (!to.is_advisor) {
         return {
           ok: false,
-          message: "Solo puedes reasignar oportunidades a un vendedor.",
+          message:
+            "Solo puedes reasignar oportunidades a quien opera como asesor.",
         };
       }
 

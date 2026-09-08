@@ -141,8 +141,12 @@ export interface ManagedUserView {
   /** Oportunidades activas (no terminales, no canceladas) asignadas. Para el bloqueo de desactivación (Block 3). */
   activeOpportunities: number;
   /** Round-robin de leads por webhook (0045): true = en la rotación. Solo
-   *  relevante para vendedores (el toggle se muestra solo para ellos). */
+   *  relevante para asesores (el toggle se muestra solo para ellos). */
   inLeadRotation: boolean;
+  /** Ranura de ASESOR (0050): true = opera cartera comercial. Ortogonal al
+   *  rol — un admin/líder que sigue vendiendo la conserva. El rol 'vendedor'
+   *  la tiene siempre encendida y no es editable para él. */
+  isAdvisor: boolean;
 }
 
 export type UsersActionResult =

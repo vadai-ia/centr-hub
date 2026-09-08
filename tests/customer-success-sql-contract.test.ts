@@ -79,18 +79,29 @@ describe("contrato: Customer Success (TS ↔ SQL)", () => {
     );
   });
 
-  it("el invariante de 0039 sigue intacto: el selector de ASESOR sigue cableado a 'vendedor'", () => {
+  it("un Customer Success NO entra al selector de asesor", () => {
     const users = readFileSync(
       path.resolve(ROOT, "lib", "db", "users.ts"),
       "utf8",
     );
-    // listActiveRealVendors NO debe haber pasado a aceptar Customer Success:
-    // un CS nunca entra al round-robin, al mapeo de tags ni al selector de asesor.
+    // El selector de asesor pasó a filtrar por la ranura `is_advisor` (0050,
+    // ortogonal al rol) en lugar de `role='vendedor'`. Lo que NO cambió es la
+    // separación con Customer Success: la ranura de CS es su propia columna
+    // (`customer_success_membership_id`) y el rol CS nace SIN is_advisor, así
+    // que un CS sigue fuera del selector de asesor, del round-robin y del
+    // mapeo de tags salvo que el admin lo encienda explícitamente.
     const listVendors = users.slice(
       users.indexOf("export async function listActiveRealVendors"),
       users.indexOf("export async function listRotationEligibleVendors"),
     );
-    expect(listVendors).toContain('.eq("role", "vendedor")');
+    expect(listVendors).toContain('.eq("is_advisor", true)');
     expect(listVendors).not.toContain(CUSTOMER_SUCCESS_ROLE_KEY);
+
+    // Y el listado de CS sigue cableado a su rol (no a la ranura de asesor).
+    const listCs = users.slice(
+      users.indexOf("export async function listActiveCustomerSuccess"),
+      users.indexOf("export async function listRotationEligibleVendors"),
+    );
+    expect(listCs).toContain("CUSTOMER_SUCCESS_ROLE_KEY");
   });
 });

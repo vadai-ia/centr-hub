@@ -416,7 +416,7 @@ Una oportunidad de Post-venta tiene **dos personas**, no una: el **asesor** (`as
 
 **Un solo Customer Success por oportunidad es estructural**, no una regla a hacer cumplir: la ranura es UNA columna, así que asignar otro sustituye al anterior por construcción. Semántica exclusiva de Post-venta — en Venta y Outbound la columna queda NULL y el servicio rechaza la asignación (`not_postventa`).
 
-**El invariante de 0039 sigue intacto.** "Solo los vendedores son asesores" no cambió: `listActiveRealVendors`/`listRealVendorsForMapping` siguen filtrando `role='vendedor'`, y un Customer Success NUNCA entra al selector de asesor, al round-robin de leads, al mapeo de tags ni al mapeo de agentes de Whaapy. La ranura nueva tiene su propio catálogo, `listActiveCustomerSuccess`, cableado al rol `customer-success`.
+**Un Customer Success NO es un asesor.** Las dos ranuras son independientes: un CS NUNCA entra al selector de asesor, al round-robin de leads, al mapeo de tags ni al mapeo de agentes de Whaapy. El catálogo de CS es `listActiveCustomerSuccess`, cableado al rol `customer-success`; el de asesores filtra por `is_advisor`. (0050 cambió ese filtro, que antes era `role='vendedor'` — la separación con CS no cambió: el rol `customer-success` nace con la ranura de asesor apagada. Ver "La ranura de ASESOR es independiente del rol".)
 
 **Auto-asignación — vive en un trigger de BD a propósito.** Las opps de Post-venta nacen por cuatro vías y una es SQL puro (el trigger F1→F2 de 0027, al pagarse la orden); las otras tres son el webhook de Whaapy Post-venta, la reapertura de casos y el backfill. `tg_opportunity_default_customer_success` (BEFORE INSERT OR UPDATE OF funnel) las cubre todas con una sola regla, y **solo rellena cuando la columna viene NULL** — jamás pisa una asignación manual ni el CS que hereda una reapertura.
 
@@ -438,6 +438,27 @@ WHERE slug = 'centr';
 ### Paso operativo obligatorio (NO es código del repo)
 
 **Aplicar la migración 0047.** Además de crear la columna, el trigger y la función, la migración **siembra el ancla** con el Customer Success activo más antiguo de cada org (en Centr, Elías) y **backfillea todas las opps de Post-venta existentes** que no tengan CS. No requiere script aparte ni pasos manuales posteriores. Es idempotente y no destructivo: nunca pisa un ancla ya puesto ni un CS ya asignado.
+
+## La ranura de ASESOR es independiente del rol (migración 0050)
+
+Una persona tiene **dos ejes**, no uno: el **rol** dice qué ve y qué alcanza (`allowed_tabs` + `data_scope`, 0039), y la ranura **`memberships.is_advisor`** dice si **opera cartera comercial** (aparece en el selector de asesor, el mapeo de tags de Shopify, el mapeo de agentes de Whaapy, el desglose por vendedor del dashboard y las metas).
+
+**Por qué existe:** hasta 0050 ambas cosas eran la misma — todo el sistema listaba asesores con `role='vendedor'`. Ese atajo asumía que el rol es el puesto ÚNICO de la persona, y se rompe con el primer ascenso real: una vendedora con cartera viva que pasa a líder/admin y **sigue vendiendo**. Al cambiarle el rol desaparecía en silencio de todo lo anterior. La cartera nunca se perdió (las FK cuelgan de `membership.id`, que no cambia), pero dejaba de ser asignable y sus ventas nuevas dejaban de atribuírsele. Cubre también a una dirección que cotiza sin ser vendedora de planta.
+
+**Invariantes (trigger `memberships_sync_is_advisor`, BEFORE INSERT OR UPDATE OF role):**
+- **Vendedor ⇒ asesor.** El rol `vendedor` fuerza la ranura encendida; no es un toggle para él (la action rechaza apagarla y la UI no la ofrece).
+- **Salir de vendedor NO apaga la ranura.** Es exactamente el ascenso. Solo el admin la apaga a mano desde Admin → Usuarios, y la action lo **bloquea si quedan oportunidades activas** sin reasignar.
+- **Ningún otro rol la enciende solo.** Un Customer Success, un SDR o un admin nacen con `is_advisor = false` — 0047 sigue intacto: ser CS no es ser asesor (son dos ranuras distintas sobre la misma opp de Post-venta). Encenderla es una acción explícita.
+
+**Dónde se opera:** Admin → Usuarios → Editar usuario, casilla "Opera oportunidades como asesor" (visible solo para roles distintos de vendedor). El listado marca a esas personas con el badge "También asesor". El toggle de reparto round-robin ahora depende de la ranura, no del rol. Audit `user_advisor_slot_updated`.
+
+**Acoplamiento a vigilar:** las cuatro lecturas de asesores de [lib/db/users.ts](lib/db/users.ts) (`listActiveRealVendors`, `listRealVendorsForMapping`, `listRotationEligibleVendors`, `findActiveMembershipIdByWhaapyAgentId`) y el RPC `handoff_outbound_opportunity` filtran por `is_advisor`. **Al agregar cualquier lectura de "quién puede recibir u operar oportunidades", filtrar por la ranura — nunca por `role`.** Reintroducir el filtro por rol es invisible para `tsc` y para la suite mockeada; lo cubre el guard `tests/advisor-slot-contract.test.ts`.
+
+### Paso operativo obligatorio (NO es código del repo)
+
+**Aplicar la migración 0050.** Además de crear la columna, el trigger y re-CREAR el RPC de handoff, hace **dos backfills**: (a) todo `role='vendedor'` queda con la ranura encendida — cero cambio de comportamiento; (b) **quien YA tiene cartera queda como asesor aunque su rol ya no sea vendedor** (existen filas suyas en `opportunities`, `orders`, `contacts`, `goals` o `tag_mappings`). El backfill (b) es el correctivo de quien fue ascendido ANTES de la migración.
+
+Está **dirigido por datos a propósito: no nombra ninguna organización.** Corrige cada tenant donde la persona tenga historia (Centr y Rustr) y deja intacto aquel donde nunca ha operado — una membresía recién creada en un tenant nuevo (p. ej. Centr Colombia) NO se enciende sola. Es idempotente y no destructivo: no toca ni una fila de negocio, solo vuelve visible a quien ya era dueño de ella. Tras aplicarla, verificar en Admin → Usuarios que quien deba operar cartera trae el badge "También asesor", y en el Dashboard que reaparece en el desglose por vendedor.
 
 ## Admin → Integraciones (migración 0046)
 

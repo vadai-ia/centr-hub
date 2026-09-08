@@ -124,9 +124,20 @@ export async function getMembership(
 }
 
 /**
- * Lista vendedores REALES (no system users + activos) de la
- * organización. R10: el usuario sistema "Histórico" se excluye
- * de dropdowns de asignación manual.
+ * Lista ASESORES REALES (no system users + activos) de la organización:
+ * quienes operan cartera comercial. Alimenta el selector de asesor, la
+ * asignación manual y el handoff Outbound.
+ *
+ * Filtra por la ranura `is_advisor` (0050), NO por `role='vendedor'`. Son
+ * ejes distintos: el rol dice QUÉ VE la persona, la ranura dice SI OPERA
+ * CARTERA. Un vendedor siempre la tiene (la fuerza el trigger); un admin o
+ * líder que ascendió conservándola sigue siendo asesor elegible — antes
+ * desaparecía del selector al cambiarle el rol, perdiendo la atribución de
+ * sus ventas nuevas. Un Customer Success o un SDR NO la tienen por defecto
+ * (0047 intacto): encenderla es una acción explícita del admin.
+ *
+ * R10: el usuario sistema "Histórico" se excluye de dropdowns de asignación
+ * manual.
  */
 export async function listActiveRealVendors(
   organizationId: UUID,
@@ -137,7 +148,7 @@ export async function listActiveRealVendors(
     .select("*, profile:user_profiles!inner(*)")
     .eq("organization_id", organizationId)
     .eq("is_active", true)
-    .eq("role", "vendedor")
+    .eq("is_advisor", true)
     .eq("profile.is_system_user", false)
     .order("created_at", { ascending: true });
   if (error) throw error;
@@ -174,13 +185,13 @@ export async function listActiveCustomerSuccess(
 }
 
 /**
- * Vendedores ELEGIBLES para el reparto round-robin de leads por webhook
+ * Asesores ELEGIBLES para el reparto round-robin de leads por webhook
  * (0045). Es `listActiveRealVendors` + el filtro `in_lead_rotation = true`.
  *
  * IMPORTANTE: úsala SOLO desde el round-robin (`pickRoundRobinAdvisor`). El
  * resto del sistema (selectores de asignación manual, mapeo de tags, etc.)
  * sigue usando `listActiveRealVendors` — el toggle NO debe restringir la
- * visibilidad/asignabilidad de un vendedor, solo su pertenencia a la rotación.
+ * visibilidad/asignabilidad de un asesor, solo su pertenencia a la rotación.
  */
 export async function listRotationEligibleVendors(
   organizationId: UUID,
@@ -191,7 +202,7 @@ export async function listRotationEligibleVendors(
     .select("*, profile:user_profiles!inner(*)")
     .eq("organization_id", organizationId)
     .eq("is_active", true)
-    .eq("role", "vendedor")
+    .eq("is_advisor", true)
     .eq("in_lead_rotation", true)
     .eq("profile.is_system_user", false)
     .order("created_at", { ascending: true });
@@ -200,11 +211,11 @@ export async function listRotationEligibleVendors(
 }
 
 /**
- * Resuelve el membership (vendedor activo) mapeado a un `whaapy_agent_id`.
+ * Resuelve el membership (asesor activo) mapeado a un `whaapy_agent_id`.
  * Inverso de `resolveWhaapyAgentIdForMembership` — usado por el inbound de
  * Whaapy para asignar el asesor de un contacto nuevo desde su agente. Devuelve
- * el `membership.id` o null si el agente no está mapeado a ningún vendedor
- * activo. Ver CLAUDE.md "Sincronización agente↔Whaapy".
+ * el `membership.id` o null si el agente no está mapeado a ningún asesor
+ * activo (`is_advisor`, 0050). Ver CLAUDE.md "Sincronización agente↔Whaapy".
  */
 export async function findActiveMembershipIdByWhaapyAgentId(
   organizationId: UUID,
@@ -217,12 +228,35 @@ export async function findActiveMembershipIdByWhaapyAgentId(
     .eq("organization_id", organizationId)
     .eq("whaapy_agent_id", whaapyAgentId)
     .eq("is_active", true)
-    .eq("role", "vendedor")
+    .eq("is_advisor", true)
     .order("created_at", { ascending: true })
     .limit(1)
     .maybeSingle();
   if (error) throw error;
   return (data?.id as UUID | undefined) ?? null;
+}
+
+/**
+ * Enciende/apaga la ranura de ASESOR de un membership (admin, 0050).
+ *
+ * Apagarla NO reasigna ni borra nada: la cartera existente sigue apuntando a
+ * esta membresía (las FK cuelgan de `membership.id`). Solo deja de ofrecerse
+ * en los selectores de asignación nueva. Para vaciar la cartera hay que
+ * reasignar explícitamente (flujo de desactivación en Admin → Usuarios).
+ */
+export async function setMembershipIsAdvisor(
+  membershipId: UUID,
+  isAdvisor: boolean,
+): Promise<MembershipRow> {
+  const supabase = getSupabaseAdminClient();
+  const { data, error } = await supabase
+    .from("memberships")
+    .update({ is_advisor: isAdvisor })
+    .eq("id", membershipId)
+    .select("*")
+    .single();
+  if (error) throw error;
+  return data;
 }
 
 /** Setea el flag de pertenencia a la rotación de un membership (admin, 0045). */
@@ -242,11 +276,14 @@ export async function setMembershipInLeadRotation(
 }
 
 /**
- * Lista vendedores REALES para el mapeo de tags (M7.2, Bloque 5).
- * A diferencia de `listActiveRealVendors`, INCLUYE vendedores
- * desactivados (no filtra por `is_active`) — un mapeo histórico a un
- * vendedor que ya no opera sigue siendo válido para atribución. R10:
- * el usuario sistema "Histórico" SIEMPRE se excluye (`is_system_user`).
+ * Lista ASESORES REALES para el mapeo de tags de Shopify (M7.2, Bloque 5) y
+ * para el desglose por vendedor / las metas del Dashboard.
+ *
+ * A diferencia de `listActiveRealVendors`, INCLUYE asesores desactivados (no
+ * filtra por `is_active`) — un mapeo histórico a alguien que ya no opera sigue
+ * siendo válido para atribución. Filtra por `is_advisor` (0050), no por rol:
+ * la tag de Shopify de una líder que ascendió a admin debe seguir mapeada y
+ * atribuyendo. R10: el usuario sistema "Histórico" SIEMPRE se excluye.
  */
 export async function listRealVendorsForMapping(
   organizationId: UUID,
@@ -256,7 +293,7 @@ export async function listRealVendorsForMapping(
     .from("memberships")
     .select("*, profile:user_profiles!inner(*)")
     .eq("organization_id", organizationId)
-    .eq("role", "vendedor")
+    .eq("is_advisor", true)
     .eq("profile.is_system_user", false)
     .order("created_at", { ascending: true });
   if (error) throw error;

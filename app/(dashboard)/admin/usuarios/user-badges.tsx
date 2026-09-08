@@ -22,6 +22,20 @@ export function RoleBadge({ role, label }: { role: string; label: string }) {
   );
 }
 
+/**
+ * Badge de la ranura de ASESOR (0050). Se pinta SOLO cuando el rol no es
+ * 'vendedor' — ahí la ranura es implícita y el RoleBadge ya lo dice. Su razón
+ * de ser es hacer visible el caso que antes no existía: el admin/líder (o la
+ * dirección) que además opera cartera comercial.
+ */
+export function AdvisorBadge() {
+  return (
+    <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
+      También asesor
+    </span>
+  );
+}
+
 export function StateBadge({ active }: { active: boolean }) {
   return (
     <span

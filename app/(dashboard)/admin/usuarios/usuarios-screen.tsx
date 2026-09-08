@@ -10,7 +10,7 @@ import { UserEditModal } from "./user-edit-modal";
 import { InviteUserModal } from "./invite-vendor-modal";
 import { LinkLoginModal } from "./link-login-modal";
 import { DeactivateModal } from "./deactivate-modal";
-import { RoleBadge, StateBadge, LoginBadge } from "./user-badges";
+import { AdvisorBadge, RoleBadge, StateBadge, LoginBadge } from "./user-badges";
 
 interface Props {
   initialUsers: ManagedUserView[];
@@ -155,6 +155,7 @@ export function UsuariosScreen({ initialUsers, assignableRoles }: Props) {
 
             <div className="flex flex-wrap items-center gap-2">
               <RoleBadge role={u.role} label={u.roleLabel} />
+              {u.isAdvisor && u.role !== "vendedor" && <AdvisorBadge />}
               <StateBadge active={u.isActive} />
               <LoginBadge status={u.loginStatus} />
               {u.loginStatus === "placeholder" && (

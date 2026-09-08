@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import {
+  updateUserAdvisorAction,
   updateUserEmailAction,
   updateUserProfileAction,
   updateUserRoleAction,
@@ -19,10 +20,15 @@ interface Props {
 const HEX = /^#[0-9A-Fa-f]{6}$/;
 
 /**
- * Modal de edición de usuario (M9.2, Block 1): nombre, color (para el
- * pipeline) y rol (admin↔vendedor). El rol se deshabilita para el
- * propio admin y para superadmin. Guarda perfil y rol en acciones
- * separadas; los guardrails (último admin, auto-rol) viven en backend.
+ * Modal de edición de usuario (M9.2, Block 1): nombre, correo, color (para el
+ * pipeline), rol y las dos ranuras operativas (asesor y rotación de leads). El
+ * rol se deshabilita para el propio admin y para superadmin. Guarda cada cosa
+ * en acciones separadas; los guardrails (último admin, auto-rol, cartera viva)
+ * viven en backend.
+ *
+ * ORDEN IMPORTANTE al guardar: el rol va PRIMERO, porque pasar a 'vendedor'
+ * enciende la ranura de asesor en BD (trigger, 0050). Los toggles de asesor y
+ * rotación se evalúan después contra el estado ya persistido.
  */
 export function UserEditModal({ open, user, assignableRoles, onClose, onSaved }: Props) {
   const [fullName, setFullName] = useState("");
@@ -30,6 +36,7 @@ export function UserEditModal({ open, user, assignableRoles, onClose, onSaved }:
   const [color, setColor] = useState("#6B7280");
   const [role, setRole] = useState<string>("vendedor");
   const [inRotation, setInRotation] = useState(true);
+  const [isAdvisor, setIsAdvisor] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -41,6 +48,7 @@ export function UserEditModal({ open, user, assignableRoles, onClose, onSaved }:
     setColor(HEX.test(user.color) ? user.color : "#6B7280");
     setRole(user.role);
     setInRotation(user.inLeadRotation);
+    setIsAdvisor(user.isAdvisor);
     setError(null);
     setSubmitting(false);
   }, [open, user]);
@@ -105,8 +113,23 @@ export function UserEditModal({ open, user, assignableRoles, onClose, onSaved }:
       latest = res.users;
     }
 
-    // Toggle de rotación (solo vendedores). Se aplica según el rol PERSISTIDO.
-    if (user.role === "vendedor" && inRotation !== user.inLeadRotation) {
+    // Ranura de asesor (0050). El rol 'vendedor' la tiene siempre encendida y
+    // no la ofrece la UI, así que aquí solo llegan los demás roles.
+    if (user.role !== "vendedor" && isAdvisor !== user.isAdvisor) {
+      const res = await updateUserAdvisorAction({
+        membershipId: user.membershipId,
+        isAdvisor,
+      });
+      if (!res.ok) {
+        setSubmitting(false);
+        setError(res.message);
+        return;
+      }
+      latest = res.users;
+    }
+
+    // Toggle de rotación (solo asesores). Se aplica según el estado PERSISTIDO.
+    if (user.isAdvisor && inRotation !== user.inLeadRotation) {
       const res = await updateUserRotationAction({
         membershipId: user.membershipId,
         inRotation,
@@ -250,7 +273,33 @@ export function UserEditModal({ open, user, assignableRoles, onClose, onSaved }:
             )}
           </label>
 
-          {user.role === "vendedor" && (
+          {user.role !== "vendedor" && (
+            <div className="rounded-md border border-gray-200 dark:border-gray-700 p-3">
+              <label className="flex items-start gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={isAdvisor}
+                  onChange={(e) => setIsAdvisor(e.target.checked)}
+                  disabled={submitting}
+                  className="mt-0.5 h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                />
+                <span className="text-sm">
+                  <span className="font-medium text-gray-900 dark:text-gray-100">
+                    Opera oportunidades como asesor
+                  </span>
+                  <span className="block text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                    Actívalo para quien vende además de su rol (por ejemplo una
+                    líder que ascendió y conserva su cartera, o una dirección
+                    que cotiza). Aparece en el selector de asesor, en el mapeo
+                    de tags de Shopify, en el desglose del dashboard y en las
+                    metas. Los vendedores lo tienen siempre activo.
+                  </span>
+                </span>
+              </label>
+            </div>
+          )}
+
+          {user.isAdvisor && (
             <div className="rounded-md border border-gray-200 dark:border-gray-700 p-3">
               <label className="flex items-start gap-2 cursor-pointer">
                 <input

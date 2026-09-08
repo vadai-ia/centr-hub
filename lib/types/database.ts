@@ -97,8 +97,13 @@ export interface MembershipRow {
   is_active: boolean;
   whaapy_agent_id: string | null;
   /** Round-robin de leads por webhook (0045): true = en la rotación. Solo
-   *  aplica a vendedores; default true. Ver lib/services/lead-advisor-assignment. */
+   *  aplica a asesores; default true. Ver lib/services/lead-advisor-assignment. */
   in_lead_rotation: boolean;
+  /** Ranura de ASESOR (0050) — ORTOGONAL al rol: true = opera cartera
+   *  comercial (selector de asesor, mapeo de tags, agentes de Whaapy,
+   *  desglose del dashboard, metas). El rol 'vendedor' la fuerza a true;
+   *  salir de vendedor NO la apaga (el ascenso conserva la cartera). */
+  is_advisor: boolean;
   created_at: ISODateString;
   updated_at: ISODateString;
 }
@@ -582,7 +587,16 @@ export interface Database {
       user_profiles: { Row: UserProfileRow; Insert: Insertable<UserProfileRow>; Update: Updatable<UserProfileRow> };
       // in_lead_rotation tiene DEFAULT true en SQL (0045) → opcional en Insert
       // para no romper los callers de createMembership (ERRORES.md "Insertable").
-      memberships: { Row: MembershipRow; Insert: Omit<Insertable<MembershipRow>, "in_lead_rotation"> & Partial<Pick<MembershipRow, "in_lead_rotation">>; Update: Updatable<MembershipRow> };
+      memberships: {
+        Row: MembershipRow;
+        // in_lead_rotation (0045) e is_advisor (0050) son NOT NULL con DEFAULT
+        // en BD → opcionales en Insert. is_advisor además la fuerza el trigger
+        // `memberships_sync_is_advisor` cuando role='vendedor', así que ningún
+        // caller necesita pasarla al crear un vendedor.
+        Insert: Omit<Insertable<MembershipRow>, "in_lead_rotation" | "is_advisor"> &
+          Partial<Pick<MembershipRow, "in_lead_rotation" | "is_advisor">>;
+        Update: Updatable<MembershipRow>;
+      };
       roles: { Row: RoleRow; Insert: Insertable<RoleRow>; Update: Updatable<RoleRow> };
       contacts: {
         Row: ContactRow;
