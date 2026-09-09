@@ -8,6 +8,7 @@ import { computeDashboardData } from "@/lib/services/dashboard-metrics";
 import {
   PERIOD_PRESETS,
   resolveCustomPeriod,
+  resolveMonthPeriod,
   resolvePresetPeriod,
   type ResolvedPeriod,
 } from "@/lib/time/period";
@@ -44,9 +45,18 @@ export interface DashboardLoadErr {
 export type DashboardLoadResult = DashboardLoadOk | DashboardLoadErr;
 
 const filtersSchema = z.object({
-  preset: z.enum([...PERIOD_PRESETS, "custom"] as [string, ...string[]]),
+  // "month" (M2v2 #1) es un ATAJO sobre el mismo motor de periodos: resuelve a
+  // un rango 1°→último día del mes en MX. Existe porque el reporte que la
+  // dirección pide es mensual, y armarlo con el rango personalizado obliga a
+  // recordar cuántos días trae cada mes.
+  preset: z.enum([...PERIOD_PRESETS, "custom", "month"] as [string, ...string[]]),
   customFrom: z.string().nullable().optional(),
   customTo: z.string().nullable().optional(),
+  // Mes elegido (`yyyy-MM`) — solo cuando preset === "month". El FORMATO no se
+  // valida aquí a propósito: `resolveMonthPeriod` ya devuelve null ante una
+  // clave inválida, así que la regla vive en un solo lugar (el módulo de
+  // periodos, que además la evalúa en MX) en vez de duplicada en un regex.
+  month: z.string().nullable().optional(),
   // "" → todos; "unassigned" → sin asignar; uuid → asesor (solo admin).
   advisor: z.string().optional(),
   // Corte por canal (F4). Disponible a cualquier rol (eje ortogonal al asesor).
@@ -63,6 +73,12 @@ function resolvePeriod(
     const res = resolveCustomPeriod(input.customFrom, input.customTo);
     if (!res.ok) return { ok: false };
     return { ok: true, period: res.period };
+  }
+  if (input.preset === "month") {
+    if (!input.month) return { ok: false };
+    const period = resolveMonthPeriod(input.month);
+    if (!period) return { ok: false };
+    return { ok: true, period };
   }
   return { ok: true, period: resolvePresetPeriod(input.preset as never) };
 }
@@ -124,6 +140,7 @@ export async function loadDashboardAction(raw: unknown): Promise<DashboardLoadRe
       preset: input.preset as DashboardFiltersState["preset"],
       customFrom: input.customFrom ?? null,
       customTo: input.customTo ?? null,
+      month: input.month ?? null,
       advisorMembershipId:
         isAdmin && input.advisor && input.advisor !== "" && input.advisor !== "unassigned"
           ? (input.advisor as UUID)

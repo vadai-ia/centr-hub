@@ -82,6 +82,30 @@ export function currentMonthKey(): string {
 }
 
 /**
+ * Opciones de mes/año para el selector del Dashboard, evaluadas en MX.
+ * Devuelve los últimos `years` años (incluido el corriente) y, para el año
+ * corriente, SOLO los meses ya iniciados: ofrecer un mes futuro produciría
+ * un tablero en ceros indistinguible de un bug.
+ *
+ * Vive aquí y no en el componente porque "qué mes es hoy" debe resolverse en
+ * America/Mexico_City como todo lo demás — con `new Date()` en el navegador,
+ * alguien en otra zona vería un mes de más o de menos (CLAUDE.md "Timezone").
+ */
+export function monthSelectorOptions(years = 5): {
+  years: number[];
+  currentYear: number;
+  currentMonth: number;
+} {
+  const now = nowInTz();
+  const currentYear = now.year;
+  return {
+    years: Array.from({ length: years }, (_, i) => currentYear - i),
+    currentYear,
+    currentMonth: now.month,
+  };
+}
+
+/**
  * Periodo del MES ANTERIOR en MX — el que acaba de cerrar. Lo usa el cron de
  * snapshot mensual (corre el día 1): al dispararse, "el mes pasado" es el
  * periodo a congelar. Maneja el cruce de año (1-ene → diciembre previo).

@@ -3,7 +3,9 @@ import { DateTime, Settings } from "luxon";
 import {
   monthKeyInTz,
   monthKeysInPeriod,
+  monthSelectorOptions,
   resolveCustomPeriod,
+  resolveMonthPeriod,
   resolvePresetPeriod,
 } from "@/lib/time/period";
 
@@ -77,5 +79,58 @@ describe("monthKeysInPeriod", () => {
     expect(res.ok).toBe(true);
     if (!res.ok) return;
     expect(monthKeysInPeriod(res.period)).toEqual(["2026-03", "2026-04", "2026-05"]);
+  });
+});
+
+describe("selector de mes/año del Dashboard (M2v2 #1)", () => {
+  it("resolveMonthPeriod cubre el mes completo, anclado en MX", () => {
+    // Febrero 2026 (28 días): el punto del atajo es no tener que recordar
+    // cuántos días trae cada mes al armarlo a mano con el rango custom.
+    const p = resolveMonthPeriod("2026-02");
+    expect(p).not.toBeNull();
+    expect(p!.startLabel).toBe("2026-02-01");
+    expect(p!.endLabel).toBe("2026-02-28");
+  });
+
+  it("resolveMonthPeriod respeta los años bisiestos", () => {
+    expect(resolveMonthPeriod("2028-02")!.endLabel).toBe("2028-02-29");
+  });
+
+  it("resolveMonthPeriod rechaza una clave inválida (única validación del formato)", () => {
+    // La action NO valida el formato con un regex propio: delega aquí, así
+    // que este null es lo que produce el error "periodo inválido".
+    expect(resolveMonthPeriod("2026-13")).toBeNull();
+    expect(resolveMonthPeriod("junio-2026")).toBeNull();
+    expect(resolveMonthPeriod("2026")).toBeNull();
+  });
+
+  it("el mes de un periodo cruza el año sin perder el diciembre", () => {
+    const p = resolveMonthPeriod("2025-12");
+    expect(p!.startLabel).toBe("2025-12-01");
+    expect(p!.endLabel).toBe("2025-12-31");
+  });
+
+  describe("monthSelectorOptions", () => {
+    it("no ofrece meses futuros del año en curso (evita un tablero en ceros)", () => {
+      freezeAt("2026-09-08T18:00:00.000Z"); // 12:00 MX del 8-sep-2026
+      const { currentYear, currentMonth } = monthSelectorOptions();
+      expect(currentYear).toBe(2026);
+      expect(currentMonth).toBe(9); // septiembre disponible; octubre no
+    });
+
+    it("resuelve el mes en curso en MX, no en UTC", () => {
+      // 2026-10-01 03:00 UTC = 2026-09-30 21:00 MX → sigue siendo septiembre.
+      // Con `new Date()` del navegador en UTC saldría octubre y el selector
+      // ofrecería un mes que aún no empieza.
+      freezeAt("2026-10-01T03:00:00.000Z");
+      const { currentMonth, currentYear } = monthSelectorOptions();
+      expect(currentMonth).toBe(9);
+      expect(currentYear).toBe(2026);
+    });
+
+    it("lista el año corriente y los anteriores, del más reciente al más viejo", () => {
+      freezeAt("2026-09-08T18:00:00.000Z");
+      expect(monthSelectorOptions(3).years).toEqual([2026, 2025, 2024]);
+    });
   });
 });

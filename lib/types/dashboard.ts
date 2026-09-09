@@ -123,11 +123,13 @@ export function channelOutboundValue(channel: Channel): boolean | null {
 }
 
 export interface DashboardFiltersState {
-  /** Preset activo, o "custom" si el usuario eligió un rango manual. */
-  preset: PeriodPreset | "custom";
+  /** Preset activo, "custom" (rango manual) o "month" (mes/año concreto). */
+  preset: PeriodPreset | "custom" | "month";
   /** Solo presente cuando preset === "custom". */
   customFrom: string | null;
   customTo: string | null;
+  /** Mes elegido (`yyyy-MM`) — solo cuando preset === "month". */
+  month: string | null;
   /** Solo admin: membership del asesor filtrado, null = todos. */
   advisorMembershipId: UUID | null;
   /** Canal activo (Todo/Outbound/Inbound). */

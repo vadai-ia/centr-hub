@@ -41,6 +41,7 @@ export function DashboardScreen({
     preset: initial.filters.preset,
     customFrom: initial.filters.customFrom,
     customTo: initial.filters.customTo,
+    month: initial.filters.month,
     advisor: initial.filters.advisorMembershipId ?? "",
     channel: initial.filters.channel ?? "all",
   }));
@@ -91,16 +92,17 @@ export function DashboardScreen({
     [pushToast],
   );
 
-  // Cambio de preset. "Personalizado" solo muestra los inputs (sin
-  // recalcular); el recálculo ocurre al "Aplicar" (#6). Cambiar a un
-  // preset rápido limpia el rango custom.
+  // Cambio de preset. "Personalizado" y "Mes" solo muestran sus controles
+  // (sin recalcular); el recálculo ocurre al "Aplicar" (#6). Cambiar a un
+  // preset rápido limpia tanto el rango custom como el mes elegido — si no,
+  // quedaría un filtro invisible activo al volver a ese preset.
   function onPresetChange(preset: DashboardFiltersInput["preset"]) {
-    if (preset === "custom") {
+    if (preset === "custom" || preset === "month") {
       setCustomError(null);
-      setFilters((f) => ({ ...f, preset: "custom" }));
+      setFilters((f) => ({ ...f, preset }));
       return;
     }
-    fetchWith({ ...filters, preset, customFrom: null, customTo: null });
+    fetchWith({ ...filters, preset, customFrom: null, customTo: null, month: null });
   }
 
   return (
@@ -124,7 +126,10 @@ export function DashboardScreen({
           customError={customError}
           onPresetChange={onPresetChange}
           onCustomApply={(customFrom, customTo) =>
-            fetchWith({ ...filters, preset: "custom", customFrom, customTo })
+            fetchWith({ ...filters, preset: "custom", customFrom, customTo, month: null })
+          }
+          onMonthApply={(month) =>
+            fetchWith({ ...filters, preset: "month", month, customFrom: null, customTo: null })
           }
           onAdvisorChange={(advisor) => fetchWith({ ...filters, advisor })}
           onChannelChange={(channel) => fetchWith({ ...filters, channel })}

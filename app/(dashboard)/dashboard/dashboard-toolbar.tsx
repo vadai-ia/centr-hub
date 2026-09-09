@@ -1,6 +1,12 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { AdvisorOption, DashboardFiltersInput } from "@/lib/actions/dashboard";
+import { monthSelectorOptions } from "@/lib/time/period";
+
+const MONTH_NAMES = [
+  "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+  "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre",
+] as const;
 
 const PRESET_BUTTONS: Array<{ value: DashboardFiltersInput["preset"]; label: string }> = [
   { value: "today", label: "Hoy" },
@@ -19,6 +25,8 @@ interface Props {
   onPresetChange: (p: DashboardFiltersInput["preset"]) => void;
   /** Aplica el rango personalizado (botón "Aplicar" — M8.2 ajuste #6). */
   onCustomApply: (from: string, to: string) => void;
+  /** Aplica un mes concreto (`yyyy-MM`) — atajo del reporte mensual. */
+  onMonthApply: (month: string) => void;
   onAdvisorChange: (advisor: string) => void;
   /** Corte por canal (F4) — disponible a cualquier rol. */
   onChannelChange: (channel: NonNullable<DashboardFiltersInput["channel"]>) => void;
@@ -46,12 +54,34 @@ export function DashboardToolbar({
   customError,
   onPresetChange,
   onCustomApply,
+  onMonthApply,
   onAdvisorChange,
   onChannelChange,
   onExport,
 }: Props) {
   const isCustom = filters.preset === "custom";
+  const isMonth = filters.preset === "month";
   const activeChannel = filters.channel ?? "all";
+
+  // Mes/año: el "hoy" se resuelve en MX (no con `new Date()` del navegador),
+  // así que el mes ofrecido por defecto es el correcto sin importar la zona
+  // horaria de quien abre el dashboard.
+  const { years, currentYear, currentMonth } = useMemo(() => monthSelectorOptions(), []);
+  const [draftYear, setDraftYear] = useState<number>(currentYear);
+  const [draftMonth, setDraftMonth] = useState<number>(currentMonth);
+  useEffect(() => {
+    if (!filters.month) return;
+    const [y, m] = filters.month.split("-").map(Number);
+    if (y && m) {
+      setDraftYear(y);
+      setDraftMonth(m);
+    }
+  }, [filters.month]);
+
+  // En el año corriente no se ofrecen meses futuros: darían un tablero en
+  // ceros indistinguible de un bug.
+  const monthsAvailable = draftYear === currentYear ? currentMonth : 12;
+  const effectiveMonth = Math.min(draftMonth, monthsAvailable);
 
   // Draft local de las fechas: el dashboard NO se recalcula hasta "Aplicar".
   const [draftFrom, setDraftFrom] = useState(filters.customFrom ?? "");
@@ -87,6 +117,7 @@ export function DashboardToolbar({
         {/* Periodo */}
         <div className="flex flex-wrap items-center gap-1.5">
           {PRESET_BUTTONS.map((b) => presetBtn(b.value, b.label))}
+          {presetBtn("month", "Mes")}
           {presetBtn("custom", "Personalizado")}
         </div>
 
@@ -153,6 +184,48 @@ export function DashboardToolbar({
           </button>
         </div>
       </div>
+
+      {isMonth ? (
+        <div className="flex flex-wrap items-end gap-2 border-t border-gray-100 dark:border-gray-700/60 pt-3">
+          <label className="flex flex-col text-xs text-gray-500 dark:text-gray-400">
+            Mes
+            <select
+              value={effectiveMonth}
+              onChange={(e) => setDraftMonth(Number(e.target.value))}
+              className="mt-0.5 rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-2 py-1 text-sm text-gray-800 dark:text-gray-100"
+            >
+              {MONTH_NAMES.slice(0, monthsAvailable).map((name, i) => (
+                <option key={name} value={i + 1}>
+                  {name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex flex-col text-xs text-gray-500 dark:text-gray-400">
+            Año
+            <select
+              value={draftYear}
+              onChange={(e) => setDraftYear(Number(e.target.value))}
+              className="mt-0.5 rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-2 py-1 text-sm text-gray-800 dark:text-gray-100"
+            >
+              {years.map((y) => (
+                <option key={y} value={y}>
+                  {y}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button
+            type="button"
+            onClick={() =>
+              onMonthApply(`${draftYear}-${String(effectiveMonth).padStart(2, "0")}`)
+            }
+            className="rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700"
+          >
+            Aplicar
+          </button>
+        </div>
+      ) : null}
 
       {isCustom ? (
         <div className="flex flex-wrap items-end gap-2 border-t border-gray-100 dark:border-gray-700/60 pt-3">
