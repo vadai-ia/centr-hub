@@ -1,5 +1,6 @@
 import "server-only";
 import { getTenantScopedClient } from "@/lib/db/client";
+import { fetchAllPaged } from "@/lib/db/paginate";
 import { updateContact } from "@/lib/db/contacts";
 import type { Json, UUID } from "@/lib/types/database";
 
@@ -13,6 +14,11 @@ import type { Json, UUID } from "@/lib/types/database";
  * llevan" suma contactos + órdenes distintos por tag normalizada.
  */
 
+// Circuit breaker del barrido completo. NO es un `.limit()`: el paginado de
+// `fetchAllPaged` es lo que garantiza traer TODAS las filas — un `.limit()`
+// mayor a 1000 lo recorta el servidor en silencio (ver lib/db/paginate.ts).
+// Con el barrido truncado, el conteo de entidades por tag salía corto y el
+// re-proceso de atribución dejaba fuera pedidos y contactos sin avisar.
 const SCAN_LIMIT = 50000;
 
 function normalizeTag(raw: string): string {
@@ -36,13 +42,15 @@ export async function aggregateDetectedTags(): Promise<DetectedTagAggregate[]> {
   const agg = new Map<string, { original: string; count: number }>();
 
   for (const table of ["contacts", "orders"] as const) {
-    const { data, error } = await supabase
-      .from(table)
-      .select("shopify_tags")
-      .eq("organization_id", organizationId)
-      .limit(SCAN_LIMIT);
-    if (error) throw error;
-    for (const row of (data ?? []) as Array<{ shopify_tags: string[] | null }>) {
+    const data = await fetchAllPaged<{ shopify_tags: string[] | null }>(
+      () =>
+        supabase
+          .from(table)
+          .select("shopify_tags")
+          .eq("organization_id", organizationId),
+      SCAN_LIMIT,
+    );
+    for (const row of data) {
       const tags = row.shopify_tags ?? [];
       const seen = new Set<string>();
       for (const raw of tags) {
@@ -71,17 +79,18 @@ export async function findOrdersWithTag(
   normalizedTag: string,
 ): Promise<Array<{ id: UUID; opportunity_id: UUID | null }>> {
   const { supabase, organizationId } = getTenantScopedClient();
-  const { data, error } = await supabase
-    .from("orders")
-    .select("id, opportunity_id, shopify_tags")
-    .eq("organization_id", organizationId)
-    .limit(SCAN_LIMIT);
-  if (error) throw error;
-  const rows = (data ?? []) as Array<{
+  const rows = await fetchAllPaged<{
     id: UUID;
     opportunity_id: UUID | null;
     shopify_tags: string[] | null;
-  }>;
+  }>(
+    () =>
+      supabase
+        .from("orders")
+        .select("id, opportunity_id, shopify_tags")
+        .eq("organization_id", organizationId),
+    SCAN_LIMIT,
+  );
   return rows
     .filter((r) => (r.shopify_tags ?? []).some((t) => normalizeTag(t) === normalizedTag))
     .map((r) => ({ id: r.id, opportunity_id: r.opportunity_id }));
@@ -141,15 +150,15 @@ export async function findContactsWithTag(
   normalizedTag: string,
 ): Promise<ContactForReattribution[]> {
   const { supabase, organizationId } = getTenantScopedClient();
-  const { data, error } = await supabase
-    .from("contacts")
-    .select("id, assigned_advisor_id, field_metadata, last_whaapy_activity_at, last_modified_at, created_at, shopify_tags")
-    .eq("organization_id", organizationId)
-    .limit(SCAN_LIMIT);
-  if (error) throw error;
-  return ((data ?? []) as ContactForReattribution[]).filter((c) =>
-    tagsInclude(c.shopify_tags, normalizedTag),
+  const rows = await fetchAllPaged<ContactForReattribution>(
+    () =>
+      supabase
+        .from("contacts")
+        .select("id, assigned_advisor_id, field_metadata, last_whaapy_activity_at, last_modified_at, created_at, shopify_tags")
+        .eq("organization_id", organizationId),
+    SCAN_LIMIT,
   );
+  return rows.filter((c) => tagsInclude(c.shopify_tags, normalizedTag));
 }
 
 /** Timestamp que representa "cuándo la tag pasó a ser fuente actual":

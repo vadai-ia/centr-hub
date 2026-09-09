@@ -38,6 +38,40 @@ interface AuthInfo {
   lookupError: string | null;
 }
 
+/**
+ * Trae TODAS las filas de una tabla tenant-scoped, paginando de mil en mil.
+ *
+ * PostgREST aplica un tope por defecto de 1000 filas: una query sin paginar
+ * devuelve una MUESTRA sin avisar — no hay error, no hay truncamiento visible,
+ * solo un array corto. En un diagnóstico de atribución eso es peor que no
+ * medir: los totales sumaban justo 1000 y los conteos por vendedor parecían
+ * ENCOGER entre corridas, porque cada oportunidad nueva empujaba a otra fuera
+ * de la muestra.
+ *
+ * Corta cuando una página vuelve incompleta (última página) o vacía.
+ */
+async function fetchAllRows(
+  supabase: ReturnType<typeof getTenantScopedClient>["supabase"],
+  table: "opportunities" | "contacts" | "orders",
+  columns: string,
+  organizationId: string,
+): Promise<Array<Record<string, unknown>>> {
+  const PAGE = 1000;
+  const all: Array<Record<string, unknown>> = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await supabase
+      .from(table)
+      .select(columns)
+      .eq("organization_id", organizationId)
+      .range(from, from + PAGE - 1);
+    if (error) throw error;
+    const page = (data ?? []) as unknown as Array<Record<string, unknown>>;
+    all.push(...page);
+    if (page.length < PAGE) break;
+  }
+  return all;
+}
+
 async function loadAuthUsersByIds(userIds: string[]): Promise<Map<string, AuthInfo>> {
   // listUsers() (bulk) falla con "Database error finding users" en este
   // entorno; resolvemos por getUserById que es targetado y evita el path bulk.
@@ -96,7 +130,7 @@ async function main() {
       const { data: memberships, error: mErr } = await supabase
         .from("memberships")
         .select(
-          "id, user_id, role, is_active, whaapy_agent_id, created_at, profile:user_profiles(full_name, is_system_user, color)",
+          "id, user_id, role, is_active, is_advisor, whaapy_agent_id, created_at, profile:user_profiles(full_name, is_system_user, color)",
         )
         .eq("organization_id", organizationId)
         .order("created_at", { ascending: true });
@@ -125,19 +159,31 @@ async function main() {
         .filter((t) => !t.mapped_membership_id)
         .map((t) => t.original_tag as string);
 
-      // 3) Conteos de atribución.
-      const { data: opps } = await supabase
-        .from("opportunities")
-        .select("id, assigned_advisor_id, funnel, cancelled_at, won_at, lost_at")
-        .eq("organization_id", organizationId);
-      const { data: contacts } = await supabase
-        .from("contacts")
-        .select("id, assigned_advisor_id")
-        .eq("organization_id", organizationId);
-      const { data: orders } = await supabase
-        .from("orders")
-        .select("id, assigned_advisor_id")
-        .eq("organization_id", organizationId);
+      // 3) Conteos de atribución. PAGINADOS a propósito: PostgREST corta en
+      // 1000 filas por defecto, y una sola query sin paginar devolvía una
+      // MUESTRA silenciosa, no el total. El síntoma era engañoso — los conteos
+      // sumaban exactamente 1000 y "atribuidas" parecía BAJAR entre corridas
+      // (en realidad las opps nuevas empujaban a otras fuera de la muestra).
+      // Un diagnóstico que miente es peor que no tenerlo: aquí se decide a
+      // quién se le atribuye la venta.
+      const opps = await fetchAllRows(
+        supabase,
+        "opportunities",
+        "id, assigned_advisor_id, funnel, cancelled_at, won_at, lost_at",
+        organizationId,
+      );
+      const contacts = await fetchAllRows(
+        supabase,
+        "contacts",
+        "id, assigned_advisor_id",
+        organizationId,
+      );
+      const orders = await fetchAllRows(
+        supabase,
+        "orders",
+        "id, assigned_advisor_id",
+        organizationId,
+      );
 
       const NULL_KEY = "__NULL__";
       const oppStats = new Map<string, { active: number; won: number; lost: number; cancelled: number }>();
@@ -178,6 +224,12 @@ async function main() {
 
         console.log(`• ${profile?.full_name ?? "(sin perfil)"}  [membership ${mid}]`);
         console.log(`    role=${m.role}  is_active=${m.is_active}  is_system_user=${profile?.is_system_user ?? "?"}  color=${profile?.color ?? "-"}`);
+        // Ranura de ASESOR (0050) — ortogonal al rol. Es la que decide si la
+        // persona aparece en el selector de asesor, el mapeo de tags, el
+        // desglose del dashboard y las metas. Se imprime junto al rol
+        // justamente porque ANTES se confundían: un `role=admin` con
+        // is_advisor=true es la líder que ascendió y conserva su cartera.
+        console.log(`    is_advisor=${m.is_advisor}${m.is_advisor && m.role !== "vendedor" ? "  (opera cartera además de su rol)" : ""}`);
         console.log(`    auth.user_id=${m.user_id}`);
         console.log(`    email=${auth?.email ?? "(no encontrado en auth)"}${auth?.lookupError ? `  [lookup error: ${auth.lookupError}]` : ""}`);
         console.log(`    provider=${auth?.provider ?? "-"}  providers=[${auth?.providers.join(",") ?? ""}]  identities=${auth?.identitiesCount ?? "?"}`);

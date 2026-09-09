@@ -1,5 +1,7 @@
 import "server-only";
 import { getTenantScopedClient } from "@/lib/db/client";
+import { fetchAllPaged as fetchAllPagedBase } from "@/lib/db/paginate";
+import type { RangeableQuery } from "@/lib/db/paginate";
 import type { UUID } from "@/lib/types/database";
 
 /**
@@ -12,9 +14,18 @@ import type { UUID } from "@/lib/types/database";
  * por vendedor (admin) necesita TODAS las filas con su asesor; reusar
  * la misma query para vista-vendedor evita duplicar caminos. Cap
  * defensivo de 50k filas como circuit breaker (patrón M5/M6).
+ *
+ * TODAS pasan por `fetchAllPaged` — ver el porqué en su doc. Una query
+ * suelta con `.limit(ROW_CAP)` NO trae 50k filas: el servidor corta antes
+ * y en silencio.
  */
 
 const ROW_CAP = 50000;
+
+/** Atajo local: todas las lecturas de este módulo comparten el mismo cap. */
+function fetchAllPaged<T>(build: () => RangeableQuery): Promise<T[]> {
+  return fetchAllPagedBase<T>(build, ROW_CAP);
+}
 
 // ------------------------------------------------------------
 // Filas crudas tipadas que devuelve cada query.
@@ -98,16 +109,15 @@ export async function listPaidOrdersInPeriod(
   endUtc: string,
 ): Promise<PaidOrderRow[]> {
   const { supabase, organizationId } = getTenantScopedClient();
-  const { data, error } = await supabase
-    .from("orders")
-    .select("assigned_advisor_id, is_outbound, total_amount, paid_at")
-    .eq("organization_id", organizationId)
-    .eq("financial_status", "paid")
-    .gte("paid_at", startUtc)
-    .lte("paid_at", endUtc)
-    .limit(ROW_CAP);
-  if (error) throw error;
-  return (data ?? []) as PaidOrderRow[];
+  return fetchAllPaged<PaidOrderRow>(() =>
+    supabase
+      .from("orders")
+      .select("assigned_advisor_id, is_outbound, total_amount, paid_at")
+      .eq("organization_id", organizationId)
+      .eq("financial_status", "paid")
+      .gte("paid_at", startUtc)
+      .lte("paid_at", endUtc),
+  );
 }
 
 /**
@@ -121,18 +131,17 @@ export async function listDraftOppsCreatedInPeriod(
   endUtc: string,
 ): Promise<AdvisorOnlyRow[]> {
   const { supabase, organizationId } = getTenantScopedClient();
-  const { data, error } = await supabase
-    .from("opportunities")
-    .select("assigned_advisor_id, is_outbound")
-    .eq("organization_id", organizationId)
-    .eq("funnel", "venta")
-    .is("cancelled_at", null)
-    .not("shopify_draft_order_id", "is", null)
-    .gte("effective_created_at", startUtc)
-    .lte("effective_created_at", endUtc)
-    .limit(ROW_CAP);
-  if (error) throw error;
-  return (data ?? []) as AdvisorOnlyRow[];
+  return fetchAllPaged<AdvisorOnlyRow>(() =>
+    supabase
+      .from("opportunities")
+      .select("assigned_advisor_id, is_outbound")
+      .eq("organization_id", organizationId)
+      .eq("funnel", "venta")
+      .is("cancelled_at", null)
+      .not("shopify_draft_order_id", "is", null)
+      .gte("effective_created_at", startUtc)
+      .lte("effective_created_at", endUtc),
+  );
 }
 
 /**
@@ -146,17 +155,16 @@ export async function listWonOppsInPeriod(
   endUtc: string,
 ): Promise<WonOppRow[]> {
   const { supabase, organizationId } = getTenantScopedClient();
-  const { data, error } = await supabase
-    .from("opportunities")
-    .select("assigned_advisor_id, is_outbound, effective_created_at, won_at, actual_amount, estimated_amount")
-    .eq("organization_id", organizationId)
-    .eq("funnel", "venta")
-    .is("cancelled_at", null)
-    .gte("won_at", startUtc)
-    .lte("won_at", endUtc)
-    .limit(ROW_CAP);
-  if (error) throw error;
-  return (data ?? []) as WonOppRow[];
+  return fetchAllPaged<WonOppRow>(() =>
+    supabase
+      .from("opportunities")
+      .select("assigned_advisor_id, is_outbound, effective_created_at, won_at, actual_amount, estimated_amount")
+      .eq("organization_id", organizationId)
+      .eq("funnel", "venta")
+      .is("cancelled_at", null)
+      .gte("won_at", startUtc)
+      .lte("won_at", endUtc),
+  );
 }
 
 /**
@@ -178,18 +186,17 @@ export async function listLivePipelineOpps(
   endUtc: string,
 ): Promise<LivePipelineRow[]> {
   const { supabase, organizationId } = getTenantScopedClient();
-  const { data, error } = await supabase
-    .from("opportunities")
-    .select("assigned_advisor_id, is_outbound, stage_id, shopify_draft_order_id, actual_amount, estimated_amount")
-    .eq("organization_id", organizationId)
-    .eq("funnel", "venta")
-    .is("cancelled_at", null)
-    .is("won_at", null)
-    .gte("effective_created_at", startUtc)
-    .lte("effective_created_at", endUtc)
-    .limit(ROW_CAP);
-  if (error) throw error;
-  return (data ?? []) as LivePipelineRow[];
+  return fetchAllPaged<LivePipelineRow>(() =>
+    supabase
+      .from("opportunities")
+      .select("assigned_advisor_id, is_outbound, stage_id, shopify_draft_order_id, actual_amount, estimated_amount")
+      .eq("organization_id", organizationId)
+      .eq("funnel", "venta")
+      .is("cancelled_at", null)
+      .is("won_at", null)
+      .gte("effective_created_at", startUtc)
+      .lte("effective_created_at", endUtc),
+  );
 }
 
 /**
@@ -235,9 +242,23 @@ export async function listLivePipelineSnapshot(
       `assigned_advisor_id.not.is.null,effective_created_at.gte.${sinceUtc}`,
     );
   }
-  const { data, error } = await query.limit(ROW_CAP);
-  if (error) throw error;
-  return (data ?? []) as LivePipelineRow[];
+  return fetchAllPaged<LivePipelineRow>(() => {
+    let q = supabase
+      .from("opportunities")
+      .select(
+        "assigned_advisor_id, is_outbound, stage_id, shopify_draft_order_id, actual_amount, estimated_amount",
+      )
+      .eq("organization_id", organizationId)
+      .eq("funnel", "venta")
+      .is("cancelled_at", null)
+      .is("won_at", null);
+    if (sinceUtc) {
+      q = q.or(
+        `assigned_advisor_id.not.is.null,effective_created_at.gte.${sinceUtc}`,
+      );
+    }
+    return q;
+  });
 }
 
 /**
@@ -251,18 +272,18 @@ export async function listLostEntriesInPeriod(
   endUtc: string,
 ): Promise<LostEntryRow[]> {
   const { supabase, organizationId } = getTenantScopedClient();
-  const { data, error } = await supabase
-    .from("opportunity_stage_history")
-    .select(
-      "opportunity_id, opportunity:opportunities!inner(assigned_advisor_id, is_outbound, actual_amount, estimated_amount, loss_reason_id, cancelled_at)",
-    )
-    .eq("organization_id", organizationId)
-    .eq("to_stage_id", lostStageId)
-    .is("opportunity.cancelled_at", null)
-    .gte("effective_event_at", startUtc)
-    .lte("effective_event_at", endUtc)
-    .limit(ROW_CAP);
-  if (error) throw error;
+  const data = await fetchAllPaged<unknown>(() =>
+    supabase
+      .from("opportunity_stage_history")
+      .select(
+        "opportunity_id, opportunity:opportunities!inner(assigned_advisor_id, is_outbound, actual_amount, estimated_amount, loss_reason_id, cancelled_at)",
+      )
+      .eq("organization_id", organizationId)
+      .eq("to_stage_id", lostStageId)
+      .is("opportunity.cancelled_at", null)
+      .gte("effective_event_at", startUtc)
+      .lte("effective_event_at", endUtc),
+  );
   type Raw = {
     opportunity_id: UUID;
     opportunity: {
@@ -302,18 +323,18 @@ export async function listStageEntriesInPeriod(
 ): Promise<StageEntryRow[]> {
   if (stageIds.length === 0) return [];
   const { supabase, organizationId } = getTenantScopedClient();
-  const { data, error } = await supabase
-    .from("opportunity_stage_history")
-    .select(
-      "opportunity_id, to_stage_id, opportunity:opportunities!inner(assigned_advisor_id, is_outbound, cancelled_at)",
-    )
-    .eq("organization_id", organizationId)
-    .in("to_stage_id", stageIds)
-    .is("opportunity.cancelled_at", null)
-    .gte("effective_event_at", startUtc)
-    .lte("effective_event_at", endUtc)
-    .limit(ROW_CAP);
-  if (error) throw error;
+  const data = await fetchAllPaged<unknown>(() =>
+    supabase
+      .from("opportunity_stage_history")
+      .select(
+        "opportunity_id, to_stage_id, opportunity:opportunities!inner(assigned_advisor_id, is_outbound, cancelled_at)",
+      )
+      .eq("organization_id", organizationId)
+      .in("to_stage_id", stageIds)
+      .is("opportunity.cancelled_at", null)
+      .gte("effective_event_at", startUtc)
+      .lte("effective_event_at", endUtc),
+  );
   type Raw = {
     opportunity_id: UUID;
     to_stage_id: UUID;
@@ -342,14 +363,16 @@ export async function listFullHistoryForOpportunities(
   const out: HistoryStageRow[] = [];
   for (let i = 0; i < opportunityIds.length; i += CHUNK) {
     const chunk = opportunityIds.slice(i, i + CHUNK);
-    const { data, error } = await supabase
-      .from("opportunity_stage_history")
-      .select("opportunity_id, to_stage_id")
-      .eq("organization_id", organizationId)
-      .in("opportunity_id", chunk)
-      .limit(ROW_CAP);
-    if (error) throw error;
-    out.push(...((data ?? []) as HistoryStageRow[]));
+    // Cada chunk se pagina también: 300 opps pueden traer entre todas
+    // miles de filas de historial.
+    const page = await fetchAllPaged<HistoryStageRow>(() =>
+      supabase
+        .from("opportunity_stage_history")
+        .select("opportunity_id, to_stage_id")
+        .eq("organization_id", organizationId)
+        .in("opportunity_id", chunk),
+    );
+    out.push(...page);
   }
   return out;
 }
@@ -372,15 +395,14 @@ export async function listOrdersCreatedInPeriod(
   endUtc: string,
 ): Promise<CreatedOrderRow[]> {
   const { supabase, organizationId } = getTenantScopedClient();
-  const { data, error } = await supabase
-    .from("orders")
-    .select("assigned_advisor_id, is_outbound, shopify_created_at")
-    .eq("organization_id", organizationId)
-    .gte("shopify_created_at", startUtc)
-    .lte("shopify_created_at", endUtc)
-    .limit(ROW_CAP);
-  if (error) throw error;
-  return (data ?? []) as CreatedOrderRow[];
+  return fetchAllPaged<CreatedOrderRow>(() =>
+    supabase
+      .from("orders")
+      .select("assigned_advisor_id, is_outbound, shopify_created_at")
+      .eq("organization_id", organizationId)
+      .gte("shopify_created_at", startUtc)
+      .lte("shopify_created_at", endUtc),
+  );
 }
 
 /** Post-venta KPI 2 — snapshot de opps en la etapa "Caso problemático". */
@@ -388,16 +410,15 @@ export async function listProblematicCaseOpps(
   problematicStageId: UUID,
 ): Promise<AdvisorOnlyRow[]> {
   const { supabase, organizationId } = getTenantScopedClient();
-  const { data, error } = await supabase
-    .from("opportunities")
-    .select("assigned_advisor_id, is_outbound")
-    .eq("organization_id", organizationId)
-    .eq("funnel", "post_venta")
-    .eq("stage_id", problematicStageId)
-    .is("cancelled_at", null)
-    .limit(ROW_CAP);
-  if (error) throw error;
-  return (data ?? []) as AdvisorOnlyRow[];
+  return fetchAllPaged<AdvisorOnlyRow>(() =>
+    supabase
+      .from("opportunities")
+      .select("assigned_advisor_id, is_outbound")
+      .eq("organization_id", organizationId)
+      .eq("funnel", "post_venta")
+      .eq("stage_id", problematicStageId)
+      .is("cancelled_at", null),
+  );
 }
 
 /**
@@ -410,13 +431,12 @@ export async function listProblematicCaseOpps(
  */
 export async function listLivePostventaOpps(): Promise<LivePostventaRow[]> {
   const { supabase, organizationId } = getTenantScopedClient();
-  const { data, error } = await supabase
-    .from("opportunities")
-    .select("id, assigned_advisor_id, is_outbound, stage_id, shopify_order_id")
-    .eq("organization_id", organizationId)
-    .eq("funnel", "post_venta")
-    .is("cancelled_at", null)
-    .limit(ROW_CAP);
-  if (error) throw error;
-  return (data ?? []) as LivePostventaRow[];
+  return fetchAllPaged<LivePostventaRow>(() =>
+    supabase
+      .from("opportunities")
+      .select("id, assigned_advisor_id, is_outbound, stage_id, shopify_order_id")
+      .eq("organization_id", organizationId)
+      .eq("funnel", "post_venta")
+      .is("cancelled_at", null),
+  );
 }
