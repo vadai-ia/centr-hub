@@ -3,6 +3,7 @@ import { getTenantScopedClient } from "@/lib/db/client";
 import type {
   Database,
   GoalMetricDb,
+  GoalSubjectDb,
   GoalResultRow,
   GoalRow,
   UUID,
@@ -37,10 +38,15 @@ export async function listGoals(opts: { onlyActive?: boolean } = {}): Promise<Go
 }
 
 /**
- * Meta de un sujeto + métrica concretos. `advisorMembershipId === null`
- * resuelve la meta GENERAL de equipo. Devuelve null si no existe.
+ * Meta de un sujeto + métrica concretos (0051).
+ *
+ * El sujeto se pasa EXPLÍCITO: antes se infería de `advisorMembershipId ===
+ * null`, y esa inferencia ya no distingue la meta de equipo de la de venta
+ * orgánica (ambas van sin vendedor). Sin filtrar por `subject`, el upsert de
+ * una encontraría la otra y la pisaría.
  */
 export async function getGoalFor(
+  subject: GoalSubjectDb,
   advisorMembershipId: UUID | null,
   metric: GoalMetricDb,
 ): Promise<GoalRow | null> {
@@ -49,6 +55,7 @@ export async function getGoalFor(
     .from("goals")
     .select("*")
     .eq("organization_id", organizationId)
+    .eq("subject", subject)
     .eq("metric", metric);
   query =
     advisorMembershipId === null

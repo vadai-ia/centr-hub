@@ -460,6 +460,32 @@ Una persona tiene **dos ejes**, no uno: el **rol** dice qué ve y qué alcanza (
 
 Está **dirigido por datos a propósito: no nombra ninguna organización.** Corrige cada tenant donde la persona tenga historia (Centr y Rustr) y deja intacto aquel donde nunca ha operado — una membresía recién creada en un tenant nuevo (p. ej. Centr Colombia) NO se enciende sola. Es idempotente y no destructivo: no toca ni una fila de negocio, solo vuelve visible a quien ya era dueño de ella. Tras aplicarla, verificar en Admin → Usuarios que quien deba operar cartera trae el badge "También asesor", y en el Dashboard que reaparece en el desglose por vendedor.
 
+## Metas: el SUJETO es explícito, y la venta orgánica es una cubeta más (migración 0051)
+
+Una meta tiene un **sujeto** (`goals.subject`): `team` (toda la organización), `advisor` (un vendedor) u `organic` (la venta que entra sola por la tienda online). Antes el sujeto se INFERÍA de `advisor_membership_id IS NULL` = equipo; ese truco alcanzaba para dos sujetos y se rompió con el tercero, que también va sin vendedor.
+
+**Por qué existe:** la dirección reparte la meta mensual en cubetas — "de los 7 millones, 1 es orgánico y el resto se divide entre los vendedores". Sin poder expresar la cubeta orgánica, el desglose no cuadra contra el total.
+
+### "Orgánica" es el ORIGEN del pedido, NUNCA la ausencia de asesor
+
+Shopify marca el origen en `source_name`, que la plataforma persiste en `orders.source`. En Centr solo aparecen dos valores: `web` (tienda online) y `shopify_draft_order` (cotización de un vendedor). La constante es `ONLINE_ORDER_SOURCE` en [lib/services/dashboard-metrics.ts](lib/services/dashboard-metrics.ts).
+
+**Medido en producción: de 947 pedidos, 578 no tienen asesor pero solo 287 son `web`.** Los otros 291 son cotizaciones donde el vendedor no puso su etiqueta. Usar "sin asesor" como criterio metería esa venta en la cubeta orgánica e inflaría el canal a costa de las metas individuales. Guard: `tests/goal-organic-subject.test.ts` asierta que `tallyOrganic` NO menciona `assigned_advisor_id`.
+
+**Métrica única:** la meta orgánica solo admite `amount`. Una venta orgánica no lleva cotización enviada ni oportunidad trabajada, así que `quotes` y `won` marcarían cero por definición. Está bloqueado en tres capas: CHECK `goals_organic_amount_only` (0051), `goalInputSchema`, y la celda deshabilitada en Admin → Metas.
+
+**Un vendedor NO ve la meta orgánica** (ni la de equipo): no es de nadie en particular. El scoping vive en `loadVendorGoalProgress`, no en la UI.
+
+**`GoalScope` es un tipo APARTE de `Scope`** a propósito. `Scope` gobierna el dashboard entero (KPIs, breakdown, filtros); ensancharlo para un caso exclusivo de metas arrastraría `organic` a rutas donde no significa nada.
+
+**El histórico también lleva el sujeto.** `goal_results` heredaba la misma inferencia y su índice único de equipo era `(org, metric, month) WHERE advisor IS NULL`. Con una meta de equipo Y una orgánica del mismo monto, el cron mensual habría intentado insertar dos filas en ese índice y **el snapshot del mes entero habría fallado** por violación de unicidad.
+
+### Paso operativo obligatorio (NO es código del repo)
+
+**Aplicar la migración 0051.** Agrega `subject` a `goals` y a `goal_results`, backfillea (`advisor_membership_id IS NULL` → `team`, si no `advisor` — cero cambio de comportamiento), instala los CHECK del sujeto y reemplaza los índices únicos por unos separados por sujeto. Es idempotente y no destructivo.
+
+Después, el admin captura el reparto en Admin → Metas: un renglón por vendedor, uno de equipo y el de "Venta orgánica (tienda online)".
+
 ## Admin → Integraciones (migración 0046)
 
 Pantalla admin-only que gestiona las TRES conexiones externas —**Shopify**, **Whaapy Venta** y **Whaapy Post-venta**— sin tocar código, `.env.local`, Vercel env ni SQL: capturar/rotar credenciales, editar el identificador de cada sistema, probar la conexión, desconectar y reemplazar. Los dos Whaapy siguen siendo proveedores **separados** (namespace de Vault, discriminador y endpoint propios).

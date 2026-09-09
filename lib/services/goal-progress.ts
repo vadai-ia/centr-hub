@@ -1,7 +1,7 @@
 import "server-only";
 import {
   computeGoalAchievement,
-  type Scope,
+  type GoalScope,
   type ScopeAchievement,
 } from "@/lib/services/dashboard-metrics";
 import { readGoalThresholds } from "@/lib/services/metas-config";
@@ -14,7 +14,7 @@ import {
   type GoalThresholds,
   type GoalZone,
 } from "@/lib/metas/semaphore";
-import type { GoalMetric } from "@/lib/metas/schema";
+import type { GoalMetric, GoalSubject } from "@/lib/metas/schema";
 import { currentMonthKey, resolveCurrentMonthPeriod } from "@/lib/time/period";
 import type { GoalRow, UUID } from "@/lib/types/database";
 
@@ -35,8 +35,10 @@ import type { GoalRow, UUID } from "@/lib/types/database";
 
 export interface GoalProgress {
   goalId: UUID;
-  advisorMembershipId: UUID | null; // null = meta de equipo
-  advisorName: string | null; // nombre del vendedor (vista admin); null = equipo
+  /** Sujeto explícito (0051): equipo, un vendedor, o la venta orgánica. */
+  subject: GoalSubject;
+  advisorMembershipId: UUID | null; // null salvo subject 'advisor'
+  advisorName: string | null; // nombre del vendedor (vista admin); null si no aplica
   metric: GoalMetric;
   target: number;
   achieved: number;
@@ -54,7 +56,9 @@ export interface VendorGoals {
 export interface AdminGoalProgress {
   thresholds: GoalThresholds;
   monthKey: string; // yyyy-MM del mes en curso (MX)
-  team: GoalProgress[]; // metas de equipo (advisor_membership_id null)
+  team: GoalProgress[]; // metas de la organización completa
+  /** Meta(s) de la venta que entra sola por la tienda online (0051). */
+  organic: GoalProgress[];
   byVendor: VendorGoals[]; // vendedores CON al menos una meta activa
 }
 
@@ -66,8 +70,8 @@ export interface VendorGoalProgress {
 
 const ZERO: ScopeAchievement = { quotes: 0, won: 0, amount: 0 };
 
-function scopeKey(s: Scope): string {
-  return s === null ? "__none__" : String(s); // "all" o el uuid del membership
+function scopeKey(s: GoalScope): string {
+  return s.kind === "advisor" ? s.membershipId : s.kind; // uuid | "team" | "organic"
 }
 
 function achievedFor(metric: GoalMetric, a: ScopeAchievement): number {
@@ -84,6 +88,7 @@ function toProgress(
   const pct = computeGoalPct(achieved, target);
   return {
     goalId: goal.id,
+    subject: goal.subject,
     advisorMembershipId: goal.advisor_membership_id,
     advisorName,
     metric: goal.metric,
@@ -113,26 +118,33 @@ export async function loadAdminGoalProgress(
   const nameById = new Map(vendors.map((v) => [v.id, v.profile.full_name]));
   const colorById = new Map(vendors.map((v) => [v.id, v.profile.color]));
 
-  const teamGoals = goals.filter((g) => g.advisor_membership_id === null);
-  const vendorGoals = goals.filter((g) => g.advisor_membership_id !== null);
+  // El sujeto ya no se infiere de advisor_membership_id (0051): se lee.
+  const teamGoals = goals.filter((g) => g.subject === "team");
+  const organicGoals = goals.filter((g) => g.subject === "organic");
+  const vendorGoals = goals.filter((g) => g.subject === "advisor");
   const vendorIds = Array.from(
     new Set(vendorGoals.map((g) => g.advisor_membership_id as UUID)),
   );
 
-  const scopes: Scope[] = [];
-  if (teamGoals.length > 0) scopes.push("all");
-  scopes.push(...vendorIds);
+  // Solo se computa el avance de los sujetos que tienen meta activa.
+  const scopes: GoalScope[] = [];
+  if (teamGoals.length > 0) scopes.push({ kind: "team" });
+  if (organicGoals.length > 0) scopes.push({ kind: "organic" });
+  scopes.push(...vendorIds.map((id) => ({ kind: "advisor" as const, membershipId: id })));
 
   const achievements = scopes.length > 0 ? await computeGoalAchievement(period, scopes) : [];
   const achByScope = new Map<string, ScopeAchievement>();
   scopes.forEach((s, i) => achByScope.set(scopeKey(s), achievements[i]));
 
   const team = teamGoals.map((g) =>
-    toProgress(g, achievedFor(g.metric, achByScope.get("all") ?? ZERO), thresholds, null),
+    toProgress(g, achievedFor(g.metric, achByScope.get("team") ?? ZERO), thresholds, null),
+  );
+  const organic = organicGoals.map((g) =>
+    toProgress(g, achievedFor(g.metric, achByScope.get("organic") ?? ZERO), thresholds, null),
   );
 
   const byVendor: VendorGoals[] = vendorIds.map((id) => {
-    const ach = achByScope.get(scopeKey(id)) ?? ZERO;
+    const ach = achByScope.get(id) ?? ZERO;
     const gs = vendorGoals
       .filter((g) => g.advisor_membership_id === id)
       .map((g) => toProgress(g, achievedFor(g.metric, ach), thresholds, nameById.get(id) ?? null));
@@ -144,7 +156,7 @@ export async function loadAdminGoalProgress(
     };
   });
 
-  return { thresholds, monthKey: currentMonthKey(), team, byVendor };
+  return { thresholds, monthKey: currentMonthKey(), team, organic, byVendor };
 }
 
 /**
@@ -161,12 +173,18 @@ export async function loadVendorGoalProgress(
     listGoals({ onlyActive: true }),
   ]);
   const thresholds = readGoalThresholds(org?.config ?? null);
-  const mine = goals.filter((g) => g.advisor_membership_id === membershipId);
+  // Un vendedor ve SOLO sus metas: ni la de equipo ni la orgánica (que no es
+  // de nadie en particular). El scoping vive aquí, no en la UI.
+  const mine = goals.filter(
+    (g) => g.subject === "advisor" && g.advisor_membership_id === membershipId,
+  );
   if (mine.length === 0) {
     return { thresholds, monthKey: currentMonthKey(), goals: [] };
   }
   const period = resolveCurrentMonthPeriod();
-  const [ach] = await computeGoalAchievement(period, [membershipId]);
+  const [ach] = await computeGoalAchievement(period, [
+    { kind: "advisor", membershipId },
+  ]);
   const progress = mine.map((g) => toProgress(g, achievedFor(g.metric, ach), thresholds, null));
   return { thresholds, monthKey: currentMonthKey(), goals: progress };
 }

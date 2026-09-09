@@ -26,7 +26,7 @@ const mockedVendors = vi.mocked(listRealVendorsForMapping);
 const mockedAch = vi.mocked(computeGoalAchievement);
 
 function goal(partial: Partial<GoalRow> & Pick<GoalRow, "id" | "metric" | "target_value">): GoalRow {
-  return {
+  const base = {
     organization_id: ORG,
     advisor_membership_id: null,
     is_active: true,
@@ -34,6 +34,12 @@ function goal(partial: Partial<GoalRow> & Pick<GoalRow, "id" | "metric" | "targe
     created_at: "2026-06-01T00:00:00.000Z",
     updated_at: "2026-06-01T00:00:00.000Z",
     ...partial,
+  };
+  // `subject` se deriva igual que el backfill de 0051 cuando el caso de
+  // prueba no lo fija: sin vendedor = meta de equipo.
+  return {
+    ...base,
+    subject: partial.subject ?? (base.advisor_membership_id === null ? "team" : "advisor"),
   };
 }
 
@@ -66,7 +72,9 @@ describe("loadVendorGoalProgress (scoping del vendedor)", () => {
     expect(res.goals[0].pct).toBe(85); // 17/20
     expect(res.goals[0].zone).toBe("green");
     // Solo se pidió el scope del propio vendedor.
-    expect(mockedAch).toHaveBeenCalledWith(expect.anything(), [A]);
+    expect(mockedAch).toHaveBeenCalledWith(expect.anything(), [
+      { kind: "advisor", membershipId: A },
+    ]);
   });
 
   it("empty cuando el vendedor no tiene meta activa (no llama achievement)", async () => {
@@ -86,11 +94,12 @@ describe("loadAdminGoalProgress (equipo + por vendedor)", () => {
       goal({ id: "g-A", metric: "quotes", target_value: "20", advisor_membership_id: A }),
       goal({ id: "g-B", metric: "won", target_value: "10", advisor_membership_id: B }),
     ]);
-    // scopes esperados en orden: ["all", A, B]
+    // scopes esperados en orden: [team, A, B]
     mockedAch.mockImplementation(async (_p, scopes) =>
       scopes.map((s) => {
-        if (s === "all") return { quotes: 0, won: 0, amount: 120000 };
-        if (s === A) return { quotes: 10, won: 0, amount: 0 };
+        if (s.kind === "team") return { quotes: 0, won: 0, amount: 120000 };
+        if (s.kind === "advisor" && s.membershipId === A)
+          return { quotes: 10, won: 0, amount: 0 };
         return { quotes: 0, won: 12, amount: 0 }; // B
       }),
     );
@@ -121,6 +130,55 @@ describe("loadAdminGoalProgress (equipo + por vendedor)", () => {
 
     const res = await loadAdminGoalProgress(ORG);
     expect(res.team).toEqual([]);
-    expect(mockedAch).toHaveBeenCalledWith(expect.anything(), [A]);
+    expect(mockedAch).toHaveBeenCalledWith(expect.anything(), [
+      { kind: "advisor", membershipId: A },
+    ]);
+  });
+});
+
+describe("meta de venta orgánica (0051)", () => {
+  it("computa su avance en un scope propio, separado del de equipo", async () => {
+    mockedListGoals.mockResolvedValue([
+      goal({ id: "g-team", metric: "amount", target_value: "7000000", subject: "team" }),
+      goal({ id: "g-org", metric: "amount", target_value: "1000000", subject: "organic" }),
+    ]);
+    mockedAch.mockImplementation(async (_p, scopes) =>
+      scopes.map((s) =>
+        s.kind === "team"
+          ? { quotes: 0, won: 0, amount: 5_000_000 }
+          : { quotes: 0, won: 0, amount: 130_000 },
+      ),
+    );
+
+    const res = await loadAdminGoalProgress(ORG);
+    expect(res.team).toHaveLength(1);
+    expect(res.organic).toHaveLength(1);
+    // El logro orgánico NO es el del equipo: son cubetas distintas.
+    expect(res.organic[0].achieved).toBe(130_000);
+    expect(res.team[0].achieved).toBe(5_000_000);
+    expect(res.organic[0].subject).toBe("organic");
+  });
+
+  it("un vendedor NO ve la meta orgánica (no es de nadie en particular)", async () => {
+    mockedListGoals.mockResolvedValue([
+      goal({ id: "g-org", metric: "amount", target_value: "1000000", subject: "organic" }),
+      goal({ id: "g-A", metric: "amount", target_value: "3000000", advisor_membership_id: A, subject: "advisor" }),
+    ]);
+    mockedAch.mockResolvedValue([{ quotes: 0, won: 0, amount: 900_000 }]);
+
+    const res = await loadVendorGoalProgress(ORG, A);
+    expect(res.goals).toHaveLength(1);
+    expect(res.goals[0].goalId).toBe("g-A");
+  });
+
+  it("sin meta orgánica activa, no se computa su scope", async () => {
+    mockedListGoals.mockResolvedValue([
+      goal({ id: "g-team", metric: "amount", target_value: "7000000", subject: "team" }),
+    ]);
+    mockedAch.mockResolvedValue([{ quotes: 0, won: 0, amount: 1 }]);
+
+    const res = await loadAdminGoalProgress(ORG);
+    expect(res.organic).toEqual([]);
+    expect(mockedAch).toHaveBeenCalledWith(expect.anything(), [{ kind: "team" }]);
   });
 });

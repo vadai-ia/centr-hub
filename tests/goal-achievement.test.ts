@@ -47,10 +47,10 @@ function raw(): VentaRaw {
     boundaries: emptyBoundaries,
     lossReasonNames: new Map(),
     paidOrders: [
-      { assigned_advisor_id: A, is_outbound: false, total_amount: "100", paid_at: "2026-05-10T18:00:00.000Z" },
-      { assigned_advisor_id: A, is_outbound: false, total_amount: "200", paid_at: "2026-05-12T18:00:00.000Z" },
-      { assigned_advisor_id: B, is_outbound: false, total_amount: "50", paid_at: "2026-05-12T18:00:00.000Z" },
-      { assigned_advisor_id: null, is_outbound: false, total_amount: "30", paid_at: "2026-05-12T18:00:00.000Z" },
+      { assigned_advisor_id: A, is_outbound: false, total_amount: "100", paid_at: "2026-05-10T18:00:00.000Z", source: "shopify_draft_order" },
+      { assigned_advisor_id: A, is_outbound: false, total_amount: "200", paid_at: "2026-05-12T18:00:00.000Z", source: "shopify_draft_order" },
+      { assigned_advisor_id: B, is_outbound: false, total_amount: "50", paid_at: "2026-05-12T18:00:00.000Z", source: "shopify_draft_order" },
+      { assigned_advisor_id: null, is_outbound: false, total_amount: "30", paid_at: "2026-05-12T18:00:00.000Z", source: "shopify_draft_order" },
     ],
     draftOpps: [
       { assigned_advisor_id: A, is_outbound: false },

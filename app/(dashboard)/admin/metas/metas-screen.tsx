@@ -8,6 +8,8 @@ import {
 } from "@/lib/actions/admin-metas";
 import {
   GOAL_METRICS,
+  metricsForSubject,
+  type GoalSubject,
   GOAL_METRIC_LABELS,
   formatGoalValue,
   type GoalMetric,
@@ -22,14 +24,24 @@ interface Props {
 }
 
 interface Subject {
-  key: string; // "team" | membershipId
+  key: string; // "team" | "organic" | membershipId
+  subject: GoalSubject;
   advisorMembershipId: UUID | null;
   label: string;
 }
 
 /** Clave de lookup de una meta por sujeto + métrica. */
-function goalKey(advisorMembershipId: UUID | null, metric: GoalMetric): string {
-  return `${advisorMembershipId ?? "team"}:${metric}`;
+/**
+ * Clave de celda. Incluye el SUJETO porque equipo y venta orgánica comparten
+ * `advisorMembershipId === null` (0051): sin él, ambas colapsarían en la misma
+ * celda y una pisaría a la otra en la grilla.
+ */
+function goalKey(
+  subject: GoalSubject,
+  advisorMembershipId: UUID | null,
+  metric: GoalMetric,
+): string {
+  return `${subject}:${advisorMembershipId ?? "-"}:${metric}`;
 }
 
 export function MetasScreen({ initialData }: Props) {
@@ -38,6 +50,7 @@ export function MetasScreen({ initialData }: Props) {
   const [banner, setBanner] = useState<{ tone: "error" | "success"; text: string } | null>(null);
   const [modal, setModal] = useState<{
     metric: GoalMetric;
+    subject: GoalSubject;
     advisorMembershipId: UUID | null;
     subjectLabel: string;
     existing: MetaGoalView | null;
@@ -45,9 +58,18 @@ export function MetasScreen({ initialData }: Props) {
 
   const subjects: Subject[] = useMemo(
     () => [
-      { key: "team", advisorMembershipId: null, label: "Equipo (general)" },
+      { key: "team", subject: "team" as const, advisorMembershipId: null, label: "Equipo (general)" },
+      // La venta que entra sola por la tienda online. Va junto a los vendedores
+      // porque es una CUBETA MÁS del reparto de la meta mensual, no un total.
+      {
+        key: "organic",
+        subject: "organic" as const,
+        advisorMembershipId: null,
+        label: "Venta orgánica (tienda online)",
+      },
       ...initialData.vendors.map((v) => ({
         key: v.membershipId,
+        subject: "advisor" as const,
         advisorMembershipId: v.membershipId,
         label: v.name,
       })),
@@ -57,7 +79,7 @@ export function MetasScreen({ initialData }: Props) {
 
   const goalByKey = useMemo(() => {
     const m = new Map<string, MetaGoalView>();
-    for (const g of goals) m.set(goalKey(g.advisorMembershipId, g.metric), g);
+    for (const g of goals) m.set(goalKey(g.subject, g.advisorMembershipId, g.metric), g);
     return m;
   }, [goals]);
 
@@ -119,7 +141,23 @@ export function MetasScreen({ initialData }: Props) {
                 <tr key={s.key} className="border-b border-slate-100 last:border-0 dark:border-slate-700/50">
                   <td className="py-2 pr-3 font-medium text-slate-700 dark:text-slate-200">{s.label}</td>
                   {GOAL_METRICS.map((m) => {
-                    const g = goalByKey.get(goalKey(s.advisorMembershipId, m)) ?? null;
+                    // La venta orgánica solo admite monto: no lleva cotización
+                    // enviada ni oportunidad trabajada (CHECK en 0051). La celda
+                    // se deshabilita en vez de ofrecer algo que la BD rechaza.
+                    const allowed = metricsForSubject(s.subject).includes(m);
+                    if (!allowed) {
+                      return (
+                        <td key={m} className="px-3 py-2">
+                          <span
+                            className="text-xs text-slate-400 dark:text-slate-600"
+                            title="La venta orgánica solo se mide en monto."
+                          >
+                            —
+                          </span>
+                        </td>
+                      );
+                    }
+                    const g = goalByKey.get(goalKey(s.subject, s.advisorMembershipId, m)) ?? null;
                     return (
                       <td key={m} className="px-3 py-2">
                         <GoalCell
@@ -128,6 +166,7 @@ export function MetasScreen({ initialData }: Props) {
                           onClick={() =>
                             setModal({
                               metric: m,
+                              subject: s.subject,
                               advisorMembershipId: s.advisorMembershipId,
                               subjectLabel: s.label,
                               existing: g,
@@ -150,6 +189,7 @@ export function MetasScreen({ initialData }: Props) {
         <GoalEditModal
           open
           metric={modal.metric}
+          subject={modal.subject}
           subjectLabel={modal.subjectLabel}
           advisorMembershipId={modal.advisorMembershipId}
           existing={modal.existing}

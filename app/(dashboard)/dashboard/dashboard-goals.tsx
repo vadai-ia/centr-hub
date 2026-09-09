@@ -63,6 +63,18 @@ function AdminGoals({
     if (data.team.length > 0) {
       list.push({ key: "team", label: "Equipo", color: null, byMetric: buildByMetric(data.team) });
     }
+    // La venta orgánica va JUNTO a los vendedores, no dentro del equipo: es
+    // una cubeta más del reparto de la meta mensual ("de los 7 millones, 1 es
+    // orgánico"), y verla al lado de cada persona es justo el desglose que
+    // permite saber si el total va a cerrar.
+    if (data.organic.length > 0) {
+      list.push({
+        key: "organic",
+        label: "Venta orgánica",
+        color: null,
+        byMetric: buildByMetric(data.organic),
+      });
+    }
     for (const v of data.byVendor) {
       if (v.goals.length > 0) {
         list.push({

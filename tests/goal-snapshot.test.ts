@@ -31,7 +31,7 @@ const mInsert = vi.mocked(insertGoalResults);
 const mAch = vi.mocked(computeGoalAchievement);
 
 function goal(p: Partial<GoalRow> & Pick<GoalRow, "id" | "metric" | "target_value">): GoalRow {
-  return {
+  const base = {
     organization_id: "org",
     advisor_membership_id: null,
     is_active: true,
@@ -39,6 +39,11 @@ function goal(p: Partial<GoalRow> & Pick<GoalRow, "id" | "metric" | "target_valu
     created_at: "x",
     updated_at: "x",
     ...p,
+  };
+  // `subject` derivado como el backfill de 0051 si el caso no lo fija.
+  return {
+    ...base,
+    subject: p.subject ?? (base.advisor_membership_id === null ? "team" : "advisor"),
   };
 }
 
@@ -69,7 +74,11 @@ describe("snapshotMonthlyGoals", () => {
       goal({ id: "g-A", metric: "quotes", target_value: "20", advisor_membership_id: A }),
     ]);
     mAch.mockImplementation(async (_p, scopes) =>
-      scopes.map((s) => (s === "all" ? { quotes: 0, won: 0, amount: 118000 } : { quotes: 17, won: 0, amount: 0 })),
+      scopes.map((s) =>
+        s.kind === "team"
+          ? { quotes: 0, won: 0, amount: 118000 }
+          : { quotes: 17, won: 0, amount: 0 },
+      ),
     );
 
     const res = await snapshotMonthlyGoals({ period: PERIOD, periodMonth: "2026-05-01" });

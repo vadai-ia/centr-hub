@@ -35,6 +35,10 @@ export interface PaidOrderRow {
   is_outbound: boolean;
   total_amount: string;
   paid_at: string | null;
+  /** `source_name` de Shopify: 'web' (tienda online) | 'shopify_draft_order'
+   *  (cotización de un vendedor) | 'pos' | null. Distingue la venta ORGÁNICA
+   *  (0051) — que NO es lo mismo que "sin asesor asignado". */
+  source: string | null;
 }
 export interface CreatedOrderRow {
   assigned_advisor_id: UUID | null;
@@ -112,7 +116,7 @@ export async function listPaidOrdersInPeriod(
   return fetchAllPaged<PaidOrderRow>(() =>
     supabase
       .from("orders")
-      .select("assigned_advisor_id, is_outbound, total_amount, paid_at")
+      .select("assigned_advisor_id, is_outbound, total_amount, paid_at, source")
       .eq("organization_id", organizationId)
       .eq("financial_status", "paid")
       .gte("paid_at", startUtc)

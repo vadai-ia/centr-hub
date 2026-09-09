@@ -477,6 +477,15 @@ export interface AuditLogRow {
 export type GoalMetricDb = "quotes" | "won" | "amount";
 
 /**
+ * Sujeto de una meta (0051). Antes se INFERÍA de `advisor_membership_id IS
+ * NULL`; ese truco solo alcanzaba para dos sujetos y se rompió con el tercero.
+ *   team    → toda la organización.
+ *   advisor → un vendedor concreto (advisor_membership_id NOT NULL).
+ *   organic → venta de la tienda online (orders.source = 'web'), sin vendedor.
+ */
+export type GoalSubjectDb = "team" | "advisor" | "organic";
+
+/**
  * Meta mensual recurrente (M2v2 — reshape 0031). Una fila por (org,
  * vendedor-o-equipo, métrica). `advisor_membership_id` NULL = meta general
  * de equipo. El periodo es siempre el mes en curso (CDMX).
@@ -485,6 +494,8 @@ export interface GoalRow {
   id: UUID;
   organization_id: UUID;
   advisor_membership_id: UUID | null;
+  /** Sujeto explícito (0051). 'advisor' exige advisor_membership_id. */
+  subject: GoalSubjectDb;
   metric: GoalMetricDb;
   target_value: Numeric;
   is_active: boolean;
@@ -504,6 +515,9 @@ export interface GoalResultRow {
   organization_id: UUID;
   goal_id: UUID | null;
   advisor_membership_id: UUID | null;
+  /** Espejo de goals.subject (0051): distingue equipo de venta orgánica,
+   *  que comparten advisor_membership_id NULL. */
+  subject: GoalSubjectDb;
   metric: GoalMetricDb;
   period_month: string; // date — primer día del mes (CDMX), yyyy-MM-dd
   target_value: Numeric;
@@ -705,7 +719,15 @@ export interface Database {
         Insert: Omit<AuditLogRow, "id" | "created_at"> & Partial<Pick<AuditLogRow, "id" | "created_at">>;
         Update: Updatable<AuditLogRow>;
       };
-      goals: { Row: GoalRow; Insert: Insertable<GoalRow>; Update: Updatable<GoalRow> };
+      goals: {
+        Row: GoalRow;
+        // subject (0051) es NOT NULL con DEFAULT 'advisor' → opcional en Insert
+        // para no romper callers previos; los CHECK de la migración rechazan
+        // una combinación incoherente (advisor sin membership, etc.).
+        Insert: Omit<Insertable<GoalRow>, "subject"> &
+          Partial<Pick<GoalRow, "subject">>;
+        Update: Updatable<GoalRow>;
+      };
       goal_results: {
         Row: GoalResultRow;
         // Append-only: sin updated_at. id/created_at auto-generados.

@@ -19,6 +19,7 @@ import {
   goalThresholdsInputSchema,
   isCountMetric,
   type GoalMetric,
+  type GoalSubject,
 } from "@/lib/metas/schema";
 import {
   goalThresholdsToConfig,
@@ -38,7 +39,9 @@ import type { GoalRow, Json, UUID } from "@/lib/types/database";
 // ── Vistas que consume la pantalla ──────────────────────────────────────
 export interface MetaGoalView {
   id: UUID;
-  advisorMembershipId: UUID | null; // null = meta de equipo
+  /** Sujeto explícito (0051): equipo, vendedor o venta orgánica. */
+  subject: GoalSubject;
+  advisorMembershipId: UUID | null; // solo cuando subject === 'advisor'
   metric: GoalMetric;
   targetValue: number;
   isActive: boolean;
@@ -80,6 +83,7 @@ export type ThresholdsMutationResult =
 function toGoalView(g: GoalRow): MetaGoalView {
   return {
     id: g.id,
+    subject: g.subject,
     advisorMembershipId: g.advisor_membership_id,
     metric: g.metric,
     targetValue: Number(g.target_value),
@@ -160,8 +164,8 @@ export async function upsertGoalAction(raw: unknown): Promise<GoalsMutationResul
   return withTenantContext(
     admin.ctx.orgId,
     async () => {
-      // Si es meta de vendedor, validar que el membership sea un vendedor real.
-      if (input.advisorMembershipId !== null) {
+      // Si es meta de vendedor, validar que el membership opere cartera.
+      if (input.subject === "advisor" && input.advisorMembershipId !== null) {
         const vendors = await listRealVendorsForMapping(admin.ctx.orgId);
         if (!vendors.some((v) => v.id === input.advisorMembershipId)) {
           return { ok: false as const, message: "Vendedor inválido." };
@@ -172,7 +176,11 @@ export async function upsertGoalAction(raw: unknown): Promise<GoalsMutationResul
         ? Math.round(input.targetValue)
         : input.targetValue;
 
-      const existing = await getGoalFor(input.advisorMembershipId, input.metric);
+      const existing = await getGoalFor(
+        input.subject,
+        input.advisorMembershipId,
+        input.metric,
+      );
       if (existing) {
         await updateGoal(existing.id, {
           target_value: String(target),
@@ -180,6 +188,7 @@ export async function upsertGoalAction(raw: unknown): Promise<GoalsMutationResul
         });
       } else {
         await createGoal({
+          subject: input.subject,
           advisor_membership_id: input.advisorMembershipId,
           metric: input.metric,
           target_value: String(target),
@@ -194,6 +203,7 @@ export async function upsertGoalAction(raw: unknown): Promise<GoalsMutationResul
         entityType: "goal",
         entityId: existing?.id ?? null,
         payload: {
+          subject: input.subject,
           advisor_membership_id: input.advisorMembershipId,
           metric: input.metric,
           target_value: target,

@@ -399,16 +399,57 @@ export function computeVentaMetrics(
  * `computeDashboardData`, así Mi Día y el Dashboard pagan poco por las barras.
  * Devuelve un arreglo alineado con `scopes`.
  */
+/**
+ * Valor de `orders.source` (el `source_name` de Shopify) que identifica la
+ * venta ORGÁNICA: la que entra sola por la tienda online, sin vendedor.
+ *
+ * NO usar "sin asesor asignado" como criterio equivalente. Medido en Centr:
+ * de 947 pedidos, 578 no tienen asesor pero solo 287 son 'web' — los otros
+ * 291 son cotizaciones donde el vendedor no puso su etiqueta. Confundirlos
+ * infla el canal orgánico a costa de las metas individuales.
+ */
+export const ONLINE_ORDER_SOURCE = "web";
+
+/**
+ * Sujeto de una meta traducido a cómo se mide su avance (0051).
+ *
+ * Es un tipo APARTE de `Scope` a propósito: `Scope` gobierna el dashboard
+ * entero (KPIs, breakdown, filtros) y ensancharlo para un caso exclusivo de
+ * metas arrastraría 'organic' a rutas donde no significa nada.
+ */
+export type GoalScope =
+  | { kind: "team" }
+  | { kind: "advisor"; membershipId: UUID }
+  | { kind: "organic" };
+
+/**
+ * Avance de la venta orgánica. Solo `amount` tiene sentido: un pedido de la
+ * tienda online no lleva cotización enviada ni oportunidad trabajada, así que
+ * `quotes` y `won` quedan en cero por definición, no por falta de datos (el
+ * CHECK de 0051 impide siquiera crear una meta orgánica de esas métricas).
+ */
+function tallyOrganic(paidOrders: VentaRaw["paidOrders"]): ScopeAchievement {
+  let amount = 0;
+  for (const o of paidOrders) {
+    if (o.source === ONLINE_ORDER_SOURCE) amount += Number(o.total_amount);
+  }
+  return { quotes: 0, won: 0, amount };
+}
+
 export async function computeGoalAchievement(
   period: ResolvedPeriod,
-  scopes: Scope[],
+  scopes: GoalScope[],
 ): Promise<ScopeAchievement[]> {
   const [paidOrders, draftOpps, wonOpps] = await Promise.all([
     listPaidOrdersInPeriod(period.startUtc, period.endUtc),
     listDraftOppsCreatedInPeriod(period.startUtc, period.endUtc),
     listWonOppsInPeriod(period.startUtc, period.endUtc),
   ]);
-  return scopes.map((s) => tallyAchievement(paidOrders, draftOpps, wonOpps, s));
+  return scopes.map((s) => {
+    if (s.kind === "organic") return tallyOrganic(paidOrders);
+    const scope: Scope = s.kind === "team" ? "all" : s.membershipId;
+    return tallyAchievement(paidOrders, draftOpps, wonOpps, scope);
+  });
 }
 
 // ============================================================

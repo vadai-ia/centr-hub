@@ -1,7 +1,7 @@
 import "server-only";
 import {
   computeGoalAchievement,
-  type Scope,
+  type GoalScope,
   type ScopeAchievement,
 } from "@/lib/services/dashboard-metrics";
 import {
@@ -34,8 +34,8 @@ export type SnapshotRow = Omit<
 
 const ZERO: ScopeAchievement = { quotes: 0, won: 0, amount: 0 };
 
-function scopeKey(s: Scope): string {
-  return s === null ? "__none__" : String(s);
+function scopeKey(s: GoalScope): string {
+  return s.kind === "advisor" ? s.membershipId : s.kind; // uuid | "team" | "organic"
 }
 
 function achievedFor(metric: GoalMetric, a: ScopeAchievement): number {
@@ -73,26 +73,39 @@ export async function snapshotMonthlyGoals(input: {
     return { written: 0, skipped: false, alreadyExists, rows: [] };
   }
 
-  const teamGoals = goals.filter((g) => g.advisor_membership_id === null);
+  // Sujeto explícito (0051) — el snapshot congela las tres clases por igual.
+  const teamGoals = goals.filter((g) => g.subject === "team");
+  const organicGoals = goals.filter((g) => g.subject === "organic");
   const vendorIds = Array.from(
-    new Set(goals.filter((g) => g.advisor_membership_id !== null).map((g) => g.advisor_membership_id as string)),
+    new Set(
+      goals
+        .filter((g) => g.subject === "advisor")
+        .map((g) => g.advisor_membership_id as string),
+    ),
   );
-  const scopes: Scope[] = [];
-  if (teamGoals.length > 0) scopes.push("all");
-  scopes.push(...vendorIds);
+  const scopes: GoalScope[] = [];
+  if (teamGoals.length > 0) scopes.push({ kind: "team" });
+  if (organicGoals.length > 0) scopes.push({ kind: "organic" });
+  scopes.push(...vendorIds.map((id) => ({ kind: "advisor" as const, membershipId: id })));
 
   const achievements = await computeGoalAchievement(input.period, scopes);
   const achByScope = new Map<string, ScopeAchievement>();
   scopes.forEach((s, i) => achByScope.set(scopeKey(s), achievements[i]));
 
   const rows: SnapshotRow[] = goals.map((g) => {
-    const scope: Scope = g.advisor_membership_id === null ? "all" : g.advisor_membership_id;
+    const scope: GoalScope =
+      g.subject === "advisor"
+        ? { kind: "advisor", membershipId: g.advisor_membership_id as string }
+        : { kind: g.subject };
     const ach = achByScope.get(scopeKey(scope)) ?? ZERO;
     const achieved = achievedFor(g.metric, ach);
     const target = Number(g.target_value);
     const pct = computeGoalPct(achieved, target) ?? 0;
     return {
       goal_id: g.id,
+      // El sujeto viaja al histórico: sin él, equipo y orgánica quedarían
+      // indistinguibles (ambas sin vendedor) y chocarían en el índice único.
+      subject: g.subject,
       advisor_membership_id: g.advisor_membership_id,
       metric: g.metric,
       period_month: input.periodMonth,

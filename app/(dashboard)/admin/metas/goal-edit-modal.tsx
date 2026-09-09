@@ -6,14 +6,22 @@ import {
   type MetaGoalView,
 } from "@/lib/actions/admin-metas";
 import { Switch } from "@/components/ui/switch";
-import { GOAL_METRIC_HINTS, GOAL_METRIC_LABELS, isCountMetric, type GoalMetric } from "@/lib/metas/schema";
+import {
+  GOAL_METRIC_HINTS,
+  GOAL_METRIC_LABELS,
+  isCountMetric,
+  type GoalMetric,
+  type GoalSubject,
+} from "@/lib/metas/schema";
 import type { UUID } from "@/lib/types/database";
 
 interface Props {
   open: boolean;
   metric: GoalMetric;
+  /** Sujeto explícito (0051): equipo, vendedor o venta orgánica. */
+  subject: GoalSubject;
   subjectLabel: string;
-  advisorMembershipId: UUID | null; // null = equipo
+  advisorMembershipId: UUID | null; // null salvo subject 'advisor'
   existing: MetaGoalView | null;
   onClose: () => void;
   onSaved: (goals: MetaGoalView[]) => void;
@@ -21,12 +29,13 @@ interface Props {
 
 /**
  * Modal de definir/editar/quitar una meta (M2v2 — Bloque 3). El sujeto
- * (equipo o vendedor) y la métrica vienen fijos desde la celda clicada; acá
- * solo se captura el objetivo mensual y si está activa.
+ * (equipo, vendedor o venta orgánica) y la métrica vienen fijos desde la celda
+ * clicada; acá solo se captura el objetivo mensual y si está activa.
  */
 export function GoalEditModal({
   open,
   metric,
+  subject,
   subjectLabel,
   advisorMembershipId,
   existing,
@@ -63,6 +72,7 @@ export function GoalEditModal({
     setSubmitting(true);
     setError(null);
     const res = await upsertGoalAction({
+      subject,
       advisorMembershipId,
       metric,
       targetValue: target,
