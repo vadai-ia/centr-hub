@@ -5,6 +5,7 @@ import {
   reprocessTagAction,
 } from "@/lib/actions/admin-tags";
 import type { TagMappingView, TagVendorOption } from "@/lib/types/admin";
+import { groupTagsByVendor, hasDuplicateVariants } from "@/lib/format/tag-grouping";
 import { TagReclassifyModal } from "./tag-reclassify-modal";
 import { CreateMappingModal } from "./create-mapping-modal";
 
@@ -33,6 +34,14 @@ export function MapeoTagsScreen({ initialMappings, vendors }: Props) {
     if (filter === "all") return mappings;
     return mappings.filter((m) => m.classification === filter);
   }, [mappings, filter]);
+
+  // Agrupadas por vendedor: una misma persona suele acumular varias variantes
+  // de su tag en Shopify y en lista plana se leían como atribuciones partidas.
+  const groups = useMemo(() => groupTagsByVendor(visible), [visible]);
+  const duplicateVendors = useMemo(
+    () => groups.filter(hasDuplicateVariants).length,
+    [groups],
+  );
 
   async function confirmDelete() {
     if (!deleteTarget) return;
@@ -124,13 +133,46 @@ export function MapeoTagsScreen({ initialMappings, vendors }: Props) {
         </div>
       )}
 
+      {duplicateVendors > 0 && (
+        <p className="mb-3 text-xs text-gray-500 dark:text-gray-400">
+          {duplicateVendors === 1
+            ? "1 vendedor tiene varias variantes de su tag en Shopify. Se muestran agrupadas: la atribución ya suma correctamente."
+            : `${duplicateVendors} vendedores tienen varias variantes de su tag en Shopify. Se muestran agrupadas: la atribución ya suma correctamente.`}
+        </p>
+      )}
+
       {visible.length === 0 ? (
         <p className="text-sm text-gray-500 dark:text-gray-400 py-8 text-center">
           No hay tags {filter === "vendor" ? "de vendedor" : filter === "informational" ? "informativas" : "detectadas"}.
         </p>
       ) : (
-        <ul className="space-y-2">
-          {visible.map((tag) => (
+        <ul className="space-y-3">
+          {groups.map((group) => (
+            <li key={group.membershipId ?? group.tags[0].normalized}>
+              {hasDuplicateVariants(group) && (
+                <div className="flex items-baseline justify-between gap-3 px-1 pb-1.5">
+                  <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                    {group.vendorName}
+                    {group.vendorActive === false && (
+                      <span className="ml-1.5 text-xs font-normal text-amber-600 dark:text-amber-400">
+                        — mapeo inactivo
+                      </span>
+                    )}
+                  </p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 shrink-0">
+                    {group.tags.length} variantes · {group.totalCount} entidad
+                    {group.totalCount === 1 ? "" : "es"} en total
+                  </p>
+                </div>
+              )}
+              <ul
+                className={
+                  hasDuplicateVariants(group)
+                    ? "space-y-1.5 border-l-2 border-indigo-200 dark:border-indigo-800 pl-3"
+                    : "space-y-2"
+                }
+              >
+          {group.tags.map((tag) => (
             <li
               key={tag.normalized}
               className="flex items-center gap-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2.5"
@@ -139,7 +181,11 @@ export function MapeoTagsScreen({ initialMappings, vendors }: Props) {
                 <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">{tag.original}</p>
                 <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
                   {tag.count} entidad{tag.count === 1 ? "" : "es"}
-                  {tag.classification === "vendor" && tag.mapped_vendor_name && (
+                  {/* El nombre del vendedor solo se repite aquí cuando la tag va
+                      sola: si el grupo tiene varias variantes, ya lo dice la
+                      cabecera y repetirlo por renglón es ruido. */}
+                  {!hasDuplicateVariants(group) &&
+                    tag.classification === "vendor" && tag.mapped_vendor_name && (
                     <>
                       {" · "}
                       <span className="text-gray-700 dark:text-gray-300">{tag.mapped_vendor_name}</span>
@@ -192,6 +238,9 @@ export function MapeoTagsScreen({ initialMappings, vendors }: Props) {
               >
                 Eliminar
               </button>
+            </li>
+          ))}
+              </ul>
             </li>
           ))}
         </ul>
