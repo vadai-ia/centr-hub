@@ -1,7 +1,7 @@
 import "server-only";
 import { getTenantScopedClient } from "@/lib/db/client";
 import {
-  getOrderNamesByShopifyOrderIds,
+  getLinkedOrderInfoByShopifyOrderIds,
   sumPaidOrdersForContact,
   type ContactOrderIndicators,
 } from "@/lib/db/orders";
@@ -42,6 +42,9 @@ export interface ContactOpportunityListItem {
   /** Folio del PEDIDO (`#1828`), resuelto desde `orders.shopify_name`. Es el
    *  que se muestra cuando existe: el del borrador es interno de Shopify. */
   order_reference: string | null;
+  /** Origen del pedido enlazado (`orders.source`). `web` = compra online:
+   *  entró sola por la tienda, sin vendedor. Derivado, no columna de la opp. */
+  order_source: string | null;
   actual_amount: Numeric | null;
   estimated_amount: Numeric | null;
   currency: string;
@@ -142,7 +145,7 @@ async function fetchContactOpportunitiesWithStage(
   const rows = (data ?? []) as unknown as OpportunityWithStageJoined[];
   // Folio del pedido en lote: la lista del contacto muestra el mismo número
   // que el kanban y la búsqueda, no el del borrador.
-  const orderNames = await getOrderNamesByShopifyOrderIds(
+  const linkedOrders = await getLinkedOrderInfoByShopifyOrderIds(
     rows.map((r) => r.shopify_order_id).filter((id): id is string => !!id),
   );
   return rows.map((r) => ({
@@ -155,7 +158,10 @@ async function fetchContactOpportunitiesWithStage(
     stage_is_lost: r.stage?.is_lost ?? false,
     display_reference: r.display_reference,
     order_reference: r.shopify_order_id
-      ? orderNames.get(r.shopify_order_id) ?? null
+      ? linkedOrders.get(r.shopify_order_id)?.name ?? null
+      : null,
+    order_source: r.shopify_order_id
+      ? linkedOrders.get(r.shopify_order_id)?.source ?? null
       : null,
     actual_amount: r.actual_amount,
     estimated_amount: r.estimated_amount,

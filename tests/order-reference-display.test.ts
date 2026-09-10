@@ -66,6 +66,7 @@ describe("búsqueda de reapertura — muestra el folio del pedido", () => {
     display_reference: "#D1205",
     shopify_order_id: "6001",
     order_reference: "#1828",
+    order_source: null,
     last_modified_at: "2026-09-01T00:00:00.000Z",
     won_at: null,
     lost_at: null,

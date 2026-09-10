@@ -218,22 +218,33 @@ export async function listOrdersForContact(
   return data ?? [];
 }
 
+/** Lo que la capa de lectura de opps necesita del pedido enlazado. */
+export interface LinkedOrderInfo {
+  /** Folio del pedido (`orders.shopify_name`, `#1828`). */
+  name: string | null;
+  /** Origen del pedido (`orders.source`): `web` = compra online. */
+  source: string | null;
+}
+
 /**
- * Mapa `shopify_order_id` → folio del pedido (`orders.shopify_name`, `#1828`).
+ * Mapa `shopify_order_id` → datos del pedido enlazado.
  *
- * Lo usa la capa de lectura de oportunidades para enseñar el número que el
- * cliente reconoce en vez del folio del borrador que guarda la opp
- * (`display_reference`, `#D1205`). Se resuelve en lote: una consulta por
- * página de cards, no una por card.
+ * Lo usa la capa de lectura de oportunidades para dos cosas: enseñar el folio
+ * que el cliente reconoce en vez del del borrador (`display_reference`,
+ * `#D1205`), y saber si la venta entró sola por la tienda para marcarla como
+ * compra online. Ambas se derivan del pedido — ninguna es columna de la opp,
+ * así que no pueden quedar desincronizadas.
+ *
+ * Se resuelve en lote: una consulta por página de cards, no una por card.
  *
  * Chunked: `in.()` con miles de ids revienta el largo de la URL de PostgREST.
  * Los ids sin pedido en la base simplemente no aparecen en el mapa y el
  * caller cae al folio del borrador.
  */
-export async function getOrderNamesByShopifyOrderIds(
+export async function getLinkedOrderInfoByShopifyOrderIds(
   shopifyOrderIds: string[],
-): Promise<Map<string, string>> {
-  const out = new Map<string, string>();
+): Promise<Map<string, LinkedOrderInfo>> {
+  const out = new Map<string, LinkedOrderInfo>();
   const ids = Array.from(
     new Set(shopifyOrderIds.map((id) => id?.trim()).filter((id): id is string => !!id)),
   );
@@ -245,17 +256,21 @@ export async function getOrderNamesByShopifyOrderIds(
     const chunk = ids.slice(i, i + CHUNK);
     const { data, error } = await supabase
       .from("orders")
-      .select("shopify_order_id, shopify_name")
+      .select("shopify_order_id, shopify_name, source")
       .eq("organization_id", organizationId)
       .in("shopify_order_id", chunk);
     if (error) throw error;
     for (const row of (data ?? []) as Array<{
       shopify_order_id: string | null;
       shopify_name: string | null;
+      source: string | null;
     }>) {
       const id = row.shopify_order_id?.trim();
-      const name = row.shopify_name?.trim();
-      if (id && name) out.set(id, name);
+      if (!id) continue;
+      out.set(id, {
+        name: row.shopify_name?.trim() || null,
+        source: row.source?.trim() || null,
+      });
     }
   }
   return out;

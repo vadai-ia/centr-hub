@@ -1,8 +1,9 @@
 import "server-only";
 import { getTenantScopedClient } from "@/lib/db/client";
 import {
-  getOrderNamesByShopifyOrderIds,
+  getLinkedOrderInfoByShopifyOrderIds,
   searchShopifyOrderIdsForQuery,
+  type LinkedOrderInfo,
 } from "@/lib/db/orders";
 import { PIPELINE_FLOOR_AUTOMATED_SOURCES } from "@/lib/constants";
 import { channelOutboundValue, type Channel } from "@/lib/types/dashboard";
@@ -78,20 +79,23 @@ function pipelineSearchOrClauses(
  */
 async function attachOrderReferences<T extends { shopify_order_id: string | null }>(
   rows: T[],
-): Promise<Array<T & { order_reference: string | null }>> {
+): Promise<Array<T & { order_reference: string | null; order_source: string | null }>> {
   const ids = rows
     .map((r) => r.shopify_order_id)
     .filter((id): id is string => !!id);
-  const names =
+  const info =
     ids.length > 0
-      ? await getOrderNamesByShopifyOrderIds(ids)
-      : new Map<string, string>();
-  return rows.map((r) => ({
-    ...r,
-    order_reference: r.shopify_order_id
-      ? names.get(r.shopify_order_id) ?? null
-      : null,
-  }));
+      ? await getLinkedOrderInfoByShopifyOrderIds(ids)
+      : new Map<string, LinkedOrderInfo>();
+  return rows.map((r) => {
+    const linked = r.shopify_order_id ? info.get(r.shopify_order_id) : undefined;
+    return {
+      ...r,
+      order_reference: linked?.name ?? null,
+      // Origen del pedido: alimenta el distintivo "Compra online" de la card.
+      order_source: linked?.source ?? null,
+    };
+  });
 }
 
 type OppInsert = Database["public"]["Tables"]["opportunities"]["Insert"];
@@ -397,6 +401,9 @@ export interface KanbanOpportunity {
    *  partir de `shopify_order_id`. NULL mientras la opp no tenga pedido
    *  (Cotización) — ahí manda `display_reference`, el folio del borrador. */
   order_reference: string | null;
+  /** Origen del pedido enlazado (`orders.source`). `web` = compra online:
+   *  entró sola por la tienda, sin vendedor. Derivado, no columna de la opp. */
+  order_source: string | null;
   actual_amount: string | null;
   estimated_amount: string | null;
   currency: string;
@@ -866,6 +873,9 @@ export interface ReopenSearchRow {
    *  número que Post-venta busca al reabrir un caso; `display_reference` es
    *  el del borrador y solo sirve de respaldo. */
   order_reference: string | null;
+  /** Origen del pedido enlazado (`orders.source`). `web` = compra online:
+   *  entró sola por la tienda, sin vendedor. Derivado, no columna de la opp. */
+  order_source: string | null;
   last_modified_at: string;
   won_at: string | null;
   lost_at: string | null;
@@ -931,7 +941,10 @@ export async function searchOpportunitiesAnyState(opts: {
   const { data, error } = await query;
   if (error) throw error;
 
-  type Raw = Omit<ReopenSearchRow, "stage_name" | "order_reference" | "stage"> & {
+  type Raw = Omit<
+    ReopenSearchRow,
+    "stage_name" | "order_reference" | "order_source" | "stage"
+  > & {
     stage: { name: string | null } | null;
   };
   const mapped = ((data ?? []) as unknown as Raw[]).map((r) => ({

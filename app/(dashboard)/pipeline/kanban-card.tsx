@@ -6,6 +6,7 @@ import { primaryOpportunityReference } from "@/lib/format/opportunity-reference"
 import type { AdvisorOption } from "@/lib/types/pipeline";
 import type { UUID } from "@/lib/types/database";
 import { OutboundBadge } from "@/components/outbound/outbound-badge";
+import { ONLINE_ORDER_SOURCE } from "@/lib/constants";
 import {
   contactDisplayName,
   contactIsCustomer,
@@ -129,6 +130,7 @@ export function KanbanCard({
         <div className="flex items-center gap-1 flex-shrink-0">
           {opp.resolved_at && <ResolvedBadge />}
           {!opp.resolved_at && opp.reopened_at && <ReopenedBadge />}
+          {opp.order_source === ONLINE_ORDER_SOURCE && <OnlinePurchaseBadge />}
           {pendingTasksCount !== undefined && pendingTasksCount > 0 && (
             <TasksBadge count={pendingTasksCount} />
           )}
@@ -248,6 +250,26 @@ export function KanbanCard({
         </button>
       )}
     </div>
+  );
+}
+
+/**
+ * La venta entró sola por la tienda online, sin vendedor. Post-venta lo pidió
+ * explícitamente: estas cards nacen sin asesor y necesitan distinguirse de una
+ * cotización a la que simplemente se le olvidó la etiqueta.
+ *
+ * Se deriva del pedido enlazado (`orders.source`), no de "no tiene asesor":
+ * medido en producción, la mayoría de los pedidos sin asesor son cotizaciones
+ * sin etiquetar, no ventas online.
+ */
+function OnlinePurchaseBadge() {
+  return (
+    <span
+      className="text-[9px] uppercase tracking-wide px-1 py-px rounded font-medium flex-shrink-0 bg-sky-100 text-sky-700 dark:bg-sky-500/15 dark:text-sky-300"
+      title="Compra hecha directamente en la tienda online, sin vendedor"
+    >
+      Online
+    </span>
   );
 }
 

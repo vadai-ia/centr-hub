@@ -235,3 +235,18 @@ export const TIMELINE_DEFAULT_LIMIT = 50 as const;
 export const DASHBOARD_STAGE_WINRATE_MIN_SAMPLE = 10 as const;
 export const DASHBOARD_REPURCHASE_WINDOW_MONTHS = 12 as const;
 export const DASHBOARD_EXPORT_MAX_ROWS = 5000 as const;
+
+/**
+ * Valor de `orders.source` (el `source_name` de Shopify) que identifica la
+ * venta ORGÁNICA: la que entra sola por la tienda online, sin vendedor.
+ *
+ * NO usar "sin asesor asignado" como criterio equivalente. Medido en Centr:
+ * de 947 pedidos, 578 no tienen asesor pero solo 287 son 'web' — los otros
+ * 291 son cotizaciones donde el vendedor no puso su etiqueta. Confundirlos
+ * infla el canal orgánico a costa de las metas individuales.
+ *
+ * Vive acá y no en `dashboard-metrics` (que es `server-only`) porque la card
+ * del kanban es `'use client'` y necesita el mismo criterio para el
+ * distintivo "Online". Una constante duplicada es una divergencia esperando.
+ */
+export const ONLINE_ORDER_SOURCE = "web";

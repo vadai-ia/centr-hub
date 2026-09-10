@@ -36,6 +36,7 @@ import {
 } from "@/lib/time/period";
 import type { UUID } from "@/lib/types/database";
 import { channelOutboundValue } from "@/lib/types/dashboard";
+import { ONLINE_ORDER_SOURCE } from "@/lib/constants";
 import type {
   AdvisorBreakdownRow,
   Channel,
@@ -399,16 +400,6 @@ export function computeVentaMetrics(
  * `computeDashboardData`, así Mi Día y el Dashboard pagan poco por las barras.
  * Devuelve un arreglo alineado con `scopes`.
  */
-/**
- * Valor de `orders.source` (el `source_name` de Shopify) que identifica la
- * venta ORGÁNICA: la que entra sola por la tienda online, sin vendedor.
- *
- * NO usar "sin asesor asignado" como criterio equivalente. Medido en Centr:
- * de 947 pedidos, 578 no tienen asesor pero solo 287 son 'web' — los otros
- * 291 son cotizaciones donde el vendedor no puso su etiqueta. Confundirlos
- * infla el canal orgánico a costa de las metas individuales.
- */
-export const ONLINE_ORDER_SOURCE = "web";
 
 /**
  * Sujeto de una meta traducido a cómo se mide su avance (0051).

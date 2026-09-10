@@ -37,6 +37,7 @@ import {
   isPostventaEngineEnabled,
 } from "@/lib/services/postventa-transition";
 import { flagOrderTagConflictIfHandoffKept } from "@/lib/services/outbound-handoff";
+import { ensureOnlineOrderOpportunity } from "@/lib/services/online-order-opportunity";
 import { recordAuditEvent } from "@/lib/db/operational";
 import type { Json, OrderRow, UUID } from "@/lib/types/database";
 
@@ -397,6 +398,21 @@ function makeOrderWorker(args: {
           } catch {
             // best-effort: la advertencia no debe romper la ingesta del pedido.
           }
+        }
+
+        // Compra online (sin Draft Order): crea su opp de Post-venta, que
+        // el trigger F1→F2 nunca haría porque no hay opp de Venta madre.
+        // Va ANTES del motor a propósito — así la opp recién creada ya entra
+        // en la misma pasada y el motor la coloca según el estado de entrega,
+        // en vez de esperar al cron. No-fatal: un fallo aquí no debe romper
+        // la ingesta del pedido.
+        try {
+          await ensureOnlineOrderOpportunity(order);
+        } catch (err) {
+          console.error(
+            `[online-order] no se pudo crear la opp (order ${order.id}):`,
+            (err as Error).message,
+          );
         }
 
         // Motor de transiciones de Post-venta (M3v2): mueve la hija de

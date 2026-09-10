@@ -153,6 +153,8 @@ describe("collapseReopenResults — una entrada por caso real (M4v2)", () => {
     contact_id: "c-1",
     display_reference: null,
     order_reference: null,
+
+    order_source: null,
     shopify_order_id: null,
     last_modified_at: "2026-06-01T00:00:00Z",
     won_at: null,
