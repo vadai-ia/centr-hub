@@ -17,9 +17,16 @@
  *
  * Idempotente: una segunda corrida no crea nada (el pedido ya quedó enlazado).
  *
+ * `--desde-orden` acota el correctivo a partir de un pedido concreto. Se ancla
+ * en la FECHA de ese pedido, no en comparar folios: `#1865` vs `#987` no se
+ * ordenan bien como texto, y un folio con prefijo o con salto de numeración
+ * rompería el corte en silencio. Post-venta pide el corte en términos de "de
+ * esta venta en adelante", que es como ellos miran el histórico.
+ *
  * Uso:
  *   npm run maintenance:backfill-online-orders -- --org-slug centr --dry-run
- *   npm run maintenance:backfill-online-orders -- --org-slug centr
+ *   npm run maintenance:backfill-online-orders -- --org-slug centr --desde-orden "#1865" --dry-run
+ *   npm run maintenance:backfill-online-orders -- --org-slug centr --desde-orden "#1865"
  *   npm run maintenance:backfill-online-orders -- --org-slug centr --limit 25
  */
 import { config as loadDotenv } from "dotenv";
@@ -57,13 +64,40 @@ async function main() {
     org.id as UUID,
     async () => {
       const admin = getSupabaseAdminClient();
-      const { data, error } = await admin
+
+      // Corte "de esta venta en adelante": se resuelve la FECHA del pedido
+      // ancla y se filtra por ella. Comparar folios como texto ordena mal
+      // (`#987` > `#1865`) y un salto de numeración cortaría donde no toca.
+      const desdeOrden = arg("--desde-orden");
+      let desdeIso: string | null = null;
+      if (desdeOrden) {
+        const { data: ancla, error: anclaErr } = await admin
+          .from("orders")
+          .select("shopify_name, shopify_created_at")
+          .eq("organization_id", org.id)
+          .eq("shopify_name", desdeOrden.trim())
+          .maybeSingle();
+        if (anclaErr) throw new Error(`orden ancla: ${anclaErr.message}`);
+        if (!ancla?.shopify_created_at) {
+          console.error(
+            `✗ No encontré el pedido "${desdeOrden}" en ${slug} (o no tiene fecha de Shopify).\n` +
+              `  Verificá el folio exacto, con "#".`,
+          );
+          process.exit(1);
+        }
+        desdeIso = ancla.shopify_created_at as string;
+        console.log(`\n  corte: desde ${ancla.shopify_name} (${desdeIso}) en adelante`);
+      }
+
+      let query = admin
         .from("orders")
         .select("*")
         .eq("organization_id", org.id)
         .eq("source", ONLINE_ORDER_SOURCE)
         .eq("financial_status", "paid")
-        .is("opportunity_id", null)
+        .is("opportunity_id", null);
+      if (desdeIso) query = query.gte("shopify_created_at", desdeIso);
+      const { data, error } = await query
         .order("shopify_created_at", { ascending: false })
         .limit(limit);
       if (error) throw new Error(`orders: ${error.message}`);
