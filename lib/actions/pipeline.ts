@@ -13,6 +13,7 @@ import {
   searchOpportunitiesAnyState,
   type KanbanOpportunity,
 } from "@/lib/db/opportunities";
+import { searchShopifyOrderIdsForQuery } from "@/lib/db/orders";
 import { reopenOpportunityIntoProblemCase } from "@/lib/services/opportunity-reopen";
 import { collapseReopenResults } from "@/lib/services/reopen-search";
 import { listPendingTaskCountsByOpportunity, recordAuditEvent } from "@/lib/db/operational";
@@ -214,10 +215,13 @@ export async function loadKanbanPageAction(
       effectiveAdvisorId = input.assignedAdvisorId;
     }
 
-    const matchingContactIds: UUID[] | null =
-      input.query && input.query.trim().length > 0
-        ? await searchContactIdsForQuery(input.query)
-        : null;
+    const hasSearch = !!input.query && input.query.trim().length > 0;
+    const [matchingContactIds, matchingOrderIds] = hasSearch
+      ? await Promise.all([
+          searchContactIdsForQuery(input.query!),
+          searchShopifyOrderIdsForQuery(input.query!),
+        ])
+      : [null, null];
 
     // Ventana de cerradas por etapa cerrada (M4v2 dos umbrales):
     //   - Vista normal: corte de auto-ocultar (N días, config de la org).
@@ -248,6 +252,7 @@ export async function loadKanbanPageAction(
       dateTo: input.dateTo,
       query: input.query,
       matchingContactIds,
+      matchingOrderIds,
       limit: PIPELINE_PAGE_SIZE + 1,
       offset: input.page * PIPELINE_PAGE_SIZE,
       closedFilter,
@@ -527,10 +532,13 @@ export async function loadInitialPipelineState(opts: {
     // Pre-resolve contact_ids that match the search query ONCE. Both
     // the count query and the per-stage list queries reuse this set
     // — sin esto, cada stage volvía a correr la sub-query de contacts.
-    const matchingContactIds: UUID[] | null =
-      filterQuery && filterQuery.trim().length > 0
-        ? await searchContactIdsForQuery(filterQuery)
-        : null;
+    const hasSearch = !!filterQuery && filterQuery.trim().length > 0;
+    const [matchingContactIds, matchingOrderIds] = hasSearch
+      ? await Promise.all([
+          searchContactIdsForQuery(filterQuery!),
+          searchShopifyOrderIdsForQuery(filterQuery!),
+        ])
+      : [null, null];
 
     // La segunda ranura (Customer Success) solo existe en Post-venta: en los
     // otros funnels ni se consulta ni se filtra por ella.
@@ -573,6 +581,7 @@ export async function loadInitialPipelineState(opts: {
         dateTo: filterDateTo,
         query: filterQuery,
         matchingContactIds,
+        matchingOrderIds,
         closedHide: { cutoffIso, retentionCutoffIso, wonStageIds, lostStageIds },
         resolvedScope,
         resolvedSinceIso,
@@ -590,6 +599,7 @@ export async function loadInitialPipelineState(opts: {
             dateTo: filterDateTo,
             query: filterQuery,
             matchingContactIds,
+            matchingOrderIds,
             limit: PIPELINE_PAGE_SIZE + 1,
             closedFilter: closedFilterForStage(stage, cutoffIso),
             resolvedScope,

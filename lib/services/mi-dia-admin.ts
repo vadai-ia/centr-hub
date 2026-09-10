@@ -5,6 +5,7 @@ import { listUnassignedActiveOpportunityCards } from "@/lib/db/opportunities";
 import { listPipelineStages } from "@/lib/db/pipeline";
 import { loadMiDiaForUser } from "@/lib/services/mi-dia";
 import { effectiveAmount, formatAmountCompact } from "@/lib/format/money";
+import { primaryOpportunityReference } from "@/lib/format/opportunity-reference";
 import type { Funnel, UUID } from "@/lib/types/database";
 
 /**
@@ -87,7 +88,7 @@ async function loadUnassignedCards(): Promise<MiDiaUnassignedCard[]> {
     return {
       opportunityId: o.id,
       funnel: o.funnel,
-      displayReference: o.display_reference,
+      displayReference: primaryOpportunityReference(o),
       contactName: o.contact?.full_name ?? null,
       amountLabel: formatAmountCompact(amt.value, o.currency),
       amountValue: Number.isFinite(num) ? num : 0,

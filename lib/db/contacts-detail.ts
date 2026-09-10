@@ -1,6 +1,10 @@
 import "server-only";
 import { getTenantScopedClient } from "@/lib/db/client";
-import { sumPaidOrdersForContact, type ContactOrderIndicators } from "@/lib/db/orders";
+import {
+  getOrderNamesByShopifyOrderIds,
+  sumPaidOrdersForContact,
+  type ContactOrderIndicators,
+} from "@/lib/db/orders";
 import { getContactById } from "@/lib/db/contacts";
 import type {
   ContactRow,
@@ -33,7 +37,11 @@ export interface ContactOpportunityListItem {
   stage_color: string;
   stage_is_won: boolean;
   stage_is_lost: boolean;
+  /** Folio del borrador (`#D1205`) — respaldo cuando aún no hay pedido. */
   display_reference: string | null;
+  /** Folio del PEDIDO (`#1828`), resuelto desde `orders.shopify_name`. Es el
+   *  que se muestra cuando existe: el del borrador es interno de Shopify. */
+  order_reference: string | null;
   actual_amount: Numeric | null;
   estimated_amount: Numeric | null;
   currency: string;
@@ -96,6 +104,7 @@ interface OpportunityWithStageJoined {
   funnel: Funnel;
   stage_id: UUID;
   display_reference: string | null;
+  shopify_order_id: string | null;
   actual_amount: Numeric | null;
   estimated_amount: Numeric | null;
   currency: string;
@@ -120,7 +129,7 @@ async function fetchContactOpportunitiesWithStage(
   const { data, error } = await supabase
     .from("opportunities")
     .select(
-      "id, funnel, stage_id, display_reference, actual_amount, " +
+      "id, funnel, stage_id, display_reference, shopify_order_id, actual_amount, " +
       "estimated_amount, currency, assigned_advisor_id, cancelled_at, " +
       "won_at, invoice_url, last_modified_at, created_at, " +
       "stage:pipeline_stages!inner(name, color, is_won, is_lost)",
@@ -131,6 +140,11 @@ async function fetchContactOpportunitiesWithStage(
   if (error) throw error;
 
   const rows = (data ?? []) as unknown as OpportunityWithStageJoined[];
+  // Folio del pedido en lote: la lista del contacto muestra el mismo número
+  // que el kanban y la búsqueda, no el del borrador.
+  const orderNames = await getOrderNamesByShopifyOrderIds(
+    rows.map((r) => r.shopify_order_id).filter((id): id is string => !!id),
+  );
   return rows.map((r) => ({
     id: r.id,
     funnel: r.funnel,
@@ -140,6 +154,9 @@ async function fetchContactOpportunitiesWithStage(
     stage_is_won: r.stage?.is_won ?? false,
     stage_is_lost: r.stage?.is_lost ?? false,
     display_reference: r.display_reference,
+    order_reference: r.shopify_order_id
+      ? orderNames.get(r.shopify_order_id) ?? null
+      : null,
     actual_amount: r.actual_amount,
     estimated_amount: r.estimated_amount,
     currency: r.currency,

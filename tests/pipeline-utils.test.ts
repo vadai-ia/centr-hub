@@ -26,6 +26,7 @@ function makeOpp(overrides: Partial<KanbanOpportunity> = {}): KanbanOpportunity 
     shopify_draft_order_id: "do-1",
     shopify_order_id: null,
     display_reference: "#D1",
+    order_reference: null,
     actual_amount: null,
     estimated_amount: null,
     currency: "MXN",

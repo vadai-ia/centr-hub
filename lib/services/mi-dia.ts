@@ -12,6 +12,7 @@ import {
 import { listPipelineStages } from "@/lib/db/pipeline";
 import { lastPlatformActivityForContacts } from "@/lib/services/activity-aggregation";
 import { effectiveAmount, formatAmountCompact } from "@/lib/format/money";
+import { primaryOpportunityReference } from "@/lib/format/opportunity-reference";
 import {
   todayBoundsUtc,
   endOfWeekWindowUtc,
@@ -163,7 +164,8 @@ export async function loadMiDiaForUser(input: {
     card = {
       opportunityId: oppId,
       available: !!opp,
-      displayReference: opp?.display_reference ?? null,
+      // Mismo folio que enseña el kanban: el del PEDIDO cuando existe.
+      displayReference: opp ? primaryOpportunityReference(opp) : null,
       contactName: opp?.contact?.full_name ?? null,
       amountLabel: opp ? formatAmountCompact(amt.value, opp.currency) : null,
       amountValue: Number.isFinite(amtNum) ? amtNum : 0,

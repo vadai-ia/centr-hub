@@ -2,6 +2,7 @@
 import { useDraggable } from "@dnd-kit/core";
 import { CSS } from "@dnd-kit/utilities";
 import type { KanbanOpportunity } from "@/lib/db/opportunities";
+import { primaryOpportunityReference } from "@/lib/format/opportunity-reference";
 import type { AdvisorOption } from "@/lib/types/pipeline";
 import type { UUID } from "@/lib/types/database";
 import { OutboundBadge } from "@/components/outbound/outbound-badge";
@@ -84,6 +85,9 @@ export function KanbanCard({
   // teléfono para que el vendedor pueda llamar sin abrir la card.
   const noAmount = amount.isMissing;
   const phone = opp.contact?.phone ?? null;
+  // Folio del PEDIDO cuando ya existe; el del borrador solo como respaldo
+  // (es interno de Shopify y el cliente nunca lo vio).
+  const reference = primaryOpportunityReference(opp);
 
   const handleClick = onSelect
     ? () => {
@@ -147,9 +151,9 @@ export function KanbanCard({
         </div>
       )}
 
-      {opp.display_reference && (
+      {reference && (
         <p className="text-[10px] font-mono text-gray-400 dark:text-gray-500 truncate">
-          {opp.display_reference}
+          {reference}
         </p>
       )}
 

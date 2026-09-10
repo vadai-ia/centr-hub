@@ -152,6 +152,7 @@ describe("collapseReopenResults — una entrada por caso real (M4v2)", () => {
     stage_name: "Etapa",
     contact_id: "c-1",
     display_reference: null,
+    order_reference: null,
     shopify_order_id: null,
     last_modified_at: "2026-06-01T00:00:00Z",
     won_at: null,
@@ -227,5 +228,102 @@ describe("collapseReopenResults — una entrada por caso real (M4v2)", () => {
       row({ id: "b", display_reference: "#D2", funnel: "post_venta" }),
     ]);
     expect(out).toHaveLength(2);
+  });
+});
+
+/**
+ * Búsqueda por el número de PEDIDO (folio del cliente, `#1828`).
+ *
+ * Post-venta buscaba un caso por el número que el cliente le dicta y no
+ * encontraba nada: la opp solo guarda el folio del BORRADOR (`#D1205`) y el
+ * predicado de búsqueda solo miraba esa columna. El folio real vive en
+ * `orders.shopify_name`, así que la búsqueda pre-resuelve los
+ * `shopify_order_id` que matchean y los suma al `.or()`.
+ */
+describe("búsqueda por número de pedido (folio del cliente)", () => {
+  function seedOrder() {
+    fake.setTable("contacts", [
+      { id: "c-1", organization_id: ORG, full_name: "Cliente Uno", phone: "+521", email: null },
+    ]);
+    fake.setTable("orders", [
+      {
+        id: "ord-1",
+        organization_id: ORG,
+        shopify_order_id: "6001",
+        shopify_name: "#1828",
+      },
+      {
+        id: "ord-2",
+        organization_id: ORG,
+        shopify_order_id: "6002",
+        shopify_name: "#1900",
+      },
+    ]);
+    fake.setTable("opportunities", [
+      {
+        id: "o-post",
+        organization_id: ORG,
+        funnel: "post_venta",
+        contact_id: "c-1",
+        stage_id: "s-1",
+        display_reference: "#D1205",
+        shopify_order_id: "6001",
+        last_modified_at: "2026-06-01T00:00:00Z",
+        won_at: null,
+        lost_at: null,
+        cancelled_at: null,
+        resolved_at: null,
+        reopened_at: null,
+        assigned_advisor_id: null,
+      },
+    ]);
+  }
+
+  it("suma el predicado shopify_order_id al .or() con los pedidos que matchean", async () => {
+    seedOrder();
+    await run(() => searchOpportunitiesAnyState({ query: "1828", limit: 25 }));
+
+    const oppQuery = fake.history.find(
+      (h) => h.table === "opportunities" && h.action === "select",
+    );
+    const orClause = oppQuery?.filters.find((f) => f.op === "or")?.value as string;
+    expect(orClause).toContain("shopify_order_id.in.(6001)");
+    // El pedido que NO matchea el texto no entra al predicado.
+    expect(orClause).not.toContain("6002");
+  });
+
+  it("devuelve el folio del pedido en order_reference, no el del borrador", async () => {
+    seedOrder();
+    const rows = await run(() =>
+      searchOpportunitiesAnyState({ query: "1828", limit: 25 }),
+    );
+    const row = rows.find((r) => r.id === "o-post");
+    expect(row?.order_reference).toBe("#1828");
+    expect(row?.display_reference).toBe("#D1205");
+  });
+
+  it("opp sin pedido: order_reference queda null y manda el borrador", async () => {
+    seedOrder();
+    fake.getTable("opportunities").push({
+      id: "o-cotizacion",
+      organization_id: ORG,
+      funnel: "venta",
+      contact_id: "c-1",
+      stage_id: "s-1",
+      display_reference: "#D1300",
+      shopify_order_id: null,
+      last_modified_at: "2026-06-02T00:00:00Z",
+      won_at: null,
+      lost_at: null,
+      cancelled_at: null,
+      resolved_at: null,
+      reopened_at: null,
+      assigned_advisor_id: null,
+    });
+    const rows = await run(() =>
+      searchOpportunitiesAnyState({ query: "1828", limit: 25 }),
+    );
+    const row = rows.find((r) => r.id === "o-cotizacion");
+    expect(row?.order_reference).toBeNull();
   });
 });

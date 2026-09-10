@@ -5,7 +5,7 @@
  * tabla por nombre con filas {organization_id?, ...}.
  *
  * Soporta el subset de operaciones usadas por `lib/db/*` y servicios:
- *   - select * con eq, in, is, or
+ *   - select * con eq, in, is, ilike, or
  *   - .single() / .maybeSingle()
  *   - insert / update / upsert / delete con filtros
  *   - encadenamiento típico
@@ -18,7 +18,7 @@ interface BuilderState {
   action: "select" | "insert" | "update" | "delete" | "upsert";
   filters: Array<{
     field: string;
-    op: "eq" | "in" | "is" | "or" | "not_is";
+    op: "eq" | "in" | "is" | "or" | "not_is" | "ilike";
     value: unknown;
   }>;
   payload?: unknown;
@@ -76,6 +76,10 @@ export class FakeSupabase {
       },
       is(field: string, value: unknown) {
         state.filters.push({ field, op: "is", value });
+        return builder;
+      },
+      ilike(field: string, pattern: string) {
+        state.filters.push({ field, op: "ilike", value: pattern });
         return builder;
       },
       not(field: string, op: string, value: unknown) {
@@ -179,6 +183,9 @@ export class FakeSupabase {
           if (!arr.includes(row[f.field])) return false;
         }
         if (f.op === "is" && row[f.field] !== f.value) return false;
+        if (f.op === "ilike" && !ilikeMatches(row[f.field], f.value as string)) {
+          return false;
+        }
         if (f.op === "not_is" && row[f.field] === f.value) return false;
         // op "or" no se aplica filtrado preciso en este fake
       }
@@ -244,3 +251,32 @@ export class FakeSupabase {
  *     getSupabaseAdminClient: () => fake,
  *   }));
  */
+
+/**
+ * `ilike` de PostgREST: case-insensitive con `%` como comodín. Se implementa
+ * de verdad (no como no-op) porque la búsqueda del pipeline encuentra opps
+ * por el folio del PEDIDO vía `orders.shopify_name ilike` — un fake que
+ * ignore el patrón daría por buena una búsqueda que en producción no filtra.
+ *
+ * Sin regex a propósito: los folios traen `#` y los patrones se arman por
+ * interpolación, así que se comparan los segmentos entre `%` en orden.
+ */
+function ilikeMatches(value: unknown, pattern: string): boolean {
+  if (typeof value !== "string") return false;
+  const haystack = value.toLowerCase();
+  const parts = pattern.toLowerCase().split("%");
+  let cursor = 0;
+  for (let i = 0; i < parts.length; i++) {
+    const part = parts[i];
+    if (part.length === 0) continue;
+    const anchoredStart = i === 0;
+    const anchoredEnd = i === parts.length - 1;
+    const found = anchoredStart
+      ? (haystack.startsWith(part) ? 0 : -1)
+      : haystack.indexOf(part, cursor);
+    if (found < 0) return false;
+    if (anchoredEnd && !haystack.endsWith(part)) return false;
+    cursor = found + part.length;
+  }
+  return true;
+}

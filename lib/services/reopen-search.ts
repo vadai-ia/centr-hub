@@ -1,4 +1,5 @@
 import type { ReopenSearchRow } from "@/lib/db/opportunities";
+import { primaryOpportunityReference } from "@/lib/format/opportunity-reference";
 import type { ReopenSearchResultItem } from "@/lib/types/pipeline";
 
 /**
@@ -22,7 +23,9 @@ export function reopenRowToItem(r: ReopenSearchRow): ReopenSearchResultItem {
     stageName: r.stage_name,
     contactName:
       r.contact?.full_name?.trim() || r.contact?.phone?.trim() || "Sin nombre",
-    reference: r.display_reference ?? r.shopify_order_id ?? null,
+    // Folio del PEDIDO (`#1828`) — es el que Post-venta y el cliente
+    // conocen. El del borrador solo aparece si aún no hay pedido.
+    reference: primaryOpportunityReference(r) ?? r.shopify_order_id ?? null,
     statusLabel: deriveReopenStatusLabel(r),
     lastModifiedAt: r.last_modified_at,
   };

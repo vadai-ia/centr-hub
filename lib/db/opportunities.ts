@@ -1,5 +1,9 @@
 import "server-only";
 import { getTenantScopedClient } from "@/lib/db/client";
+import {
+  getOrderNamesByShopifyOrderIds,
+  searchShopifyOrderIdsForQuery,
+} from "@/lib/db/orders";
 import { PIPELINE_FLOOR_AUTOMATED_SOURCES } from "@/lib/constants";
 import { channelOutboundValue, type Channel } from "@/lib/types/dashboard";
 import type {
@@ -26,6 +30,68 @@ function pipelineVisibilityFloorOr(minIso: string): string {
     (s) => `last_modified_source.neq.${s}`,
   ).join(",");
   return `effective_created_at.gte.${minIso},and(last_modified_at.gte.${minIso},${notAuto})`;
+}
+
+/**
+ * Predicados `.or()` de la búsqueda libre del pipeline.
+ *
+ * Tres formas de encontrar la misma opp, unidas por OR: el folio del
+ * borrador que guarda la opp (`#D1205`), el contacto (nombre/teléfono/email,
+ * pre-resuelto a ids) y el folio del PEDIDO (`#1828`, pre-resuelto a
+ * `shopify_order_id`s por `searchShopifyOrderIdsForQuery`). Los ids se
+ * inyectan como `in.(...)` porque PostgREST no permite mezclar un predicado
+ * sobre una tabla embebida con los de la tabla padre.
+ *
+ * El folio del pedido es el número que el cliente y Post-venta conocen: sin
+ * su cláusula, buscar "1828" no encontraba nada porque la opp solo guarda el
+ * del borrador. Compartido por la lista y por el CONTEO para que no puedan
+ * divergir — un conteo con otro criterio pinta un badge que no corresponde a
+ * las cards listadas.
+ *
+ * Lista vacía ⇒ el query no puede matchear nada; el caller corta y devuelve
+ * vacío en vez de listar todo sin filtro.
+ */
+function pipelineSearchOrClauses(
+  sanitized: string,
+  contactIds: UUID[] | null | undefined,
+  orderIds: string[] | null | undefined,
+): string[] {
+  const clauses: string[] = [];
+  if (sanitized.length > 0) {
+    clauses.push(`display_reference.ilike.%${sanitized}%`);
+  }
+  const cIds = (contactIds ?? []).slice(0, 5000);
+  if (cIds.length > 0) clauses.push(`contact_id.in.(${cIds.join(",")})`);
+  const oIds = (orderIds ?? []).slice(0, 5000);
+  if (oIds.length > 0) clauses.push(`shopify_order_id.in.(${oIds.join(",")})`);
+  return clauses;
+}
+
+/**
+ * Rellena `order_reference` (folio del pedido, `#1828`) en un lote de opps ya
+ * leídas, resolviendo `orders.shopify_name` por `shopify_order_id`.
+ *
+ * Vive en la capa de datos y no en cada pantalla: card del kanban, detalle,
+ * lista del contacto, Mi Día y búsqueda de reapertura leen todas por este
+ * camino, así que ninguna puede quedarse enseñando el folio del borrador.
+ * Una sola consulta por lote.
+ */
+async function attachOrderReferences<T extends { shopify_order_id: string | null }>(
+  rows: T[],
+): Promise<Array<T & { order_reference: string | null }>> {
+  const ids = rows
+    .map((r) => r.shopify_order_id)
+    .filter((id): id is string => !!id);
+  const names =
+    ids.length > 0
+      ? await getOrderNamesByShopifyOrderIds(ids)
+      : new Map<string, string>();
+  return rows.map((r) => ({
+    ...r,
+    order_reference: r.shopify_order_id
+      ? names.get(r.shopify_order_id) ?? null
+      : null,
+  }));
 }
 
 type OppInsert = Database["public"]["Tables"]["opportunities"]["Insert"];
@@ -326,6 +392,11 @@ export interface KanbanOpportunity {
   shopify_draft_order_id: string | null;
   shopify_order_id: string | null;
   display_reference: string | null;
+  /** Folio del PEDIDO (`#1828`) resuelto desde `orders.shopify_name`. NO es
+   *  una columna de `opportunities`: lo rellena la capa de datos en lote a
+   *  partir de `shopify_order_id`. NULL mientras la opp no tenga pedido
+   *  (Cotización) — ahí manda `display_reference`, el folio del borrador. */
+  order_reference: string | null;
   actual_amount: string | null;
   estimated_amount: string | null;
   currency: string;
@@ -423,6 +494,10 @@ export async function listKanbanOpportunities(opts: {
    *  this to avoid duplicate sub-queries when listing multiple stages
    *  with the same search. */
   matchingContactIds?: UUID[] | null;
+  /** Igual que `matchingContactIds` pero para el folio del PEDIDO: los
+   *  `shopify_order_id` cuyo `orders.shopify_name` matchea el query. El
+   *  caller los comparte con el conteo y con las demás etapas. */
+  matchingOrderIds?: string[] | null;
   /** Auto-ocultar cerradas (Fix de pipeline P1): para una etapa cerrada
    *  (Ganada/Perdida) se mantienen visibles solo las opps con la fecha
    *  de cierre `>= sinceIso` (o NULL — antigüedad desconocida no se
@@ -458,6 +533,13 @@ export async function listKanbanOpportunities(opts: {
   let contactIds = opts.matchingContactIds;
   if (contactIds === undefined && opts.query && opts.query.trim().length > 0) {
     contactIds = await searchContactIdsForQuery(opts.query);
+  }
+  // Ids de pedido cuyo folio (`orders.shopify_name`, `#1828`) matchea el
+  // query. Sin esto, buscar el número que el cliente conoce no encuentra
+  // nada: la opp solo guarda el folio del borrador.
+  let orderIds = opts.matchingOrderIds;
+  if (orderIds === undefined && opts.query && opts.query.trim().length > 0) {
+    orderIds = await searchShopifyOrderIdsForQuery(opts.query);
   }
   const hasQuery = !!opts.query && opts.query.trim().length > 0;
   const sanitized = hasQuery
@@ -518,20 +600,9 @@ export async function listKanbanOpportunities(opts: {
   }
 
   if (hasQuery) {
-    const idsList = (contactIds ?? []).slice(0, 5000);
-    if (idsList.length === 0 && sanitized.length === 0) {
-      return [];
-    }
-    if (idsList.length === 0) {
-      // Solo display_reference puede matchear.
-      query = query.ilike("display_reference", `%${sanitized}%`);
-    } else {
-      const inList = idsList.join(",");
-      // PostgREST `.or()` con `in.(...)` requiere el set entre paréntesis.
-      query = query.or(
-        `display_reference.ilike.%${sanitized}%,contact_id.in.(${inList})`,
-      );
-    }
+    const clauses = pipelineSearchOrClauses(sanitized, contactIds, orderIds);
+    if (clauses.length === 0) return [];
+    query = query.or(clauses.join(","));
   }
 
   query = query
@@ -543,7 +614,11 @@ export async function listKanbanOpportunities(opts: {
 
   const { data, error } = await query;
   if (error) throw error;
-  return (data ?? []) as unknown as KanbanOpportunity[];
+  // El folio visible es el del PEDIDO cuando existe (ver
+  // `attachOrderReferences`); la opp solo guarda el del borrador.
+  return (await attachOrderReferences(
+    (data ?? []) as unknown as Array<Omit<KanbanOpportunity, "order_reference">>,
+  )) as unknown as KanbanOpportunity[];
 }
 
 /**
@@ -568,6 +643,10 @@ export async function countKanbanOpportunitiesByStage(opts: {
   /** Pre-resolved contact_ids — caller suele compartirlos con
    *  `listKanbanOpportunities` para evitar la sub-query repetida. */
   matchingContactIds?: UUID[] | null;
+  /** Pre-resolved shopify_order_ids (folio del pedido) — mismo criterio y
+   *  misma fuente que en `listKanbanOpportunities`; mantiene el conteo
+   *  alineado con la lista. */
+  matchingOrderIds?: string[] | null;
   /** Auto-ocultar cerradas (Fix de pipeline P1): si se pasa, el conteo
    *  bucketea cada etapa cerrada en VISIBLE (cierre dentro de la ventana
    *  o NULL) vs OCULTA (cierre antes de `cutoffIso`). Sin esto, todo
@@ -606,6 +685,13 @@ export async function countKanbanOpportunitiesByStage(opts: {
   let contactIds = opts.matchingContactIds;
   if (contactIds === undefined && opts.query && opts.query.trim().length > 0) {
     contactIds = await searchContactIdsForQuery(opts.query);
+  }
+  // Ids de pedido cuyo folio (`orders.shopify_name`, `#1828`) matchea el
+  // query. Sin esto, buscar el número que el cliente conoce no encuentra
+  // nada: la opp solo guarda el folio del borrador.
+  let orderIds = opts.matchingOrderIds;
+  if (orderIds === undefined && opts.query && opts.query.trim().length > 0) {
+    orderIds = await searchShopifyOrderIdsForQuery(opts.query);
   }
   const hasQuery = !!opts.query && opts.query.trim().length > 0;
   const sanitized = hasQuery
@@ -655,18 +741,9 @@ export async function countKanbanOpportunitiesByStage(opts: {
   }
 
   if (hasQuery) {
-    const idsList = (contactIds ?? []).slice(0, 5000);
-    if (idsList.length === 0 && sanitized.length === 0) {
-      return { counts: {}, hiddenCounts: {} };
-    }
-    if (idsList.length === 0) {
-      query = query.ilike("display_reference", `%${sanitized}%`);
-    } else {
-      const inList = idsList.join(",");
-      query = query.or(
-        `display_reference.ilike.%${sanitized}%,contact_id.in.(${inList})`,
-      );
-    }
+    const clauses = pipelineSearchOrClauses(sanitized, contactIds, orderIds);
+    if (clauses.length === 0) return { counts: {}, hiddenCounts: {} };
+    query = query.or(clauses.join(","));
   }
 
   // Cap explícito: el conteo no debería volcar millones de filas. 50k
@@ -772,8 +849,10 @@ export async function searchContactIdsForQuery(rawQuery: string): Promise<UUID[]
  * propias opps (CLAUDE.md "Vista de vendedor — scoping a nivel data").
  * Admin pasa `undefined` → ve todas.
  *
- * Match: `display_reference` (ilike) o contacto (nombre/teléfono/email,
- * pre-resuelto a contact_ids como el resto del pipeline).
+ * Match: folio del PEDIDO (`orders.shopify_name`, pre-resuelto a
+ * `shopify_order_id`s), folio del borrador (`display_reference`, ilike) o
+ * contacto (nombre/teléfono/email, pre-resuelto a contact_ids como el resto
+ * del pipeline). Mismo criterio que la búsqueda del kanban.
  */
 export interface ReopenSearchRow {
   id: UUID;
@@ -783,6 +862,10 @@ export interface ReopenSearchRow {
   contact_id: UUID;
   display_reference: string | null;
   shopify_order_id: string | null;
+  /** Folio del PEDIDO (`#1828`), resuelto desde `orders.shopify_name`. Es el
+   *  número que Post-venta busca al reabrir un caso; `display_reference` es
+   *  el del borrador y solo sirve de respaldo. */
+  order_reference: string | null;
   last_modified_at: string;
   won_at: string | null;
   lost_at: string | null;
@@ -820,8 +903,12 @@ export async function searchOpportunitiesAnyState(opts: {
     .trim()
     .replace(/[,.()*%\\]/g, " ")
     .slice(0, 80);
-  const contactIds = await searchContactIdsForQuery(opts.query);
-  if (sanitized.length === 0 && contactIds.length === 0) return [];
+  const [contactIds, orderIds] = await Promise.all([
+    searchContactIdsForQuery(opts.query),
+    searchShopifyOrderIdsForQuery(opts.query),
+  ]);
+  const clauses = pipelineSearchOrClauses(sanitized, contactIds, orderIds);
+  if (clauses.length === 0) return [];
 
   const { supabase, organizationId } = getTenantScopedClient();
   let query = supabase
@@ -834,14 +921,7 @@ export async function searchOpportunitiesAnyState(opts: {
     query = query.eq("assigned_advisor_id", opts.assignedAdvisorId);
   }
 
-  const idsList = contactIds.slice(0, 5000);
-  if (idsList.length === 0) {
-    query = query.ilike("display_reference", `%${sanitized}%`);
-  } else {
-    query = query.or(
-      `display_reference.ilike.%${sanitized}%,contact_id.in.(${idsList.join(",")})`,
-    );
-  }
+  query = query.or(clauses.join(","));
 
   query = query
     .order("last_modified_at", { ascending: false })
@@ -851,10 +931,10 @@ export async function searchOpportunitiesAnyState(opts: {
   const { data, error } = await query;
   if (error) throw error;
 
-  type Raw = Omit<ReopenSearchRow, "stage_name" | "stage"> & {
+  type Raw = Omit<ReopenSearchRow, "stage_name" | "order_reference" | "stage"> & {
     stage: { name: string | null } | null;
   };
-  return ((data ?? []) as unknown as Raw[]).map((r) => ({
+  const mapped = ((data ?? []) as unknown as Raw[]).map((r) => ({
     id: r.id,
     funnel: r.funnel,
     stage_id: r.stage_id,
@@ -871,6 +951,7 @@ export async function searchOpportunitiesAnyState(opts: {
     assigned_advisor_id: r.assigned_advisor_id,
     contact: r.contact,
   }));
+  return attachOrderReferences(mapped);
 }
 
 /**
@@ -895,7 +976,11 @@ export async function getKanbanOpportunityById(
   }
   const { data, error } = await query.maybeSingle();
   if (error) throw error;
-  return (data ?? null) as unknown as KanbanOpportunity | null;
+  if (!data) return null;
+  const [row] = await attachOrderReferences([
+    data as unknown as Omit<KanbanOpportunity, "order_reference">,
+  ]);
+  return row as unknown as KanbanOpportunity;
 }
 
 /**
@@ -917,7 +1002,9 @@ export async function listKanbanOpportunitiesByIds(
     .eq("organization_id", organizationId)
     .in("id", ids.slice(0, 5000));
   if (error) throw error;
-  return (data ?? []) as unknown as KanbanOpportunity[];
+  return (await attachOrderReferences(
+    (data ?? []) as unknown as Array<Omit<KanbanOpportunity, "order_reference">>,
+  )) as unknown as KanbanOpportunity[];
 }
 
 /**
@@ -938,7 +1025,9 @@ export async function listUnassignedActiveOpportunityCards(): Promise<KanbanOppo
     .order("last_modified_at", { ascending: false })
     .limit(200);
   if (error) throw error;
-  return (data ?? []) as unknown as KanbanOpportunity[];
+  return (await attachOrderReferences(
+    (data ?? []) as unknown as Array<Omit<KanbanOpportunity, "order_reference">>,
+  )) as unknown as KanbanOpportunity[];
 }
 
 /**

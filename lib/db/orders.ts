@@ -217,3 +217,80 @@ export async function listOrdersForContact(
   if (error) throw error;
   return data ?? [];
 }
+
+/**
+ * Mapa `shopify_order_id` → folio del pedido (`orders.shopify_name`, `#1828`).
+ *
+ * Lo usa la capa de lectura de oportunidades para enseñar el número que el
+ * cliente reconoce en vez del folio del borrador que guarda la opp
+ * (`display_reference`, `#D1205`). Se resuelve en lote: una consulta por
+ * página de cards, no una por card.
+ *
+ * Chunked: `in.()` con miles de ids revienta el largo de la URL de PostgREST.
+ * Los ids sin pedido en la base simplemente no aparecen en el mapa y el
+ * caller cae al folio del borrador.
+ */
+export async function getOrderNamesByShopifyOrderIds(
+  shopifyOrderIds: string[],
+): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  const ids = Array.from(
+    new Set(shopifyOrderIds.map((id) => id?.trim()).filter((id): id is string => !!id)),
+  );
+  if (ids.length === 0) return out;
+
+  const { supabase, organizationId } = getTenantScopedClient();
+  const CHUNK = 200;
+  for (let i = 0; i < ids.length; i += CHUNK) {
+    const chunk = ids.slice(i, i + CHUNK);
+    const { data, error } = await supabase
+      .from("orders")
+      .select("shopify_order_id, shopify_name")
+      .eq("organization_id", organizationId)
+      .in("shopify_order_id", chunk);
+    if (error) throw error;
+    for (const row of (data ?? []) as Array<{
+      shopify_order_id: string | null;
+      shopify_name: string | null;
+    }>) {
+      const id = row.shopify_order_id?.trim();
+      const name = row.shopify_name?.trim();
+      if (id && name) out.set(id, name);
+    }
+  }
+  return out;
+}
+
+/**
+ * `shopify_order_id`s cuyos pedidos matchean el texto buscado por folio
+ * (`shopify_name` ilike). Espeja `searchContactIdsForQuery`: se pre-resuelven
+ * los ids y el caller los inyecta como `shopify_order_id.in.(...)` en su
+ * `.or()`, porque PostgREST no permite mezclar un predicado sobre una tabla
+ * embebida con los de la tabla padre.
+ *
+ * Sin esto, buscar "1828" (el número que el cliente y Post-venta conocen) no
+ * encuentra nada: la opp solo guarda el folio del borrador.
+ */
+export async function searchShopifyOrderIdsForQuery(
+  rawQuery: string,
+): Promise<string[]> {
+  const sanitized = rawQuery
+    .trim()
+    .replace(/[,.()*%\\]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 80);
+  if (sanitized.length === 0) return [];
+
+  const { supabase, organizationId } = getTenantScopedClient();
+  const { data, error } = await supabase
+    .from("orders")
+    .select("shopify_order_id")
+    .eq("organization_id", organizationId)
+    .ilike("shopify_name", `%${sanitized}%`)
+    .limit(5000);
+  if (error) throw error;
+  return (data ?? [])
+    .map((r) => (r as { shopify_order_id: string | null }).shopify_order_id?.trim())
+    .filter((id): id is string => !!id);
+}

@@ -3,6 +3,7 @@ import Link from "next/link";
 import type { ContactOpportunityListItem } from "@/lib/db/contacts-detail";
 import type { AdvisorOption } from "@/lib/actions/contacts";
 import { effectiveAmount, formatAmount } from "@/lib/format/money";
+import { primaryOpportunityReference } from "@/lib/format/opportunity-reference";
 import { resolveAdvisor } from "../utils";
 
 interface Props {
@@ -118,9 +119,9 @@ function OpportunityCard({
               <span className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
                 {opp.stage_name}
               </span>
-              {opp.display_reference && (
+              {primaryOpportunityReference(opp) && (
                 <span className="text-xs text-gray-400 dark:text-gray-500">
-                  {opp.display_reference}
+                  {primaryOpportunityReference(opp)}
                 </span>
               )}
               {isCancelled && (

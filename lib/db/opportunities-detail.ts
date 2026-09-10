@@ -1,6 +1,7 @@
 import "server-only";
 import { getTenantScopedClient } from "@/lib/db/client";
 import { getOpportunityById, listLineItems } from "@/lib/db/opportunities";
+import { resolveCustomerFacingOrderRef } from "@/lib/services/order-reference";
 import type {
   ContactRow,
   ISODateString,
@@ -46,6 +47,10 @@ export interface OpportunityDetail {
   contact: OpportunityContactSummary;
   lineItems: OpportunityLineItemRow[];
   lossReason: LossReasonRow | null;
+  /** Folio del PEDIDO (`#1828`), desde `orders.shopify_name`. Es el que ve
+   *  el cliente; `opportunity.display_reference` guarda el del borrador
+   *  (`#D1205`), interno de Shopify. NULL mientras no haya pedido. */
+  orderReference: string | null;
 }
 
 /**
@@ -59,9 +64,12 @@ export async function getOpportunityDetail(
   const opportunity = await getOpportunityById(opportunityId);
   if (!opportunity) return null;
 
-  const [joined, lineItems] = await Promise.all([
+  const [joined, lineItems, orderReference] = await Promise.all([
     fetchOpportunityJoinedShape(opportunityId),
     listLineItems(opportunityId),
+    // Mismo resolutor que usan los mensajes de WhatsApp: el detalle no
+    // puede enseñar un folio distinto del que se le manda al cliente.
+    resolveCustomerFacingOrderRef(opportunity.shopify_order_id),
   ]);
 
   if (!joined) return null;
@@ -72,6 +80,7 @@ export async function getOpportunityDetail(
     contact: joined.contact,
     lineItems,
     lossReason: joined.lossReason,
+    orderReference,
   };
 }
 

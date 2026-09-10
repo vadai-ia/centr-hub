@@ -3,6 +3,7 @@ import Link from "next/link";
 import { useCallback } from "react";
 import type { OpportunityDialogBundle } from "@/lib/actions/opportunities-m6";
 import { effectiveAmount, formatAmount } from "@/lib/format/money";
+import { opportunityReferences } from "@/lib/format/opportunity-reference";
 import {
   resolveAdvisor,
   resolveCustomerSuccess,
@@ -49,6 +50,12 @@ export function OpportunityDialogContent({
   onTasksChanged,
 }: Props) {
   const { opportunity, stage, contact, lineItems, lossReason } = bundle.detail;
+  // Manda el folio del PEDIDO; el del borrador se conserva aparte porque el
+  // detalle sí tiene espacio para la trazabilidad al Draft de Shopify.
+  const references = opportunityReferences({
+    order_reference: bundle.detail.orderReference,
+    display_reference: opportunity.display_reference,
+  });
   const amount = effectiveAmount(opportunity);
   const totalText = formatAmount(amount.value, opportunity.currency);
   const subtotalText = formatAmount(bundle.lineItemsSubtotal, opportunity.currency);
@@ -98,9 +105,24 @@ export function OpportunityDialogContent({
             </Link>
             <div className="mt-2 flex items-center gap-2 flex-wrap">
               <StagePill stage={stage} />
-              {opportunity.display_reference && (
-                <span className="text-xs font-mono text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-gray-700/60 px-2 py-0.5 rounded">
-                  {opportunity.display_reference}
+              {references.primary && (
+                <span
+                  title={
+                    references.draft
+                      ? "Folio del pedido en Shopify"
+                      : "Folio de la cotización (borrador) en Shopify"
+                  }
+                  className="text-xs font-mono text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-gray-700/60 px-2 py-0.5 rounded"
+                >
+                  {references.primary}
+                </span>
+              )}
+              {references.draft && (
+                <span
+                  title="Folio del borrador (cotización) que originó el pedido"
+                  className="text-[10px] font-mono text-gray-400 dark:text-gray-500"
+                >
+                  Cotización {references.draft}
                 </span>
               )}
               {opportunity.cancelled_at && (
