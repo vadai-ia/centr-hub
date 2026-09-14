@@ -74,19 +74,19 @@ function fmtDate(label: string): string {
 export function exportKpiOptions(data: DashboardData): ExportKpiOption[] {
   const opts: ExportKpiOption[] = [
     // Venta
-    { key: "revenue", label: "Venta · Revenue cerrado" },
+    { key: "revenue", label: "Venta · Venta cobrada" },
     { key: "quotesSent", label: "Venta · Cotizaciones enviadas" },
     { key: "activeWithDraft", label: "Venta · Activas con cotización (actual)" },
-    { key: "pipelineGrossNow", label: "Venta · Pipeline $ actual (bruto)" },
-    { key: "pipelineGrossPeriod", label: "Venta · Pipeline $ en el periodo (bruto)" },
+    { key: "pipelineGrossNow", label: "Venta · Cartera en proceso hoy (sin ponderar)" },
+    { key: "pipelineGrossPeriod", label: "Venta · Cartera en proceso del periodo (sin ponderar)" },
     { key: "leads", label: "Venta · Leads" },
     { key: "qualifiedLeads", label: "Venta · Leads calificados" },
     { key: "wonCount", label: "Venta · Oportunidades ganadas" },
-    { key: "winRateGlobal", label: "Venta · Win rate global" },
-    { key: "lossRate", label: "Venta · Loss rate" },
-    { key: "salesCycleDays", label: "Venta · Sales cycle promedio" },
+    { key: "winRateGlobal", label: "Venta · Tasa de éxito" },
+    { key: "lossRate", label: "Venta · Tasa de pérdida" },
+    { key: "salesCycleDays", label: "Venta · Ciclo de venta promedio" },
     { key: "lossesByReason", label: "Venta · Pérdidas por motivo" },
-    { key: "winRateByStage", label: "Venta · Win rate por etapa" },
+    { key: "winRateByStage", label: "Venta · % de avance por etapa" },
   ];
   if (data.ventaBreakdown && data.ventaBreakdown.length > 0) {
     opts.push({ key: "ventaBreakdown", label: "Venta · Desglose por vendedor" });
@@ -124,19 +124,19 @@ export function buildExportModel(
   const pushV = (key: ExportKpiKey, label: string, value: string) => {
     if (selected.has(key)) ventaScalar.push([label, value]);
   };
-  pushV("revenue", "Revenue cerrado", formatAmount(v.revenue, CCY) ?? DASH);
+  pushV("revenue", "Venta cobrada", formatAmount(v.revenue, CCY) ?? DASH);
   pushV("quotesSent", "Cotizaciones enviadas", formatCount(v.quotesSent));
   pushV("activeWithDraft", "Activas con cotización (actual)", formatCount(v.activeWithDraft));
-  pushV("pipelineGrossNow", "Pipeline $ actual (bruto)", formatAmount(v.pipelineGrossNow, CCY) ?? DASH);
-  pushV("pipelineGrossPeriod", "Pipeline $ en el periodo (bruto)", formatAmount(v.pipelineGrossPeriod, CCY) ?? DASH);
+  pushV("pipelineGrossNow", "Cartera en proceso hoy (sin ponderar)", formatAmount(v.pipelineGrossNow, CCY) ?? DASH);
+  pushV("pipelineGrossPeriod", "Cartera en proceso del periodo (sin ponderar)", formatAmount(v.pipelineGrossPeriod, CCY) ?? DASH);
   pushV("leads", "Leads", formatCount(v.leads));
   pushV("qualifiedLeads", "Leads calificados", formatCount(v.qualifiedLeads));
   pushV("wonCount", "Oportunidades ganadas", formatCount(v.wonCount));
-  pushV("winRateGlobal", "Win rate global", formatPercent(v.winRateGlobal));
-  pushV("lossRate", "Loss rate", formatPercent(v.lossRate));
-  pushV("salesCycleDays", "Sales cycle promedio", formatDays(v.salesCycleDays));
+  pushV("winRateGlobal", "Tasa de éxito", formatPercent(v.winRateGlobal));
+  pushV("lossRate", "Tasa de pérdida", formatPercent(v.lossRate));
+  pushV("salesCycleDays", "Ciclo de venta promedio", formatDays(v.salesCycleDays));
   if (ventaScalar.length > 0) {
-    sections.push({ heading: "Venta · Indicadores", columns: ["KPI", "Valor"], rows: ventaScalar });
+    sections.push({ heading: "Venta · Indicadores", columns: ["Indicador", "Valor"], rows: ventaScalar });
   }
   if (selected.has("lossesByReason")) {
     sections.push({
@@ -151,7 +151,7 @@ export function buildExportModel(
   }
   if (selected.has("winRateByStage")) {
     sections.push({
-      heading: "Venta · Win rate por etapa",
+      heading: "Venta · % de avance por etapa",
       columns: ["Etapa", "Muestra", "% avanza"],
       rows: v.winRateByStage.map((s) => [
         s.stageName,
@@ -163,11 +163,14 @@ export function buildExportModel(
   if (selected.has("ventaBreakdown") && data.ventaBreakdown) {
     sections.push({
       heading: "Venta · Desglose por vendedor",
-      columns: ["Vendedor", "Revenue", "Cotiz.", "Ganadas", "Perdidas", "Win rate", "Pipeline $ actual"],
+      // Mismas columnas y nombres que el desglose en pantalla: un reporte que
+      // dice otra cosa que el tablero confunde justo a quien lo presenta.
+      columns: ["Vendedor", "Venta cobrada", "Cotiz.", "% cierre", "Ganadas", "Perdidas", "Tasa de éxito", "Cartera en proceso hoy"],
       rows: data.ventaBreakdown.map((r) => [
         r.name,
         formatAmount(r.revenue, CCY) ?? DASH,
         formatCount(r.quotesSent),
+        formatPercent(r.closeRate),
         formatCount(r.wonCount),
         formatCount(r.lostCount),
         formatPercent(r.winRate),
@@ -183,7 +186,7 @@ export function buildExportModel(
   if (selected.has("activeOrders")) pvScalar.push(["Pedidos activos ahora", formatCount(p.activeOrders)]);
   if (selected.has("problematicCases")) pvScalar.push(["Casos problemáticos", formatCount(p.problematicCases)]);
   if (pvScalar.length > 0) {
-    sections.push({ heading: "Post-venta · Indicadores", columns: ["KPI", "Valor"], rows: pvScalar });
+    sections.push({ heading: "Post-venta · Indicadores", columns: ["Indicador", "Valor"], rows: pvScalar });
   }
   if (selected.has("postventaBreakdown") && data.postventaBreakdown) {
     sections.push({

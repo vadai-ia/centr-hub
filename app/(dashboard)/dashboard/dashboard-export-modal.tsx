@@ -54,7 +54,7 @@ export function DashboardExportModal({
     // Timeout defensivo: si la generación se cuelga (dataset patológico),
     // libera la UI con un mensaje claro en vez de quedar bloqueada.
     const timeout = setTimeout(() => {
-      setError("La generación está tardando demasiado. Intenta con menos KPIs o un periodo más corto.");
+      setError("La generación está tardando demasiado. Intenta con menos indicadores o un periodo más corto.");
       setBusy(false);
     }, 30000);
     try {
@@ -114,7 +114,7 @@ export function DashboardExportModal({
 
           <div>
             <div className="flex items-center justify-between mb-1.5">
-              <p className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">KPIs a incluir</p>
+              <p className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">Indicadores a incluir</p>
               <div className="flex gap-2 text-xs">
                 <button type="button" className="text-indigo-600 dark:text-indigo-400 hover:underline" onClick={() => setSelected(new Set(options.map((o) => o.key)))}>
                   Todos
@@ -144,7 +144,7 @@ export function DashboardExportModal({
 
         <div className="px-5 py-4 border-t border-gray-100 dark:border-gray-700/60 flex items-center justify-between">
           <span className="text-xs text-gray-400 dark:text-gray-500">
-            {noneSelected ? "Selecciona al menos un KPI" : `${selected.size} KPI(s) seleccionados`}
+            {noneSelected ? "Selecciona al menos un indicador" : `${selected.size} indicador(es) seleccionado(s)`}
           </span>
           <div className="flex gap-2">
             <button type="button" onClick={onClose} className="px-3 py-1.5 text-sm rounded-md border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700">
