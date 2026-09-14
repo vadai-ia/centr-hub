@@ -49,7 +49,10 @@ const filtersSchema = z.object({
   // un rango 1°→último día del mes en MX. Existe porque el reporte que la
   // dirección pide es mensual, y armarlo con el rango personalizado obliga a
   // recordar cuántos días trae cada mes.
-  preset: z.enum([...PERIOD_PRESETS, "custom", "month"] as [string, ...string[]]),
+  // "week" (revisión semanal): semana lunes–domingo recortada al mes. El
+  // selector la calcula (weeksOfMonth) y viaja como customFrom/customTo, así que
+  // se resuelve con el mismo motor que el rango personalizado.
+  preset: z.enum([...PERIOD_PRESETS, "custom", "month", "week"] as [string, ...string[]]),
   customFrom: z.string().nullable().optional(),
   customTo: z.string().nullable().optional(),
   // Mes elegido (`yyyy-MM`) — solo cuando preset === "month". El FORMATO no se
@@ -68,7 +71,7 @@ export type DashboardFiltersInput = z.infer<typeof filtersSchema>;
 function resolvePeriod(
   input: DashboardFiltersInput,
 ): { ok: true; period: ResolvedPeriod } | { ok: false } {
-  if (input.preset === "custom") {
+  if (input.preset === "custom" || input.preset === "week") {
     if (!input.customFrom || !input.customTo) return { ok: false };
     const res = resolveCustomPeriod(input.customFrom, input.customTo);
     if (!res.ok) return { ok: false };

@@ -81,6 +81,49 @@ export function currentMonthKey(): string {
   return nowInTz().toFormat("yyyy-MM");
 }
 
+export interface WeekSegment {
+  /** Primer día (`yyyy-MM-dd`, MX). */
+  from: string;
+  /** Último día incluido (`yyyy-MM-dd`, MX). */
+  to: string;
+  /** Etiqueta corta, ej. "1–6 sept". */
+  label: string;
+}
+
+/**
+ * Semanas de un mes para la revisión semanal con el equipo, en MX.
+ *
+ * Semana = lunes a domingo, RECORTADA a los bordes del mes. Así la primera
+ * semana de septiembre 2026 (el 1 cae en martes) es "1–6", no "31 ago–6 sep":
+ * la meta se da por mes y la pregunta de cada lunes es cómo va ESE mes.
+ *
+ * En el mes en curso solo se devuelven las semanas que ya empezaron — una
+ * semana futura daría un tablero en ceros indistinguible de un bug. "Hoy" se
+ * resuelve en America/Mexico_City, no en el reloj del servidor.
+ */
+export function weeksOfMonth(monthKey: string): WeekSegment[] {
+  const month = DateTime.fromFormat(monthKey, "yyyy-MM", { zone: TIMEZONE });
+  if (!month.isValid) return [];
+  const monthEnd = month.endOf("month").startOf("day");
+  const today = nowInTz().startOf("day");
+  const out: WeekSegment[] = [];
+  let cursor = month.startOf("month");
+  while (cursor <= monthEnd && cursor <= today) {
+    // endOf("week") en luxon es la semana ISO: termina en domingo.
+    const weekEnd = cursor.endOf("week").startOf("day");
+    const to = weekEnd < monthEnd ? weekEnd : monthEnd;
+    const monthName = to.setLocale("es").toFormat("LLL").replace(".", "");
+    out.push({
+      from: cursor.toFormat("yyyy-MM-dd"),
+      to: to.toFormat("yyyy-MM-dd"),
+      label:
+        cursor.day === to.day ? `${to.day} ${monthName}` : `${cursor.day}–${to.day} ${monthName}`,
+    });
+    cursor = to.plus({ days: 1 });
+  }
+  return out;
+}
+
 /**
  * Opciones de mes/año para el selector del Dashboard, evaluadas en MX.
  * Devuelve los últimos `years` años (incluido el corriente) y, para el año

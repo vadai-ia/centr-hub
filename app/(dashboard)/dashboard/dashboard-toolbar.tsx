@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
 import type { AdvisorOption, DashboardFiltersInput } from "@/lib/actions/dashboard";
-import { monthSelectorOptions } from "@/lib/time/period";
+import { monthSelectorOptions, weeksOfMonth } from "@/lib/time/period";
 
 const MONTH_NAMES = [
   "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
@@ -27,6 +27,8 @@ interface Props {
   onCustomApply: (from: string, to: string) => void;
   /** Aplica un mes concreto (`yyyy-MM`) — atajo del reporte mensual. */
   onMonthApply: (month: string) => void;
+  /** Aplica una semana del mes (lunes–domingo recortada al mes), en MX. */
+  onWeekApply: (from: string, to: string) => void;
   onAdvisorChange: (advisor: string) => void;
   /** Corte por canal (F4) — disponible a cualquier rol. */
   onChannelChange: (channel: NonNullable<DashboardFiltersInput["channel"]>) => void;
@@ -55,12 +57,14 @@ export function DashboardToolbar({
   onPresetChange,
   onCustomApply,
   onMonthApply,
+  onWeekApply,
   onAdvisorChange,
   onChannelChange,
   onExport,
 }: Props) {
   const isCustom = filters.preset === "custom";
   const isMonth = filters.preset === "month";
+  const isWeek = filters.preset === "week";
   const activeChannel = filters.channel ?? "all";
 
   // Mes/año: el "hoy" se resuelve en MX (no con `new Date()` del navegador),
@@ -82,6 +86,28 @@ export function DashboardToolbar({
   // ceros indistinguible de un bug.
   const monthsAvailable = draftYear === currentYear ? currentMonth : 12;
   const effectiveMonth = Math.min(draftMonth, monthsAvailable);
+
+  // Revisión semanal: al volver a la pantalla con una semana aplicada, los
+  // selectores muestran el mes de esa semana.
+  useEffect(() => {
+    if (filters.preset !== "week" || !filters.customFrom) return;
+    const [y, m] = filters.customFrom.split("-").map(Number);
+    if (y && m) {
+      setDraftYear(y);
+      setDraftMonth(m);
+    }
+  }, [filters.preset, filters.customFrom]);
+
+  // Semanas del mes elegido. Por defecto la más reciente: la revisión de cada
+  // lunes es sobre la semana que acaba de pasar o la que va en curso.
+  const weeks = useMemo(
+    () => weeksOfMonth(`${draftYear}-${String(effectiveMonth).padStart(2, "0")}`),
+    [draftYear, effectiveMonth],
+  );
+  const [draftWeek, setDraftWeek] = useState<number>(-1);
+  useEffect(() => setDraftWeek(-1), [draftYear, effectiveMonth]);
+  const weekIndex = draftWeek >= 0 && draftWeek < weeks.length ? draftWeek : weeks.length - 1;
+  const selectedWeek = weeks[weekIndex] ?? null;
 
   // Draft local de las fechas: el dashboard NO se recalcula hasta "Aplicar".
   const [draftFrom, setDraftFrom] = useState(filters.customFrom ?? "");
@@ -117,6 +143,7 @@ export function DashboardToolbar({
         {/* Periodo */}
         <div className="flex flex-wrap items-center gap-1.5">
           {PRESET_BUTTONS.map((b) => presetBtn(b.value, b.label))}
+          {presetBtn("week", "Semana")}
           {presetBtn("month", "Mes")}
           {presetBtn("custom", "Personalizado")}
         </div>
@@ -185,7 +212,7 @@ export function DashboardToolbar({
         </div>
       </div>
 
-      {isMonth ? (
+      {isMonth || isWeek ? (
         <div className="flex flex-wrap items-end gap-2 border-t border-gray-100 dark:border-gray-700/60 pt-3">
           <label className="flex flex-col text-xs text-gray-500 dark:text-gray-400">
             Mes
@@ -215,12 +242,33 @@ export function DashboardToolbar({
               ))}
             </select>
           </label>
+          {isWeek ? (
+            <label className="flex flex-col text-xs text-gray-500 dark:text-gray-400">
+              Semana
+              <select
+                value={weekIndex}
+                onChange={(e) => setDraftWeek(Number(e.target.value))}
+                className="mt-0.5 rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-2 py-1 text-sm text-gray-800 dark:text-gray-100"
+              >
+                {weeks.map((w, i) => (
+                  <option key={w.from} value={i}>
+                    {w.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
           <button
             type="button"
-            onClick={() =>
-              onMonthApply(`${draftYear}-${String(effectiveMonth).padStart(2, "0")}`)
-            }
-            className="rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700"
+            disabled={isWeek && !selectedWeek}
+            onClick={() => {
+              if (isWeek) {
+                if (selectedWeek) onWeekApply(selectedWeek.from, selectedWeek.to);
+                return;
+              }
+              onMonthApply(`${draftYear}-${String(effectiveMonth).padStart(2, "0")}`);
+            }}
+            className="rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             Aplicar
           </button>

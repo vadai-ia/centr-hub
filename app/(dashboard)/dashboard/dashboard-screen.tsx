@@ -97,7 +97,7 @@ export function DashboardScreen({
   // preset rápido limpia tanto el rango custom como el mes elegido — si no,
   // quedaría un filtro invisible activo al volver a ese preset.
   function onPresetChange(preset: DashboardFiltersInput["preset"]) {
-    if (preset === "custom" || preset === "month") {
+    if (preset === "custom" || preset === "month" || preset === "week") {
       setCustomError(null);
       setFilters((f) => ({ ...f, preset }));
       return;
@@ -130,6 +130,9 @@ export function DashboardScreen({
           }
           onMonthApply={(month) =>
             fetchWith({ ...filters, preset: "month", month, customFrom: null, customTo: null })
+          }
+          onWeekApply={(customFrom, customTo) =>
+            fetchWith({ ...filters, preset: "week", customFrom, customTo, month: null })
           }
           onAdvisorChange={(advisor) => fetchWith({ ...filters, advisor })}
           onChannelChange={(channel) => fetchWith({ ...filters, channel })}

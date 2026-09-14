@@ -50,6 +50,12 @@ export function AdvisorBreakdown({
                 <>
                   <th className="py-2 px-3 font-medium text-right">Venta cobrada</th>
                   <th className="py-2 px-3 font-medium text-right">Cotiz.</th>
+                  <th
+                    className="py-2 px-3 font-medium text-right"
+                    title="De las cotizaciones hechas en el periodo, % que ya se ganaron. En una semana o mes en curso sube conforme cierran."
+                  >
+                    % cierre
+                  </th>
                   <th className="py-2 px-3 font-medium text-right">Ganadas</th>
                   <th className="py-2 px-3 font-medium text-right">Perdidas</th>
                   <th className="py-2 px-3 font-medium text-right">Tasa de éxito</th>
@@ -92,6 +98,7 @@ export function AdvisorBreakdown({
                   <>
                     <td className="py-2 px-3 text-right tabular-nums">{formatAmount(r.revenue, CCY) ?? DASH}</td>
                     <td className="py-2 px-3 text-right tabular-nums">{formatCount(r.quotesSent)}</td>
+                    <td className="py-2 px-3 text-right tabular-nums">{formatPercent(r.closeRate)}</td>
                     <td className="py-2 px-3 text-right tabular-nums">{formatCount(r.wonCount)}</td>
                     <td className="py-2 px-3 text-right tabular-nums">{formatCount(r.lostCount)}</td>
                     <td className="py-2 px-3 text-right tabular-nums">{formatPercent(r.winRate)}</td>

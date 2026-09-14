@@ -451,6 +451,7 @@ export function computeVentaMetrics(
   return {
     revenue,
     quotesSent,
+    quotesWon: tally.quotesWon,
     pipelineGrossNow,
     pipelineGrossPeriod,
     leads: leadOpps.size,
@@ -696,6 +697,9 @@ function breakdownRow(
     isUnassigned: s.membershipId === null,
     revenue: v?.revenue ?? 0,
     quotesSent: v?.quotesSent ?? 0,
+    // % de cierre de cotizaciones del periodo (cohorte): en la revisión semanal
+    // responde "de lo que cotizó, cuánto cerró".
+    closeRate: v && v.quotesSent > 0 ? v.quotesWon / v.quotesSent : null,
     wonCount: v?.wonCount ?? 0,
     lostCount: v?.wonVsLost.lost ?? 0,
     winRate: v?.winRateGlobal ?? null,

@@ -39,6 +39,8 @@ export interface LossByReason {
 export interface VentaMetrics {
   revenue: number; // 1
   quotesSent: number; // 2
+  /** De esas cotizaciones del periodo, cuántas ya se ganaron (cohorte → % de cierre). */
+  quotesWon: number;
   /**
    * Pipeline $ ACTUAL — BRUTO, sin ponderar. SNAPSHOT del ahora: suma de
    * opps vivas en este momento. NO responde al filtro de fecha (solo al
@@ -100,6 +102,8 @@ export interface AdvisorBreakdownRow {
   // Venta
   revenue: number;
   quotesSent: number;
+  /** % de cierre de cotizaciones (0–1, cohorte del periodo). null sin cotizaciones. */
+  closeRate: number | null;
   wonCount: number;
   lostCount: number;
   winRate: number | null;
@@ -131,8 +135,8 @@ export function channelOutboundValue(channel: Channel): boolean | null {
 }
 
 export interface DashboardFiltersState {
-  /** Preset activo, "custom" (rango manual) o "month" (mes/año concreto). */
-  preset: PeriodPreset | "custom" | "month";
+  /** Preset activo, "custom" (rango manual), "month" (mes/año) o "week" (semana del mes). */
+  preset: PeriodPreset | "custom" | "month" | "week";
   /** Solo presente cuando preset === "custom". */
   customFrom: string | null;
   customTo: string | null;
