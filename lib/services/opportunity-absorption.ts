@@ -78,7 +78,10 @@ export interface AbsorbInput {
   trigger:
     | "draft_orders_create"
     | "draft_orders_update_as_create"
-    | "corrective_backfill";
+    | "corrective_backfill"
+    // Fusión de un lead duplicado dentro de su cliente (0054): el "Lead nuevo"
+    // del lead pasa a convivir con la cotización del cliente.
+    | "contact_merge";
 }
 
 export interface AbsorbResult {

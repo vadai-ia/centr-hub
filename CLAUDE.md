@@ -500,6 +500,33 @@ Después, el admin captura el reparto en Admin → Metas: un renglón por vended
 
 **Aplicar la migración 0053 ANTES de desplegar.** Amplía el CHECK de `metric` en `goals` y `goal_results` a `close_rate` y acota su objetivo a 0–100. Sin ella, la columna "% de cierre de cotizaciones" aparece en Admin → Metas pero guardar una meta ahí falla por CHECK. Localiza los CHECK viejos de 0031 por definición (se crearon sin nombre) y nunca toca el invariante de orgánica de 0051. Idempotente.
 
+## Contactos duplicados: fusión automática lead → cliente (migración 0054)
+
+**El problema.** El vendedor crea el cliente en Shopify al vuelo —al cotizar— solo con nombre o correo, y le agrega el teléfono minutos después. `customers/create` llega sin teléfono, no empata con el lead que ya existía (WhatsApp o formulario) y nace una segunda tarjeta. Cuando el teléfono llega por `customers/update`, el contacto ya existe por su `shopify_customer_id` y nadie vuelve a buscar coincidencias. Verificado en los webhooks crudos.
+
+**La corrección.** El worker de `customers/update`, cuando el cliente RECIBE o cambia teléfono, llama a `mergeDuplicateLeadIntoClient` ([lib/services/contact-lead-merge.ts](lib/services/contact-lead-merge.ts)). La decisión (`decideLeadClientMerge`, pura y testeada) fusiona solo si:
+- el cliente tiene Shopify y el otro contacto NO — **dos clientes de Shopify nunca se fusionan** (un contacto no puede ligarse a dos customers; esos se unen primero en Shopify);
+- son **exactamente dos** contactos con ese teléfono;
+- no chocan identidades de Whaapy;
+- los **nombres son compatibles** (el nombre de pila de uno aparece en el otro). No es opcional: en Centr hay pares con el mismo teléfono que son personas distintas, incluso con el mismo apellido.
+
+La parte atómica vive en el RPC `merge_lead_contact_into_client`: revalida todo bajo lock (incluido que el lead no tenga pedidos), mueve las **seis** tablas que apuntan al contacto, libera el id de Whaapy del lead antes de dárselo al cliente, completa los datos del cliente solo donde le faltan (nunca pisa) y borra el lead. Después el servicio guarda la foto completa del lead en el audit `contact_lead_merged_into_client` y archiva su "Lead nuevo" frente a la cotización del cliente con la absorción existente (trigger `contact_merge`). Si la fusión falla, el webhook NO falla: queda audit `contact_lead_merge_failed`.
+
+**`activities` sigue inmutable.** Su bloqueo impedía mover el historial y también borrar el lead (la cascada lo disparaba). 0054 lo reemplaza por `tg_activities_guard`: DELETE bloqueado siempre; UPDATE solo re-apunta `contact_id` y solo con la bandera transaccional `centr.contact_merge`, que el RPC enciende únicamente alrededor de ese update.
+
+**Acoplamiento a vigilar:** si una migración nueva agrega una columna con `references public.contacts`, la fusión TIENE que moverla. `tests/contact-lead-merge-sql-contract.test.ts` descubre esas tablas leyendo las migraciones y falla si el RPC no las re-apunta.
+
+### Pasos operativos obligatorios (NO son código del repo)
+
+1. **Aplicar la migración 0054 ANTES de desplegar.** Sin ella el worker intentaría llamar un RPC inexistente (no tumba el webhook, pero ninguna fusión ocurre y se llena el audit de `contact_lead_merge_failed`).
+2. **Correctivo de los duplicados que ya existen**, dry-run primero:
+   ```
+   npm run maintenance:merge-duplicate-leads -- --org-slug centr
+   npm run maintenance:merge-duplicate-leads -- --org-slug centr --apply
+   ```
+   Aplica la misma decisión y el mismo RPC que el worker. Medido antes de 0054: en Centr fusionaría exactamente 3 pares (cada lead con 0 pedidos y 1 oportunidad); en Rustr, ninguno.
+3. Verificar con `npm run maintenance:inspect-duplicate-contacts -- --org-slug centr`: los grupos `cliente+lead` deben bajar a 0. Los `cliente+cliente` NO cambian (son de Shopify).
+
 ## Admin → Integraciones (migración 0046)
 
 Pantalla admin-only que gestiona las TRES conexiones externas —**Shopify**, **Whaapy Venta** y **Whaapy Post-venta**— sin tocar código, `.env.local`, Vercel env ni SQL: capturar/rotar credenciales, editar el identificador de cada sistema, probar la conexión, desconectar y reemplazar. Los dos Whaapy siguen siendo proveedores **separados** (namespace de Vault, discriminador y endpoint propios).

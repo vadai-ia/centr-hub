@@ -24,9 +24,11 @@ import { discardIfOwnEcho } from "@/lib/services/sync-loop-defense";
 import {
   createContact,
   findContactByShopifyCustomerId,
+  getContactById,
   updateContact,
 } from "@/lib/db/contacts";
 import { recordAuditEvent } from "@/lib/db/operational";
+import { mergeDuplicateLeadIntoClient } from "@/lib/services/contact-lead-merge";
 import type { ContactRow, Json, UUID } from "@/lib/types/database";
 
 /**
@@ -397,10 +399,37 @@ export const customersUpdate = inngest.createFunction(
       const updated = await updateContact(contact.id, finalPatch);
       await persistMissingPhoneFlag(updated.id, normalizePhone(normalized.phone));
 
-      if (updated.whaapy_contact_id) {
-        await recordWhaapySyncIntent(updated, "update_from_shopify");
+      // Dedup lead+cliente (0054). El cliente suele crearse en Shopify al vuelo
+      // SIN teléfono y recibirlo minutos después; al crearse no empató con el
+      // lead que ya existía y nació una segunda tarjeta. Este es el momento en
+      // que por fin hay con qué empatar. Un fallo de la fusión NO tumba el
+      // webhook: el update del cliente ya se aplicó y reintentarlo todo no
+      // arreglaría la fusión; queda audit para revisarlo.
+      let current = updated;
+      if (updated.phone && updated.phone !== contact.phone) {
+        try {
+          const merge = await mergeDuplicateLeadIntoClient(updated.id, {
+            dryRun: false,
+            trigger: "customers_update_phone",
+          });
+          if (merge.status === "merged") {
+            current = (await getContactById(updated.id)) ?? updated;
+          }
+        } catch (err) {
+          await recordAuditEvent({
+            actorUserId: null,
+            eventType: "contact_lead_merge_failed",
+            entityType: "contact",
+            entityId: updated.id,
+            payload: { error: err instanceof Error ? err.message : String(err) } as Json,
+          });
+        }
       }
-      return { contactId: updated.id };
+
+      if (current.whaapy_contact_id) {
+        await recordWhaapySyncIntent(current, "update_from_shopify");
+      }
+      return { contactId: current.id };
     });
   },
 );
