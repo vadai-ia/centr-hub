@@ -474,7 +474,7 @@ export interface AuditLogRow {
 }
 
 /** Métrica de una meta (M2v2). Espejo de `GOAL_METRICS` en lib/metas/schema. */
-export type GoalMetricDb = "quotes" | "won" | "amount";
+export type GoalMetricDb = "quotes" | "won" | "amount" | "close_rate";
 
 /**
  * Sujeto de una meta (0051). Antes se INFERÍA de `advisor_membership_id IS

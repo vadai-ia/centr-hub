@@ -31,7 +31,9 @@ const TT = {
     "De las oportunidades cerradas en el periodo: Ganadas ÷ (Ganadas + Perdidas). No incluye canceladas. Muestra — si no hubo cierres.",
   won: "Oportunidades de Venta marcadas como ganadas en el periodo, por su fecha real de ganada (la fecha del pedido en Shopify).",
   leads:
-    "Oportunidades que entraron a la etapa inicial 'Lead nuevo' durante el periodo. No incluye canceladas.",
+    "Oportunidades que entraron a la etapa inicial 'Lead nuevo' durante el periodo. Incluye los leads que ya avanzaron a cotización (el sistema los archiva al avanzar); no incluye los cancelados por otra razón, como duplicados o pruebas.",
+  leadsConverted:
+    "De los leads que entraron en el periodo, cuántos ya compraron: la persona tiene al menos un pedido pagado desde el inicio del periodo. El monto es lo que pagaron. Si esa persona quedó registrada como dos contactos distintos, su compra no se liga al lead.",
   qualified:
     "Oportunidades que entraron a una etapa de calificación durante el periodo. No incluye canceladas.",
   quotes:
@@ -43,7 +45,7 @@ const TT = {
   cycle:
     "Promedio de días desde la creación real de la oportunidad hasta su fecha de ganada, sobre las oportunidades ganadas en el periodo.",
   revenueByMonth:
-    "Revenue (pedidos pagados) distribuido por mes, según la fecha de pago real de Shopify.",
+    "Venta cobrada (pedidos pagados) distribuida por mes, según la fecha de pago real de Shopify.",
   wonVsLost: "Conteo de oportunidades ganadas y perdidas en el periodo.",
   lossesByReason:
     "Oportunidades perdidas en el periodo agrupadas por su motivo de pérdida (conteo y monto).",
@@ -130,12 +132,12 @@ export function DashboardVenta({
             tooltip={withCutoffNote(TT.active, snapshotSince)}
           />
           <KpiCard
-            label="Pipeline $ actual"
+            label="Cartera en proceso hoy"
             value={formatAmount(m.pipelineGrossNow, CCY) ?? DASH}
             accent="pipeline"
             icon={<IconPipeline />}
             hint={
-              snapshotSince ? "Bruto · vivas ahora · sin asignar acotado" : "Bruto · vivas ahora"
+              snapshotSince ? "Sin ponderar · vivas ahora · sin asignar acotado" : "Sin ponderar · vivas ahora"
             }
             tooltip={withCutoffNote(TT.pipelineNow, snapshotSince)}
           />
@@ -145,7 +147,7 @@ export function DashboardVenta({
       <SubGroup title="Resultados clave">
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <KpiCard
-            label="Revenue cerrado"
+            label="Venta cobrada"
             value={formatAmount(m.revenue, CCY) ?? DASH}
             accent="revenue"
             emphasis
@@ -153,16 +155,16 @@ export function DashboardVenta({
             tooltip={TT.revenue}
           />
           <KpiCard
-            label="Pipeline $ en el periodo"
+            label="Cartera en proceso del periodo"
             value={formatAmount(m.pipelineGrossPeriod, CCY) ?? DASH}
             accent="pipeline"
             emphasis
             icon={<IconPipeline />}
-            hint="Bruto · opps creadas en el periodo"
+            hint="Sin ponderar · oportunidades creadas en el periodo"
             tooltip={TT.pipelinePeriod}
           />
           <KpiCard
-            label="Win rate global"
+            label="Tasa de éxito"
             value={formatPercent(m.winRateGlobal)}
             accent="won"
             emphasis
@@ -182,18 +184,27 @@ export function DashboardVenta({
       </SubGroup>
 
       <SubGroup title="Embudo de venta">
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <KpiCard label="Leads" value={formatCount(m.leads)} tooltip={TT.leads} />
           <KpiCard label="Leads calificados" value={formatCount(m.qualifiedLeads)} tooltip={TT.qualified} />
           <KpiCard label="Cotizaciones enviadas" value={formatCount(m.quotesSent)} tooltip={TT.quotes} />
+          <KpiCard
+            label="Leads que compraron"
+            value={`${formatCount(m.leadsConverted)} de ${formatCount(m.leads)}`}
+            accent="won"
+            hint={`${formatAmount(m.leadsConvertedRevenue, CCY) ?? DASH} · ${formatPercent(
+              m.leads > 0 ? m.leadsConverted / m.leads : null,
+            )}`}
+            tooltip={TT.leadsConverted}
+          />
         </div>
       </SubGroup>
 
       <SubGroup title="Calidad de cierre">
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <KpiCard label="Loss rate" value={formatPercent(m.lossRate)} accent="lost" tooltip={TT.lossRate} />
+          <KpiCard label="Tasa de pérdida" value={formatPercent(m.lossRate)} accent="lost" tooltip={TT.lossRate} />
           <KpiCard
-            label="Sales cycle promedio"
+            label="Ciclo de venta promedio"
             value={formatDays(m.salesCycleDays)}
             hint="Creación → cierre"
             tooltip={TT.cycle}
@@ -221,8 +232,8 @@ function StageWinRateTable({ m }: { m: VentaMetrics }) {
   return (
     <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4 shadow-sm">
       <p className="mb-3 flex items-center gap-1 text-sm font-medium text-gray-700 dark:text-gray-200">
-        Win rate por etapa
-        <InfoTooltip label="Win rate por etapa" content={TT.stageWinRate} />
+        % de avance por etapa
+        <InfoTooltip label="% de avance por etapa" content={TT.stageWinRate} />
       </p>
       {m.winRateByStage.length === 0 ? (
         <div className="h-56 flex items-center justify-center text-sm text-gray-400 dark:text-gray-500">

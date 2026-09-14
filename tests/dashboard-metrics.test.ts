@@ -80,7 +80,7 @@ function ventaRaw(): VentaRaw {
       { assigned_advisor_id: B, is_outbound: false, total_amount: "50", paid_at: "2026-05-12T18:00:00.000Z", source: "shopify_draft_order" },
       { assigned_advisor_id: null, is_outbound: false, total_amount: "30", paid_at: "2026-05-12T18:00:00.000Z", source: "shopify_draft_order" },
     ],
-    draftOpps: [{ assigned_advisor_id: A, is_outbound: false }, { assigned_advisor_id: A, is_outbound: false }, { assigned_advisor_id: B, is_outbound: false }],
+    draftOpps: [{ assigned_advisor_id: A, is_outbound: false, won_at: null }, { assigned_advisor_id: A, is_outbound: false, won_at: null }, { assigned_advisor_id: B, is_outbound: false, won_at: null }],
     wonOpps: [
       { assigned_advisor_id: A, is_outbound: false, effective_created_at: "2026-05-01T06:00:00.000Z", won_at: "2026-05-11T06:00:00.000Z", actual_amount: "100", estimated_amount: null },
       { assigned_advisor_id: B, is_outbound: false, effective_created_at: "2026-05-01T06:00:00.000Z", won_at: "2026-05-21T06:00:00.000Z", actual_amount: "50", estimated_amount: null },
@@ -111,12 +111,18 @@ function ventaRaw(): VentaRaw {
       { opportunity_id: "l1", assigned_advisor_id: A, is_outbound: false, actual_amount: "70", estimated_amount: null, loss_reason_id: "r1" },
       { opportunity_id: "l2", assigned_advisor_id: B, is_outbound: false, actual_amount: null, estimated_amount: null, loss_reason_id: null },
     ],
+    absorbedLeadEntries: [],
+    // Leads que compraron: o1 (lead de A, contacto c-o1) pagó un pedido;
+    // o2 (lead de B) no.
+    leadPurchases: [
+      { contact_id: "c-o1", total_amount: "500", paid_at: "2026-05-15T18:00:00.000Z" },
+    ],
     stageEntries: [
-      { opportunity_id: "o1", to_stage_id: LEAD.id, assigned_advisor_id: A, is_outbound: false },
-      { opportunity_id: "o2", to_stage_id: LEAD.id, assigned_advisor_id: B, is_outbound: false },
-      { opportunity_id: "o1", to_stage_id: CALIF.id, assigned_advisor_id: A, is_outbound: false },
-      { opportunity_id: "o3", to_stage_id: CALIF.id, assigned_advisor_id: A, is_outbound: false },
-      { opportunity_id: "o1", to_stage_id: DISENO.id, assigned_advisor_id: A, is_outbound: false }, // dup en banda
+      { opportunity_id: "o1", to_stage_id: LEAD.id, assigned_advisor_id: A, is_outbound: false, contact_id: "c-o1" },
+      { opportunity_id: "o2", to_stage_id: LEAD.id, assigned_advisor_id: B, is_outbound: false, contact_id: "c-o2" },
+      { opportunity_id: "o1", to_stage_id: CALIF.id, assigned_advisor_id: A, is_outbound: false, contact_id: "c-o1" },
+      { opportunity_id: "o3", to_stage_id: CALIF.id, assigned_advisor_id: A, is_outbound: false, contact_id: "c-o3" },
+      { opportunity_id: "o1", to_stage_id: DISENO.id, assigned_advisor_id: A, is_outbound: false, contact_id: "c-o1" }, // dup en banda
     ],
     maxNonLostPos: new Map([
       ["o1", 5],
@@ -265,8 +271,8 @@ describe("computeVentaMetrics — corte por canal (F4)", () => {
         { assigned_advisor_id: A, is_outbound: false, total_amount: "50", paid_at: "2026-05-11T18:00:00.000Z", source: "shopify_draft_order" },
       ],
       draftOpps: [
-        { assigned_advisor_id: A, is_outbound: true },
-        { assigned_advisor_id: A, is_outbound: false },
+        { assigned_advisor_id: A, is_outbound: true, won_at: null },
+        { assigned_advisor_id: A, is_outbound: false, won_at: null },
       ],
       wonOpps: [
         { assigned_advisor_id: A, is_outbound: true, effective_created_at: "2026-05-01T06:00:00.000Z", won_at: "2026-05-11T06:00:00.000Z", actual_amount: "100", estimated_amount: null },
@@ -276,6 +282,8 @@ describe("computeVentaMetrics — corte por canal (F4)", () => {
       livePipelineSnapshot: [],
       lostEntries: [],
       stageEntries: [],
+      leadPurchases: [],
+      absorbedLeadEntries: [],
       maxNonLostPos: new Map(),
     };
   }
@@ -329,5 +337,75 @@ describe("channelOutboundValue — definición ÚNICA de canal (dashboard + pipe
       expect(decide(isOutbound, "outbound")).toBe(isOutbound);
       expect(decide(isOutbound, "inbound")).toBe(!isOutbound);
     }
+  });
+});
+
+describe("Leads que compraron", () => {
+  it("cuenta los leads cuyo contacto ya pagó un pedido, y suma lo que pagaron", () => {
+    const m = computeVentaMetrics(ventaRaw(), "all");
+    expect(m.leads).toBe(2);
+    expect(m.leadsConverted).toBe(1);
+    expect(m.leadsConvertedRevenue).toBe(500);
+  });
+
+  it("respeta el scope del asesor del lead", () => {
+    const b = computeVentaMetrics(ventaRaw(), B);
+    expect(b.leads).toBe(1);
+    expect(b.leadsConverted).toBe(0);
+    expect(b.leadsConvertedRevenue).toBe(0);
+  });
+
+  it("una compra de alguien que NO entró como lead no infla la conversión", () => {
+    const r = ventaRaw();
+    r.leadPurchases = [
+      ...r.leadPurchases,
+      { contact_id: "c-o3", total_amount: "999", paid_at: "2026-05-16T18:00:00.000Z" },
+    ];
+    const m = computeVentaMetrics(r, "all");
+    // o3 entró a calificación, no a "Lead nuevo": no es lead del periodo.
+    expect(m.leadsConverted).toBe(1);
+    expect(m.leadsConvertedRevenue).toBe(500);
+  });
+});
+
+describe("Leads archivados por absorción", () => {
+  // Un lead que avanza a cotización se CANCELA por absorción. No es una baja:
+  // medido en Centr (agosto 2026), 3 de los 4 leads que compraron estaban
+  // entre los absorbidos. Si se excluyeran, la conversión se reportaría baja.
+  const absorbed = {
+    opportunity_id: "o9",
+    to_stage_id: LEAD.id,
+    assigned_advisor_id: A,
+    is_outbound: false,
+    contact_id: "c-o9",
+  };
+
+  it("un lead absorbido SÍ cuenta como lead y como compra", () => {
+    const r = ventaRaw();
+    r.absorbedLeadEntries = [absorbed];
+    r.leadPurchases = [
+      ...r.leadPurchases,
+      { contact_id: "c-o9", total_amount: "250", paid_at: "2026-05-20T18:00:00.000Z" },
+    ];
+    const m = computeVentaMetrics(r, "all");
+    expect(m.leads).toBe(3);
+    expect(m.leadsConverted).toBe(2);
+    expect(m.leadsConvertedRevenue).toBe(750);
+  });
+
+  it("respeta el scope del asesor también en los absorbidos", () => {
+    const r = ventaRaw();
+    r.absorbedLeadEntries = [absorbed];
+    expect(computeVentaMetrics(r, B).leads).toBe(1);
+    expect(computeVentaMetrics(r, A).leads).toBe(2);
+  });
+
+  it("no altera leads calificados ni el avance por etapa", () => {
+    const base = computeVentaMetrics(ventaRaw(), "all");
+    const r = ventaRaw();
+    r.absorbedLeadEntries = [absorbed];
+    const m = computeVentaMetrics(r, "all");
+    expect(m.qualifiedLeads).toBe(base.qualifiedLeads);
+    expect(m.winRateByStage).toEqual(base.winRateByStage);
   });
 });

@@ -250,3 +250,14 @@ export const DASHBOARD_EXPORT_MAX_ROWS = 5000 as const;
  * distintivo "Online". Una constante duplicada es una divergencia esperando.
  */
 export const ONLINE_ORDER_SOURCE = "web";
+
+/**
+ * `cancellation_source` de una oportunidad-lead archivada porque el mismo
+ * contacto avanzó a cotización (lib/services/opportunity-absorption.ts).
+ *
+ * NO es una baja: el Dashboard la sigue contando como lead
+ * (listAbsorbedLeadEntriesInPeriod). Compartida para que quien cancela y quien
+ * cuenta no puedan divergir — si este string cambiara de un solo lado, los
+ * leads que avanzaron volverían a desaparecer del conteo sin ningún error.
+ */
+export const ABSORPTION_CANCELLATION_SOURCE = "absorbed_by_advanced_opportunity" as const;

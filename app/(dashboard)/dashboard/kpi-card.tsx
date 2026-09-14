@@ -75,7 +75,7 @@ export function KpiCard({
 
   if (emphasis) {
     return (
-      <div className={`relative rounded-xl border p-4 shadow-sm ${a.heroBg}`}>
+      <div className={`relative min-w-0 rounded-xl border p-4 shadow-sm ${a.heroBg}`}>
         <div className="flex items-start justify-between gap-2">
           <p className="flex items-center gap-1 text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
             {label}
@@ -89,7 +89,15 @@ export function KpiCard({
             </span>
           ) : null}
         </div>
-        <p className={`mt-2 text-3xl font-bold tabular-nums sm:text-4xl ${a.value}`}>{value}</p>
+        {/* Tamaño acotado + corte de línea permitido: un monto de 8 cifras con
+            centavos ("$20,567,660.50") a text-4xl desbordaba la tarjeta en
+            pantallas de laptop, donde la grilla ya va a 4 columnas. Se prefiere
+            un número más chico que uno que se sale del recuadro. */}
+        <p
+          className={`mt-2 text-2xl font-bold leading-tight tabular-nums [overflow-wrap:anywhere] 2xl:text-3xl ${a.value}`}
+        >
+          {value}
+        </p>
         {hint ? (
           <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{hint}</p>
         ) : null}
@@ -100,12 +108,12 @@ export function KpiCard({
   // Secundaria — compacta y discreta.
   const valueColor = accent === "default" ? "text-gray-900 dark:text-gray-100" : a.value;
   return (
-    <div className="rounded-lg border border-gray-200 bg-white px-3.5 py-3 shadow-sm dark:border-gray-700 dark:bg-gray-800">
+    <div className="min-w-0 rounded-lg border border-gray-200 bg-white px-3.5 py-3 shadow-sm dark:border-gray-700 dark:bg-gray-800">
       <p className="flex items-center gap-1 text-[11px] font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
         {label}
         {tooltip ? <InfoTooltip label={label} content={tooltip} /> : null}
       </p>
-      <p className={`mt-1 text-xl font-semibold tabular-nums ${valueColor}`}>{value}</p>
+      <p className={`mt-1 text-xl font-semibold tabular-nums [overflow-wrap:anywhere] ${valueColor}`}>{value}</p>
       {hint ? (
         <p className="mt-0.5 text-[11px] text-gray-400 dark:text-gray-500">{hint}</p>
       ) : null}

@@ -76,8 +76,8 @@ describe("snapshotMonthlyGoals", () => {
     mAch.mockImplementation(async (_p, scopes) =>
       scopes.map((s) =>
         s.kind === "team"
-          ? { quotes: 0, won: 0, amount: 118000 }
-          : { quotes: 17, won: 0, amount: 0 },
+          ? { quotes: 0, won: 0, amount: 118000, quotesWon: 0 }
+          : { quotes: 17, won: 0, amount: 0, quotesWon: 0 },
       ),
     );
 

@@ -7,8 +7,11 @@ import { z } from "zod";
  * de runtime de servidor.
  */
 
-/** Las tres métricas elegibles para una meta. */
-export const GOAL_METRICS = ["quotes", "won", "amount"] as const;
+/**
+ * Métricas elegibles para una meta. `close_rate` (0053) es un porcentaje: de
+ * las cotizaciones creadas en el mes, cuántas ya se ganaron.
+ */
+export const GOAL_METRICS = ["quotes", "won", "amount", "close_rate"] as const;
 export type GoalMetric = (typeof GOAL_METRICS)[number];
 
 /** Etiqueta legible (español) de cada métrica. */
@@ -16,6 +19,7 @@ export const GOAL_METRIC_LABELS: Record<GoalMetric, string> = {
   quotes: "Cotizaciones enviadas",
   won: "Oportunidades ganadas",
   amount: "Monto vendido",
+  close_rate: "% de cierre de cotizaciones",
 };
 
 /** Descripción corta (qué mide) — tooltip/ayuda en la UI de admin. */
@@ -23,6 +27,7 @@ export const GOAL_METRIC_HINTS: Record<GoalMetric, string> = {
   quotes: "Cotizaciones generadas en el mes (actividad).",
   won: "Oportunidades concretadas en venta (cierre).",
   amount: "Monto total vendido en el mes (valor).",
+  close_rate: "De las cotizaciones del mes, % que ya se ganaron (efectividad). Sube conforme cierran.",
 };
 
 /** Etiqueta corta para encabezados de columnas/grids compactos. */
@@ -30,6 +35,7 @@ export const GOAL_METRIC_SHORT: Record<GoalMetric, string> = {
   quotes: "Cotizaciones",
   won: "Órdenes",
   amount: "Monto",
+  close_rate: "% cierre",
 };
 
 /** `true` si la métrica se mide como conteo entero (quotes/won) vs monto. */
@@ -38,10 +44,21 @@ export function isCountMetric(metric: GoalMetric): boolean {
 }
 
 /**
+ * `true` si la métrica es un porcentaje 0–100 (`close_rate`). Se muestra con
+ * "%" en vez de "$" y su objetivo se acota a 100 (también por CHECK en 0053).
+ */
+export function isRateMetric(metric: GoalMetric): boolean {
+  return metric === "close_rate";
+}
+
+/**
  * Formatea un valor de meta para la UI: conteos como entero, monto como
  * `$` + miles. Pura (sin `server-only`) — usada en pantallas client.
  */
 export function formatGoalValue(metric: GoalMetric, value: number): string {
+  if (isRateMetric(metric)) {
+    return `${new Intl.NumberFormat("es-MX", { maximumFractionDigits: 0 }).format(value)}%`;
+  }
   const n = isCountMetric(metric) ? Math.round(value) : value;
   const formatted = new Intl.NumberFormat("es-MX", {
     maximumFractionDigits: 0,
@@ -54,6 +71,9 @@ export function formatGoalValue(metric: GoalMetric, value: number): string {
  * monto en notación compacta ("$94 k", "$1.5 M").
  */
 export function formatGoalValueShort(metric: GoalMetric, value: number): string {
+  if (isRateMetric(metric)) {
+    return `${new Intl.NumberFormat("es-MX", { maximumFractionDigits: 0 }).format(value)}%`;
+  }
   if (isCountMetric(metric)) {
     return new Intl.NumberFormat("es-MX", { maximumFractionDigits: 0 }).format(
       Math.round(value),
@@ -114,6 +134,13 @@ export const goalInputSchema = z
         message:
           "La venta orgánica solo se mide en monto: no lleva cotización enviada ni oportunidad trabajada.",
         path: ["metric"],
+      });
+    }
+    if (v.metric === "close_rate" && v.targetValue > 100) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "El % de cierre no puede pasar de 100.",
+        path: ["targetValue"],
       });
     }
   });

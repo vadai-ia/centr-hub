@@ -336,11 +336,13 @@ function ZoneChip({ className, label }: { className: string; label: string }) {
   );
 }
 
+const SUBJECT_ORDER: Record<GoalSubject, number> = { team: 0, organic: 1, advisor: 2 };
+
 function sortSubjects(a: MetaHistoryRow, b: MetaHistoryRow): number {
-  // Equipo (advisor null) primero; luego alfabético por nombre.
-  if (a.advisorMembershipId === null && b.advisorMembershipId !== null) return -1;
-  if (a.advisorMembershipId !== null && b.advisorMembershipId === null) return 1;
-  return a.advisorName.localeCompare(b.advisorName);
+  // Equipo, luego venta orgánica, luego vendedores por nombre — el mismo orden
+  // en que se reparte la meta mensual.
+  const d = SUBJECT_ORDER[a.subject] - SUBJECT_ORDER[b.subject];
+  return d !== 0 ? d : a.advisorName.localeCompare(b.advisorName);
 }
 
 function HistorySection({
@@ -369,8 +371,13 @@ function HistorySection({
     return map;
   }, [history]);
 
-  // Default: ningún mes expandido (con muchos meses, mostrarlos todos sería interminable).
-  const [selected, setSelected] = useState<Set<string>>(new Set());
+  // Default: abre el mes EN CURSO si tiene metas — es lo primero que se quiere
+  // ver ("¿cómo vamos en septiembre?"). Los meses cerrados quedan colapsados:
+  // con muchos meses, mostrarlos todos sería interminable.
+  const [selected, setSelected] = useState<Set<string>>(() => {
+    const current = history.find((r) => r.live);
+    return current ? new Set([current.monthKey]) : new Set();
+  });
 
   function toggle(key: string) {
     setSelected((prev) => {
@@ -385,7 +392,7 @@ function HistorySection({
     <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
-          Histórico mensual
+          Avance por mes
         </h2>
         {months.length > 0 && (
           <MonthSelect months={months} selected={selected} onToggle={toggle} />
@@ -467,9 +474,16 @@ function MonthHistory({
   const metrics = GOAL_METRICS.filter((m) => rows.some((r) => r.metric === m));
   return (
     <div>
-      <h3 className="mb-3 text-sm font-semibold capitalize text-slate-700 dark:text-slate-200">
+      <h3 className="mb-1 text-sm font-semibold capitalize text-slate-700 dark:text-slate-200">
         {label}
       </h3>
+      {rows.some((r) => r.live) ? (
+        <p className="mb-3 text-xs text-slate-400 dark:text-slate-500">
+          Avance en tiempo real del mes en curso. Al cerrar el mes se congela en el histórico.
+        </p>
+      ) : (
+        <div className="mb-2" />
+      )}
       <div className="space-y-5">
         {metrics.map((m) => {
           const subjectRows = rows.filter((r) => r.metric === m).sort(sortSubjects);

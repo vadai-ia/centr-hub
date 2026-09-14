@@ -23,11 +23,16 @@ export function DashboardChannelStrip({
 }) {
   const rows: Array<{ label: string; ob: string; in: string }> = [
     {
-      label: "Revenue",
+      label: "Venta cobrada",
       ob: formatAmount(venta.outbound.revenue, CCY) ?? DASH,
       in: formatAmount(venta.inbound.revenue, CCY) ?? DASH,
     },
     { label: "Leads", ob: String(venta.outbound.leads), in: String(venta.inbound.leads) },
+    {
+      label: "Leads que compraron",
+      ob: String(venta.outbound.leadsConverted),
+      in: String(venta.inbound.leadsConverted),
+    },
     {
       label: "Cotizaciones",
       ob: String(venta.outbound.quotesSent),
@@ -35,7 +40,7 @@ export function DashboardChannelStrip({
     },
     { label: "Ganadas", ob: String(venta.outbound.wonCount), in: String(venta.inbound.wonCount) },
     {
-      label: "Win rate",
+      label: "Tasa de éxito",
       ob: pct(venta.outbound.winRateGlobal),
       in: pct(venta.inbound.winRateGlobal),
     },

@@ -486,6 +486,20 @@ Shopify marca el origen en `source_name`, que la plataforma persiste en `orders.
 
 Después, el admin captura el reparto en Admin → Metas: un renglón por vendedor, uno de equipo y el de "Venta orgánica (tienda online)".
 
+## Dashboard y Metas: mes en curso, % de cierre y leads que compraron (migración 0053)
+
+**Metas en vivo.** Admin → Metas → "Avance por mes" muestra el **mes en curso calculado en vivo** (etiqueta "· en curso", abierto por defecto) además de los meses cerrados. El snapshot mensual (`goal_results`) solo se escribe al CERRAR el mes, así que sin esto el único mes que todavía se puede corregir nunca aparecía. Usa `loadAdminGoalProgress` — la misma definición que la tarjeta "Metas del mes" del Dashboard — para que ambas pantallas no diverjan. La tarjeta del Dashboard sigue sin responder al filtro de periodo (siempre mes en curso).
+
+**% de cierre de cotizaciones (`close_rate`, 0053).** Métrica de meta nueva, en porcentaje 0–100. Es **por cohorte**: de las cotizaciones CREADAS en el mes, cuántas ya se ganaron (`opportunities.won_at` sobre la misma opp de la cotización). NO es "ganadas del mes ÷ cotizaciones del mes", que mezcla cierres de cotizaciones de meses anteriores y puede pasar de 100%. **Consecuencia a comunicar:** en el mes en curso arranca bajo y sube conforme cierran (medido en Centr: jul 51%, ago 53%, sep 38% a mitad de mes). El avance de la meta sigue siendo logrado ÷ objetivo. La venta orgánica no la admite (0051). La definición única vive en `lib/metas/achievement.ts` (`achievedForMetric`), módulo puro compartido por el avance en vivo y el snapshot.
+
+**"Tasa de éxito" ≠ "% de cierre".** El KPI del Dashboard antes llamado "Win rate" es ganadas ÷ (ganadas + perdidas) y hoy marca ~93% porque el equipo casi no mueve oportunidades a "Perdida" — el denominador está vacío. Se renombró a **Tasa de éxito** justamente para que no se confunda con el % de cierre de cotizaciones, que es el indicador que sí mide efectividad.
+
+**Leads que compraron.** De los leads que entraron en el periodo, cuántos corresponden a una persona con al menos un pedido pagado desde el inicio del periodo. Se liga **por contacto, no por oportunidad**: el lead vive en una opp "Lead nuevo" y la venta se cierra en OTRA (la de la cotización de Shopify). **Los leads archivados por absorción SÍ cuentan** (`ABSORPTION_CANCELLATION_SOURCE` en `lib/constants`, compartida con `opportunity-absorption`): un lead que avanza a cotización se cancela, y excluir canceladas borraba justo a los que avanzaron — en agosto 2026, 9 de 23 leads y 3 de las 4 compras. Esto también corrige el KPI "Leads" (antes 14, real 23). **Límite conocido:** si la persona quedó como dos contactos distintos (ver duplicados en `ERRORES.md`), su compra no se liga al lead.
+
+### Paso operativo obligatorio (NO es código del repo)
+
+**Aplicar la migración 0053 ANTES de desplegar.** Amplía el CHECK de `metric` en `goals` y `goal_results` a `close_rate` y acota su objetivo a 0–100. Sin ella, la columna "% de cierre de cotizaciones" aparece en Admin → Metas pero guardar una meta ahí falla por CHECK. Localiza los CHECK viejos de 0031 por definición (se crearon sin nombre) y nunca toca el invariante de orgánica de 0051. Idempotente.
+
 ## Admin → Integraciones (migración 0046)
 
 Pantalla admin-only que gestiona las TRES conexiones externas —**Shopify**, **Whaapy Venta** y **Whaapy Post-venta**— sin tocar código, `.env.local`, Vercel env ni SQL: capturar/rotar credenciales, editar el identificador de cada sistema, probar la conexión, desconectar y reemplazar. Los dos Whaapy siguen siendo proveedores **separados** (namespace de Vault, discriminador y endpoint propios).

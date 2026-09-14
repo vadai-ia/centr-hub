@@ -53,9 +53,9 @@ function raw(): VentaRaw {
       { assigned_advisor_id: null, is_outbound: false, total_amount: "30", paid_at: "2026-05-12T18:00:00.000Z", source: "shopify_draft_order" },
     ],
     draftOpps: [
-      { assigned_advisor_id: A, is_outbound: false },
-      { assigned_advisor_id: A, is_outbound: false },
-      { assigned_advisor_id: B, is_outbound: false },
+      { assigned_advisor_id: A, is_outbound: false, won_at: "2026-05-11T06:00:00.000Z" },
+      { assigned_advisor_id: A, is_outbound: false, won_at: null },
+      { assigned_advisor_id: B, is_outbound: false, won_at: null },
     ],
     wonOpps: [
       { assigned_advisor_id: A, is_outbound: false, effective_created_at: "2026-05-01T06:00:00.000Z", won_at: "2026-05-11T06:00:00.000Z", actual_amount: "100", estimated_amount: null },
@@ -66,6 +66,8 @@ function raw(): VentaRaw {
     livePipelineSnapshot: [],
     lostEntries: [],
     stageEntries: [],
+    leadPurchases: [],
+    absorbedLeadEntries: [],
     maxNonLostPos: new Map(),
   };
 }
@@ -76,11 +78,13 @@ describe("tallyAchievement", () => {
       quotes: 2,
       won: 2,
       amount: 300,
+      quotesWon: 1,
     });
     expect(tallyAchievement(raw().paidOrders, raw().draftOpps, raw().wonOpps, B)).toEqual({
       quotes: 1,
       won: 1,
       amount: 50,
+      quotesWon: 0,
     });
   });
   it("scope 'all' incluye sin-asignar (totales de la org)", () => {
@@ -88,6 +92,7 @@ describe("tallyAchievement", () => {
       quotes: 3,
       won: 3,
       amount: 380,
+      quotesWon: 1,
     });
   });
   it("scope null = solo sin-asignar", () => {
@@ -95,6 +100,7 @@ describe("tallyAchievement", () => {
       quotes: 0,
       won: 0,
       amount: 30,
+      quotesWon: 0,
     });
   });
 });

@@ -181,8 +181,8 @@ function ComparisonGrid({
   showLabels: boolean;
 }) {
   const cols = showLabels
-    ? "minmax(72px,auto) repeat(3, minmax(120px,1fr))"
-    : "repeat(3, minmax(120px,1fr))";
+    ? `minmax(72px,auto) repeat(${GOAL_METRICS.length}, minmax(120px,1fr))`
+    : `repeat(${GOAL_METRICS.length}, minmax(120px,1fr))`;
   return (
     <div className="overflow-x-auto">
       <div className="grid items-center gap-x-5 gap-y-3" style={{ gridTemplateColumns: cols }}>

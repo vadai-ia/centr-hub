@@ -27,6 +27,7 @@ import {
 } from "@/lib/services/metas-config";
 import { sanitizeGoalThresholds, type GoalThresholds } from "@/lib/metas/semaphore";
 import { monthLabel } from "@/lib/time/period";
+import { loadAdminGoalProgress, type GoalProgress } from "@/lib/services/goal-progress";
 import type { GoalRow, Json, UUID } from "@/lib/types/database";
 
 /**
@@ -57,7 +58,15 @@ export interface MetaHistoryRow {
   monthKey: string; // yyyy-MM
   monthLabel: string; // "may 2026"
   advisorMembershipId: UUID | null;
-  advisorName: string; // "Equipo" o el nombre del vendedor
+  advisorName: string; // "Equipo", "Venta orgánica" o el nombre del vendedor
+  /** Sujeto explícito (0051). */
+  subject: GoalSubject;
+  /**
+   * true = mes EN CURSO calculado en vivo (no es un snapshot congelado). El
+   * histórico solo guarda un mes cuando cierra, así que sin esta fila el mes
+   * actual —el único que se puede corregir a tiempo— no aparecía nunca.
+   */
+  live: boolean;
   metric: GoalMetric;
   target: number;
   achieved: number;
@@ -105,11 +114,14 @@ export async function loadAdminMetas(): Promise<LoadAdminMetasResult> {
   return withTenantContext(
     admin.ctx.orgId,
     async () => {
-      const [org, goals, vendors, history] = await Promise.all([
+      const [org, goals, vendors, history, live] = await Promise.all([
         getOrganizationById(admin.ctx.orgId),
         listGoals(),
         listRealVendorsForMapping(admin.ctx.orgId),
         listGoalResults({ limit: 240 }),
+        // Mismo cálculo que la tarjeta "Metas del mes" del Dashboard: una sola
+        // definición de avance, así la pantalla de Metas y el tablero no divergen.
+        loadAdminGoalProgress(admin.ctx.orgId),
       ]);
       const thresholds = readGoalThresholds(org?.config ?? null);
       const nameById = new Map(vendors.map((v) => [v.id, v.profile.full_name]));
@@ -121,17 +133,47 @@ export async function loadAdminMetas(): Promise<LoadAdminMetasResult> {
           periodMonth: r.period_month,
           monthKey,
           monthLabel: monthLabel(monthKey),
+          subject: r.subject,
           advisorMembershipId: r.advisor_membership_id,
+          // Por sujeto, no por `advisor_membership_id === null`: equipo y venta
+          // orgánica van ambos sin vendedor (0051) y antes los dos salían "Equipo".
           advisorName:
-            r.advisor_membership_id === null
+            r.subject === "team"
               ? "Equipo"
-              : nameById.get(r.advisor_membership_id) ?? "Vendedor",
+              : r.subject === "organic"
+                ? "Venta orgánica"
+                : nameById.get(r.advisor_membership_id ?? "") ?? "Vendedor",
+          live: false,
           metric: r.metric,
           target: Number(r.target_value),
           achieved: Number(r.achieved_value),
           pct: Number(r.pct),
         };
       });
+
+      // Mes EN CURSO, calculado en vivo. El snapshot mensual solo se escribe al
+      // CERRAR el mes; sin esto la pantalla de Metas mostraba agosto pero nunca
+      // septiembre, que es justo el mes en el que todavía se puede actuar.
+      const liveLabel = `${monthLabel(live.monthKey)} · en curso`;
+      const toLiveRow = (p: GoalProgress, advisorName: string): MetaHistoryRow => ({
+        id: `live-${p.goalId}`,
+        periodMonth: `${live.monthKey}-01`,
+        monthKey: live.monthKey,
+        monthLabel: liveLabel,
+        subject: p.subject,
+        advisorMembershipId: p.advisorMembershipId,
+        advisorName,
+        live: true,
+        metric: p.metric,
+        target: p.target,
+        achieved: p.achieved,
+        pct: p.pct ?? 0,
+      });
+      const liveRows: MetaHistoryRow[] = [
+        ...live.team.map((p) => toLiveRow(p, "Equipo")),
+        ...live.organic.map((p) => toLiveRow(p, "Venta orgánica")),
+        ...live.byVendor.flatMap((v) => v.goals.map((p) => toLiveRow(p, v.name))),
+      ];
 
       return {
         ok: true as const,
@@ -143,7 +185,9 @@ export async function loadAdminMetas(): Promise<LoadAdminMetasResult> {
           })),
           goals: goals.map(toGoalView),
           thresholds,
-          history: historyRows,
+          // Un snapshot del mes en curso no debería existir (el cron corre al
+          // cerrar); si alguien lo forzó a mano, manda el cálculo en vivo.
+          history: [...liveRows, ...historyRows.filter((r) => r.monthKey !== live.monthKey)],
         },
       };
     },

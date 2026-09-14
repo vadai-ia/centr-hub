@@ -70,7 +70,7 @@ export function RevenueByMonthChart({
   tooltip?: string;
 }) {
   return (
-    <ChartFrame title="Revenue por mes" tooltip={tooltip} empty={data.length === 0}>
+    <ChartFrame title="Venta cobrada por mes" tooltip={tooltip} empty={data.length === 0}>
       <ResponsiveContainer width="100%" height="100%">
         <BarChart data={data} margin={{ top: 8, right: 8, left: 8, bottom: 0 }}>
           <CartesianGrid strokeDasharray="3 3" stroke={GRID_COLOR} vertical={false} />
@@ -85,7 +85,7 @@ export function RevenueByMonthChart({
           <Tooltip
             contentStyle={tooltipStyle}
             cursor={{ fill: "rgba(148,163,184,0.12)" }}
-            formatter={(v) => [formatAmount(Number(v), currency) ?? String(v), "Revenue"]}
+            formatter={(v) => [formatAmount(Number(v), currency) ?? String(v), "Venta cobrada"]}
           />
           <Bar dataKey="value" fill="#10B981" radius={[4, 4, 0, 0]} maxBarSize={48} />
         </BarChart>

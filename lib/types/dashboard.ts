@@ -53,6 +53,14 @@ export interface VentaMetrics {
   pipelineGrossPeriod: number;
   leads: number; // 4
   qualifiedLeads: number; // 5
+  /**
+   * Leads del periodo cuyo contacto ya tiene al menos un pedido pagado desde
+   * el inicio del periodo ("entraron 18, compraron 3"). Mismo denominador que
+   * `leads`, así el cociente es directo.
+   */
+  leadsConverted: number;
+  /** Venta cobrada de esos leads (suma de sus pedidos pagados). */
+  leadsConvertedRevenue: number;
   wonCount: number; // 6
   /**
    * Activas (con cotización) — SNAPSHOT del ahora: opps vivas con Draft

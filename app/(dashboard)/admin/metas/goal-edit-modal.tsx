@@ -10,6 +10,7 @@ import {
   GOAL_METRIC_HINTS,
   GOAL_METRIC_LABELS,
   isCountMetric,
+  isRateMetric,
   type GoalMetric,
   type GoalSubject,
 } from "@/lib/metas/schema";
@@ -67,6 +68,8 @@ export function GoalEditModal({
   if (!open) return null;
 
   const count = isCountMetric(metric);
+  // % de cierre (0053): se captura como porcentaje 0–100, sin "$".
+  const rate = isRateMetric(metric);
 
   async function handleSave() {
     setSubmitting(true);
@@ -117,20 +120,22 @@ export function GoalEditModal({
         </p>
 
         <label className="mt-4 block text-sm font-medium text-slate-700 dark:text-slate-200">
-          Objetivo mensual {count ? "(cantidad)" : "(monto)"}
+          Objetivo mensual {rate ? "(% de cierre)" : count ? "(cantidad)" : "(monto)"}
         </label>
         <div className="mt-1 flex items-center gap-2">
-          {!count && <span className="text-slate-400">$</span>}
+          {!count && !rate && <span className="text-slate-400">$</span>}
           <input
             type="number"
             min={0}
-            step={count ? 1 : 100}
+            max={rate ? 100 : undefined}
+            step={count || rate ? 1 : 100}
             value={target}
             onChange={(e) => setTarget(e.target.value)}
             autoFocus
             className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/30 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
-            placeholder={count ? "Ej. 20" : "Ej. 80000"}
+            placeholder={rate ? "Ej. 30" : count ? "Ej. 20" : "Ej. 80000"}
           />
+          {rate && <span className="text-slate-400">%</span>}
         </div>
 
         <div className="mt-4 flex items-center justify-between">

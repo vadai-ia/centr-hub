@@ -62,7 +62,7 @@ describe("loadVendorGoalProgress (scoping del vendedor)", () => {
       goal({ id: "g-A", metric: "quotes", target_value: "20", advisor_membership_id: A }),
       goal({ id: "g-B", metric: "won", target_value: "10", advisor_membership_id: B }),
     ]);
-    mockedAch.mockResolvedValue([{ quotes: 17, won: 4, amount: 9000 }]); // scope [A]
+    mockedAch.mockResolvedValue([{ quotes: 17, won: 4, amount: 9000, quotesWon: 0 }]); // scope [A]
 
     const res = await loadVendorGoalProgress(ORG, A);
 
@@ -97,10 +97,10 @@ describe("loadAdminGoalProgress (equipo + por vendedor)", () => {
     // scopes esperados en orden: [team, A, B]
     mockedAch.mockImplementation(async (_p, scopes) =>
       scopes.map((s) => {
-        if (s.kind === "team") return { quotes: 0, won: 0, amount: 120000 };
+        if (s.kind === "team") return { quotes: 0, won: 0, amount: 120000, quotesWon: 0 };
         if (s.kind === "advisor" && s.membershipId === A)
-          return { quotes: 10, won: 0, amount: 0 };
-        return { quotes: 0, won: 12, amount: 0 }; // B
+          return { quotes: 10, won: 0, amount: 0, quotesWon: 0 };
+        return { quotes: 0, won: 12, amount: 0, quotesWon: 0 }; // B
       }),
     );
 
@@ -126,7 +126,7 @@ describe("loadAdminGoalProgress (equipo + por vendedor)", () => {
     mockedListGoals.mockResolvedValue([
       goal({ id: "g-A", metric: "quotes", target_value: "20", advisor_membership_id: A }),
     ]);
-    mockedAch.mockResolvedValue([{ quotes: 5, won: 0, amount: 0 }]);
+    mockedAch.mockResolvedValue([{ quotes: 5, won: 0, amount: 0, quotesWon: 0 }]);
 
     const res = await loadAdminGoalProgress(ORG);
     expect(res.team).toEqual([]);
@@ -145,8 +145,8 @@ describe("meta de venta orgánica (0051)", () => {
     mockedAch.mockImplementation(async (_p, scopes) =>
       scopes.map((s) =>
         s.kind === "team"
-          ? { quotes: 0, won: 0, amount: 5_000_000 }
-          : { quotes: 0, won: 0, amount: 130_000 },
+          ? { quotes: 0, won: 0, amount: 5_000_000, quotesWon: 0 }
+          : { quotes: 0, won: 0, amount: 130_000, quotesWon: 0 },
       ),
     );
 
@@ -164,7 +164,7 @@ describe("meta de venta orgánica (0051)", () => {
       goal({ id: "g-org", metric: "amount", target_value: "1000000", subject: "organic" }),
       goal({ id: "g-A", metric: "amount", target_value: "3000000", advisor_membership_id: A, subject: "advisor" }),
     ]);
-    mockedAch.mockResolvedValue([{ quotes: 0, won: 0, amount: 900_000 }]);
+    mockedAch.mockResolvedValue([{ quotes: 0, won: 0, amount: 900_000, quotesWon: 0 }]);
 
     const res = await loadVendorGoalProgress(ORG, A);
     expect(res.goals).toHaveLength(1);
@@ -175,7 +175,7 @@ describe("meta de venta orgánica (0051)", () => {
     mockedListGoals.mockResolvedValue([
       goal({ id: "g-team", metric: "amount", target_value: "7000000", subject: "team" }),
     ]);
-    mockedAch.mockResolvedValue([{ quotes: 0, won: 0, amount: 1 }]);
+    mockedAch.mockResolvedValue([{ quotes: 0, won: 0, amount: 1, quotesWon: 0 }]);
 
     const res = await loadAdminGoalProgress(ORG);
     expect(res.organic).toEqual([]);

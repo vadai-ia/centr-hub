@@ -36,6 +36,12 @@ import {
 } from "@/lib/time/period";
 import type { UUID } from "@/lib/types/database";
 import { channelOutboundValue } from "@/lib/types/dashboard";
+import {
+  listAbsorbedLeadEntriesInPeriod,
+  listPaidOrdersForContactsSince,
+  type LeadPurchaseRow,
+} from "@/lib/db/dashboard";
+import { ABSORPTION_CANCELLATION_SOURCE } from "@/lib/constants";
 import { ONLINE_ORDER_SOURCE } from "@/lib/constants";
 import type {
   AdvisorBreakdownRow,
@@ -87,6 +93,8 @@ export interface ScopeAchievement {
   quotes: number; // cotizaciones enviadas (draft opps creadas en el periodo)
   won: number; // oportunidades ganadas
   amount: number; // monto vendido (orders pagadas)
+  /** De las cotizaciones CREADAS en el periodo, cuántas ya se ganaron (cohorte). */
+  quotesWon: number;
 }
 
 /**
@@ -108,13 +116,21 @@ export function tallyAchievement(
     if (matchScope(o.assigned_advisor_id, scope) && matchChannel(o.is_outbound, channel))
       amount += Number(o.total_amount);
   }
-  const quotes = draftOpps.filter(
+  const scopedQuotes = draftOpps.filter(
     (d) => matchScope(d.assigned_advisor_id, scope) && matchChannel(d.is_outbound, channel),
-  ).length;
+  );
+  const quotes = scopedQuotes.length;
+  // % de cierre de cotizaciones (OKR). Es por COHORTE: de las cotizaciones
+  // creadas en el periodo, cuántas ya se ganaron — la pregunta tal cual
+  // ("de 100 cotizaciones, cuántas cerró"). NO es ganadas ÷ cotizaciones del
+  // mes, que mezclaría cierres de cotizaciones de meses anteriores.
+  // Consecuencia esperada: en el mes en curso arranca bajo y sube conforme
+  // esas cotizaciones cierran.
+  const quotesWon = scopedQuotes.filter((d) => d.won_at !== null).length;
   const won = wonOpps.filter(
     (w) => matchScope(w.assigned_advisor_id, scope) && matchChannel(w.is_outbound, channel),
   ).length;
-  return { quotes, won, amount };
+  return { quotes, won, amount, quotesWon };
 }
 
 function amountOf(row: { actual_amount: string | null; estimated_amount: string | null }): number {
@@ -141,6 +157,10 @@ export interface VentaRaw {
   livePipelineSnapshot: LivePipelineRow[];
   lostEntries: LostEntryRow[];
   stageEntries: StageEntryRow[];
+  /** Pedidos pagados (desde el inicio del periodo) de los contactos que entraron como lead. */
+  leadPurchases: LeadPurchaseRow[];
+  /** Leads del periodo archivados por absorción (avanzaron a cotización). Cuentan como leads. */
+  absorbedLeadEntries: StageEntryRow[];
   /** oppId → posición máxima NO-perdida alcanzada (para avance KPI9). */
   maxNonLostPos: Map<UUID, number>;
   boundaries: VentaStageBoundaries;
@@ -220,6 +240,33 @@ async function fetchVentaRaw(
   }
 
   const lossReasonNames = new Map(lossReasons.map((r) => [r.id, r.name]));
+
+  // Compras de las personas que entraron como lead en el periodo. Se trae sin
+  // scope (el scope se aplica al computar, igual que el resto del bundle).
+  const initialStageId = boundaries.initialStage?.id ?? null;
+  // Los leads que avanzan a cotización se ARCHIVAN (cancelación por absorción)
+  // y `stageEntries` excluye canceladas: sin traerlos aparte, desaparecían del
+  // conteo justo los leads que sí avanzaron.
+  const absorbedLeadEntries = initialStageId
+    ? await listAbsorbedLeadEntriesInPeriod(
+        initialStageId,
+        ABSORPTION_CANCELLATION_SOURCE,
+        period.startUtc,
+        period.endUtc,
+      )
+    : [];
+  const leadContactIds = initialStageId
+    ? Array.from(
+        new Set(
+          stageEntries
+            .filter((e) => e.to_stage_id === initialStageId)
+            .concat(absorbedLeadEntries)
+            .map((e) => e.contact_id),
+        ),
+      )
+    : [];
+  const leadPurchases = await listPaidOrdersForContactsSince(leadContactIds, period.startUtc);
+
   return {
     paidOrders,
     draftOpps,
@@ -228,6 +275,8 @@ async function fetchVentaRaw(
     livePipelineSnapshot,
     lostEntries,
     stageEntries,
+    leadPurchases,
+    absorbedLeadEntries,
     maxNonLostPos,
     boundaries,
     lossReasonNames,
@@ -289,12 +338,16 @@ export function computeVentaMetrics(
   const initialId = boundaries.initialStage?.id ?? null;
   const bandIds = new Set(boundaries.qualifiedBandStageIds);
   const leadOpps = new Set<UUID>();
+  const leadContactByOpp = new Map<UUID, UUID>();
   const qualifiedOpps = new Set<UUID>();
   // Cohort por etapa para KPI9.
   const cohortByStage = new Map<UUID, Set<UUID>>();
   for (const e of raw.stageEntries) {
     if (!matchScope(e.assigned_advisor_id, scope) || !matchChannel(e.is_outbound, channel)) continue;
-    if (initialId && e.to_stage_id === initialId) leadOpps.add(e.opportunity_id);
+    if (initialId && e.to_stage_id === initialId) {
+      leadOpps.add(e.opportunity_id);
+      leadContactByOpp.set(e.opportunity_id, e.contact_id);
+    }
     if (bandIds.has(e.to_stage_id)) qualifiedOpps.add(e.opportunity_id);
     let set = cohortByStage.get(e.to_stage_id);
     if (!set) {
@@ -303,6 +356,32 @@ export function computeVentaMetrics(
     }
     set.add(e.opportunity_id);
   }
+
+  // Leads archivados por absorción: entraron a "Lead nuevo" y se cancelaron
+  // porque avanzaron a cotización. Son leads reales — y los más valiosos. Solo
+  // entran a esta cohorte; calificados y avance por etapa no se tocan.
+  for (const e of raw.absorbedLeadEntries) {
+    if (!matchScope(e.assigned_advisor_id, scope) || !matchChannel(e.is_outbound, channel)) continue;
+    leadOpps.add(e.opportunity_id);
+    leadContactByOpp.set(e.opportunity_id, e.contact_id);
+  }
+
+  // Leads que compraron: de los leads del periodo (en este scope), cuántos
+  // corresponden a una persona que ya pagó al menos un pedido. Se cuenta por
+  // oportunidad-lead (mismo denominador que `leads`) y el monto por pedido,
+  // una sola vez aunque la persona haya entrado como lead dos veces.
+  const scopedLeadContacts = new Set(leadContactByOpp.values());
+  const buyers = new Set<UUID>();
+  let leadsConvertedRevenue = 0;
+  for (const p of raw.leadPurchases) {
+    if (!scopedLeadContacts.has(p.contact_id)) continue;
+    buyers.add(p.contact_id);
+    leadsConvertedRevenue += Number(p.total_amount);
+  }
+  let leadsConverted = 0;
+  leadContactByOpp.forEach((contactId) => {
+    if (buyers.has(contactId)) leadsConverted += 1;
+  });
 
   // KPI6 Ganadas + KPI12 Sales cycle.
   const wonScoped = raw.wonOpps.filter(
@@ -376,6 +455,8 @@ export function computeVentaMetrics(
     pipelineGrossPeriod,
     leads: leadOpps.size,
     qualifiedLeads: qualifiedOpps.size,
+    leadsConverted,
+    leadsConvertedRevenue,
     wonCount,
     activeWithDraft,
     winRateGlobal,
@@ -424,7 +505,7 @@ function tallyOrganic(paidOrders: VentaRaw["paidOrders"]): ScopeAchievement {
   for (const o of paidOrders) {
     if (o.source === ONLINE_ORDER_SOURCE) amount += Number(o.total_amount);
   }
-  return { quotes: 0, won: 0, amount };
+  return { quotes: 0, won: 0, amount, quotesWon: 0 };
 }
 
 export async function computeGoalAchievement(

@@ -44,7 +44,7 @@ export function DashboardPostventa({
           accent="pipeline"
           emphasis
           icon={<IconPulse />}
-          hint="Con caso post-venta abierto (snapshot)"
+          hint="Con caso post-venta abierto (foto del momento)"
           tooltip={TT.active}
         />
         <KpiCard

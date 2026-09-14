@@ -28,9 +28,9 @@ describe("metricsForSubject", () => {
     expect(metricsForSubject("organic")).toEqual(["amount"]);
   });
 
-  it("equipo y vendedor admiten las tres métricas", () => {
-    expect(metricsForSubject("team")).toHaveLength(3);
-    expect(metricsForSubject("advisor")).toHaveLength(3);
+  it("equipo y vendedor admiten todas las métricas, incluido el % de cierre (0053)", () => {
+    expect(metricsForSubject("team")).toHaveLength(4);
+    expect(metricsForSubject("advisor")).toContain("close_rate");
   });
 });
 

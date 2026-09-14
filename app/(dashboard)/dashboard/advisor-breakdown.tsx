@@ -48,12 +48,12 @@ export function AdvisorBreakdown({
               <th className="py-2 px-4 font-medium">Vendedor</th>
               {isVenta ? (
                 <>
-                  <th className="py-2 px-3 font-medium text-right">Revenue</th>
+                  <th className="py-2 px-3 font-medium text-right">Venta cobrada</th>
                   <th className="py-2 px-3 font-medium text-right">Cotiz.</th>
                   <th className="py-2 px-3 font-medium text-right">Ganadas</th>
                   <th className="py-2 px-3 font-medium text-right">Perdidas</th>
-                  <th className="py-2 px-3 font-medium text-right">Win rate</th>
-                  <th className="py-2 px-4 font-medium text-right">Pipeline $ actual</th>
+                  <th className="py-2 px-3 font-medium text-right">Tasa de éxito</th>
+                  <th className="py-2 px-4 font-medium text-right">Cartera en proceso hoy</th>
                 </>
               ) : (
                 <>

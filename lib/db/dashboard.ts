@@ -56,6 +56,11 @@ export interface AdvisorOnlyRow {
   assigned_advisor_id: UUID | null;
   is_outbound: boolean;
 }
+/** Cotización del periodo + si ya se ganó (para el % de cierre de cotizaciones). */
+export interface DraftOppRow extends AdvisorOnlyRow {
+  /** Fecha de ganada si esa cotización ya cerró; null si sigue viva o se perdió. */
+  won_at: string | null;
+}
 export interface WonOppRow {
   assigned_advisor_id: UUID | null;
   is_outbound: boolean;
@@ -97,6 +102,8 @@ export interface StageEntryRow {
   to_stage_id: UUID;
   assigned_advisor_id: UUID | null;
   is_outbound: boolean;
+  /** Contacto de la oportunidad: liga un lead con las compras de esa persona. */
+  contact_id: UUID;
 }
 export interface HistoryStageRow {
   opportunity_id: UUID;
@@ -133,12 +140,12 @@ export async function listPaidOrdersInPeriod(
 export async function listDraftOppsCreatedInPeriod(
   startUtc: string,
   endUtc: string,
-): Promise<AdvisorOnlyRow[]> {
+): Promise<DraftOppRow[]> {
   const { supabase, organizationId } = getTenantScopedClient();
-  return fetchAllPaged<AdvisorOnlyRow>(() =>
+  return fetchAllPaged<DraftOppRow>(() =>
     supabase
       .from("opportunities")
-      .select("assigned_advisor_id, is_outbound")
+      .select("assigned_advisor_id, is_outbound, won_at")
       .eq("organization_id", organizationId)
       .eq("funnel", "venta")
       .is("cancelled_at", null)
@@ -331,7 +338,7 @@ export async function listStageEntriesInPeriod(
     supabase
       .from("opportunity_stage_history")
       .select(
-        "opportunity_id, to_stage_id, opportunity:opportunities!inner(assigned_advisor_id, is_outbound, cancelled_at)",
+        "opportunity_id, to_stage_id, opportunity:opportunities!inner(assigned_advisor_id, is_outbound, cancelled_at, contact_id)",
       )
       .eq("organization_id", organizationId)
       .in("to_stage_id", stageIds)
@@ -342,14 +349,104 @@ export async function listStageEntriesInPeriod(
   type Raw = {
     opportunity_id: UUID;
     to_stage_id: UUID;
-    opportunity: { assigned_advisor_id: UUID | null; is_outbound: boolean };
+    opportunity: { assigned_advisor_id: UUID | null; is_outbound: boolean; contact_id: UUID };
   };
   return ((data ?? []) as unknown as Raw[]).map((r) => ({
     opportunity_id: r.opportunity_id,
     to_stage_id: r.to_stage_id,
     assigned_advisor_id: r.opportunity.assigned_advisor_id,
     is_outbound: r.opportunity.is_outbound,
+    contact_id: r.opportunity.contact_id,
   }));
+}
+
+/**
+ * Leads del periodo que se ARCHIVARON por absorción: entraron a "Lead nuevo"
+ * y después se cancelaron porque el mismo contacto avanzó a cotización (ver
+ * lib/services/opportunity-absorption.ts).
+ *
+ * Existe aparte de `listStageEntriesInPeriod` (que excluye canceladas) porque
+ * esa exclusión, correcta para limpiar duplicados y pruebas, borraba del
+ * conteo de leads justo a los que avanzaron. Medido en Centr, agosto 2026: 23
+ * leads reales, 9 de ellos absorbidos — y 3 de los 4 que compraron estaban
+ * entre esos 9.
+ *
+ * `cancellationSource` lo pasa el servicio (la constante es compartida con
+ * quien cancela) para no acoplar la capa de datos a la de servicios.
+ */
+export async function listAbsorbedLeadEntriesInPeriod(
+  initialStageId: UUID,
+  cancellationSource: string,
+  startUtc: string,
+  endUtc: string,
+): Promise<StageEntryRow[]> {
+  const { supabase, organizationId } = getTenantScopedClient();
+  const data = await fetchAllPaged<unknown>(() =>
+    supabase
+      .from("opportunity_stage_history")
+      .select(
+        "opportunity_id, to_stage_id, opportunity:opportunities!inner(assigned_advisor_id, is_outbound, contact_id, cancellation_source)",
+      )
+      .eq("organization_id", organizationId)
+      .eq("to_stage_id", initialStageId)
+      .eq("opportunity.cancellation_source", cancellationSource)
+      .gte("effective_event_at", startUtc)
+      .lte("effective_event_at", endUtc),
+  );
+  type Raw = {
+    opportunity_id: UUID;
+    to_stage_id: UUID;
+    opportunity: { assigned_advisor_id: UUID | null; is_outbound: boolean; contact_id: UUID };
+  };
+  return ((data ?? []) as unknown as Raw[]).map((r) => ({
+    opportunity_id: r.opportunity_id,
+    to_stage_id: r.to_stage_id,
+    assigned_advisor_id: r.opportunity.assigned_advisor_id,
+    is_outbound: r.opportunity.is_outbound,
+    contact_id: r.opportunity.contact_id,
+  }));
+}
+
+export interface LeadPurchaseRow {
+  contact_id: UUID;
+  total_amount: string;
+  paid_at: string | null;
+}
+
+/**
+ * Pedidos PAGADOS de un conjunto de contactos desde `sinceUtc` — alimenta
+ * "Leads que compraron": de los leads que entraron en el periodo, cuáles ya
+ * generaron venta cobrada.
+ *
+ * Por CONTACTO y no por oportunidad a propósito: el lead nace como una opp en
+ * "Lead nuevo" y la venta suele cerrarse en OTRA opp (la que crea la cotización
+ * de Shopify), así que buscar `won_at` en la misma opp del lead contaría casi
+ * cero. Lo que une ambas es la persona.
+ *
+ * Chunked por el tope de la cláusula IN y paginado por el tope de filas.
+ */
+export async function listPaidOrdersForContactsSince(
+  contactIds: UUID[],
+  sinceUtc: string,
+): Promise<LeadPurchaseRow[]> {
+  if (contactIds.length === 0) return [];
+  const { supabase, organizationId } = getTenantScopedClient();
+  const CHUNK = 300;
+  const out: LeadPurchaseRow[] = [];
+  for (let i = 0; i < contactIds.length; i += CHUNK) {
+    const chunk = contactIds.slice(i, i + CHUNK);
+    const page = await fetchAllPaged<LeadPurchaseRow>(() =>
+      supabase
+        .from("orders")
+        .select("contact_id, total_amount, paid_at")
+        .eq("organization_id", organizationId)
+        .eq("financial_status", "paid")
+        .in("contact_id", chunk)
+        .gte("paid_at", sinceUtc),
+    );
+    out.push(...page);
+  }
+  return out;
 }
 
 /**

@@ -4,6 +4,7 @@ import {
   type GoalScope,
   type ScopeAchievement,
 } from "@/lib/services/dashboard-metrics";
+import { achievedForMetric } from "@/lib/metas/achievement";
 import {
   insertGoalResults,
   listGoalResultsForMonth,
@@ -32,14 +33,15 @@ export type SnapshotRow = Omit<
  * nada (los índices únicos parciales de 0031 son la red de respaldo).
  */
 
-const ZERO: ScopeAchievement = { quotes: 0, won: 0, amount: 0 };
+const ZERO: ScopeAchievement = { quotes: 0, won: 0, amount: 0, quotesWon: 0 };
 
 function scopeKey(s: GoalScope): string {
   return s.kind === "advisor" ? s.membershipId : s.kind; // uuid | "team" | "organic"
 }
 
 function achievedFor(metric: GoalMetric, a: ScopeAchievement): number {
-  return metric === "quotes" ? a.quotes : metric === "won" ? a.won : a.amount;
+  // Una sola definición para el avance en vivo y el snapshot (dashboard-metrics).
+  return achievedForMetric(metric, a);
 }
 
 export interface SnapshotResult {

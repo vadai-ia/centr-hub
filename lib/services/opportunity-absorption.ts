@@ -7,6 +7,7 @@ import {
   updateOpportunity,
 } from "@/lib/db/opportunities";
 import { recordAuditEvent } from "@/lib/db/operational";
+import { ABSORPTION_CANCELLATION_SOURCE } from "@/lib/constants";
 import type { Json, UUID } from "@/lib/types/database";
 
 /**
@@ -46,7 +47,8 @@ import type { Json, UUID } from "@/lib/types/database";
  * `listOpportunities` ya excluye canceladas (los absorbidos no reaparecen).
  */
 
-const ABSORPTION_SOURCE = "absorbed_by_advanced_opportunity" as const;
+// Compartida con el Dashboard, que SIGUE contando estos leads (lib/constants).
+const ABSORPTION_SOURCE = ABSORPTION_CANCELLATION_SOURCE;
 
 export interface AbsorbInput {
   /** Contacto cuyo Lead nuevo se quiere absorber. */
