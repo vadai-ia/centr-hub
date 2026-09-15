@@ -5,9 +5,10 @@ import {
   type AdminMetasData,
   type MetaGoalView,
   type MetaHistoryRow,
+  type MetaMonthOption,
 } from "@/lib/actions/admin-metas";
 import {
-  GOAL_METRICS,
+  EDITABLE_GOAL_METRICS,
   metricsForSubject,
   type GoalSubject,
   GOAL_METRIC_LABELS,
@@ -18,6 +19,7 @@ import type { GoalThresholds } from "@/lib/metas/semaphore";
 import type { UUID } from "@/lib/types/database";
 import { GoalProgressBar } from "@/components/metas/goal-progress-bar";
 import { GoalEditModal } from "./goal-edit-modal";
+import { MonthCloseRate } from "./close-rate-section";
 
 interface Props {
   initialData: AdminMetasData;
@@ -122,14 +124,15 @@ export function MetasScreen({ initialData }: Props) {
         </h2>
         <p className="mt-1 text-xs text-slate-400 dark:text-slate-500">
           Toca una celda para definir o editar el objetivo. La meta de equipo se compara contra los
-          totales de la operación; cada vendedor contra lo suyo.
+          totales de la operación; cada vendedor contra lo suyo. Las cotizaciones y el % de cierre
+          no se capturan: se calculan solos en &quot;Avance por mes&quot;.
         </p>
         <div className="mt-4 overflow-x-auto">
           <table className="w-full border-collapse text-sm">
             <thead>
               <tr className="border-b border-slate-200 text-left dark:border-slate-700">
                 <th className="py-2 pr-3 font-medium text-slate-500 dark:text-slate-400">Sujeto</th>
-                {GOAL_METRICS.map((m) => (
+                {EDITABLE_GOAL_METRICS.map((m) => (
                   <th key={m} className="px-3 py-2 font-medium text-slate-500 dark:text-slate-400">
                     {GOAL_METRIC_LABELS[m]}
                   </th>
@@ -140,7 +143,7 @@ export function MetasScreen({ initialData }: Props) {
               {subjects.map((s) => (
                 <tr key={s.key} className="border-b border-slate-100 last:border-0 dark:border-slate-700/50">
                   <td className="py-2 pr-3 font-medium text-slate-700 dark:text-slate-200">{s.label}</td>
-                  {GOAL_METRICS.map((m) => {
+                  {EDITABLE_GOAL_METRICS.map((m) => {
                     // La venta orgánica solo admite monto: no lleva cotización
                     // enviada ni oportunidad trabajada (CHECK en 0051). La celda
                     // se deshabilita en vez de ofrecer algo que la BD rechaza.
@@ -183,7 +186,12 @@ export function MetasScreen({ initialData }: Props) {
         </div>
       </section>
 
-      <HistorySection history={initialData.history} thresholds={thresholds} />
+      <HistorySection
+        history={initialData.history}
+        months={initialData.months}
+        currentCloseRates={initialData.currentCloseRates}
+        thresholds={thresholds}
+      />
 
       {modal && (
         <GoalEditModal
@@ -279,7 +287,8 @@ function ThresholdsCard({
         Umbrales del semáforo
       </h2>
       <p className="mt-1 text-xs text-slate-400 dark:text-slate-500">
-        Porcentajes de avance donde la barra cambia de color. Aplican igual a las tres métricas.
+        Porcentajes de avance donde la barra cambia de color. Aplican igual a todas las metas; el %
+        de cierre no usa semáforo porque no tiene objetivo.
         Superar el 100% siempre es dorado.
       </p>
       <div className="mt-4 flex flex-wrap items-end gap-4">
@@ -336,6 +345,8 @@ function ZoneChip({ className, label }: { className: string; label: string }) {
   );
 }
 
+type MetaCloseRateRows = AdminMetasData["currentCloseRates"]["rows"];
+
 const SUBJECT_ORDER: Record<GoalSubject, number> = { team: 0, organic: 1, advisor: 2 };
 
 function sortSubjects(a: MetaHistoryRow, b: MetaHistoryRow): number {
@@ -347,19 +358,16 @@ function sortSubjects(a: MetaHistoryRow, b: MetaHistoryRow): number {
 
 function HistorySection({
   history,
+  months,
+  currentCloseRates,
   thresholds,
 }: {
   history: MetaHistoryRow[];
+  /** Meses a ofrecer (más reciente primero), aunque no tengan metas: el % de cierre siempre existe. */
+  months: MetaMonthOption[];
+  currentCloseRates: AdminMetasData["currentCloseRates"];
   thresholds: GoalThresholds;
 }) {
-  // Meses disponibles (clave + label), más reciente primero.
-  const months = useMemo(() => {
-    const seen = new Map<string, string>();
-    for (const r of history) if (!seen.has(r.monthKey)) seen.set(r.monthKey, r.monthLabel);
-    return Array.from(seen.entries())
-      .sort((a, b) => b[0].localeCompare(a[0]))
-      .map(([key, label]) => ({ key, label }));
-  }, [history]);
 
   const byMonth = useMemo(() => {
     const map = new Map<string, MetaHistoryRow[]>();
@@ -375,8 +383,8 @@ function HistorySection({
   // ver ("¿cómo vamos en septiembre?"). Los meses cerrados quedan colapsados:
   // con muchos meses, mostrarlos todos sería interminable.
   const [selected, setSelected] = useState<Set<string>>(() => {
-    const current = history.find((r) => r.live);
-    return current ? new Set([current.monthKey]) : new Set();
+    const current = months.find((m) => m.live);
+    return current ? new Set([current.key]) : new Set();
   });
 
   function toggle(key: string) {
@@ -414,8 +422,11 @@ function HistorySection({
             .map((m) => (
               <MonthHistory
                 key={m.key}
+                monthKey={m.key}
                 label={m.label}
+                live={m.live}
                 rows={byMonth.get(m.key) ?? []}
+                closeRates={m.key === currentCloseRates.monthKey ? currentCloseRates.rows : null}
                 thresholds={thresholds}
               />
             ))}
@@ -462,22 +473,29 @@ function MonthSelect({
 }
 
 function MonthHistory({
+  monthKey,
   label,
+  live,
   rows,
+  closeRates,
   thresholds,
 }: {
+  monthKey: string;
   label: string;
+  live: boolean;
   rows: MetaHistoryRow[];
+  /** Ya calculado (mes en curso) o null para pedirlo al abrir. */
+  closeRates: MetaCloseRateRows | null;
   thresholds: GoalThresholds;
 }) {
   // Solo las métricas con datos en el mes, en el orden canónico.
-  const metrics = GOAL_METRICS.filter((m) => rows.some((r) => r.metric === m));
+  const metrics = EDITABLE_GOAL_METRICS.filter((m) => rows.some((r) => r.metric === m));
   return (
     <div>
       <h3 className="mb-1 text-sm font-semibold capitalize text-slate-700 dark:text-slate-200">
         {label}
       </h3>
-      {rows.some((r) => r.live) ? (
+      {live ? (
         <p className="mb-3 text-xs text-slate-400 dark:text-slate-500">
           Avance en tiempo real del mes en curso. Al cerrar el mes se congela en el histórico.
         </p>
@@ -485,6 +503,7 @@ function MonthHistory({
         <div className="mb-2" />
       )}
       <div className="space-y-5">
+        <MonthCloseRate monthKey={monthKey} initialRows={closeRates} />
         {metrics.map((m) => {
           const subjectRows = rows.filter((r) => r.metric === m).sort(sortSubjects);
           return (

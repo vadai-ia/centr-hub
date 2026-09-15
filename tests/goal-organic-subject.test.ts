@@ -28,9 +28,10 @@ describe("metricsForSubject", () => {
     expect(metricsForSubject("organic")).toEqual(["amount"]);
   });
 
-  it("equipo y vendedor admiten todas las métricas, incluido el % de cierre (0053)", () => {
-    expect(metricsForSubject("team")).toHaveLength(4);
-    expect(metricsForSubject("advisor")).toContain("close_rate");
+  it("equipo y vendedor solo admiten metas con objetivo (ganadas y monto)", () => {
+    // Cotizaciones y % de cierre se calculan solos: no se capturan.
+    expect(metricsForSubject("team")).toEqual(["won", "amount"]);
+    expect(metricsForSubject("advisor")).toEqual(["won", "amount"]);
   });
 });
 

@@ -11,7 +11,7 @@ import {
   listGoals,
 } from "@/lib/db/metas";
 import { computeGoalPct } from "@/lib/metas/semaphore";
-import type { GoalMetric } from "@/lib/metas/schema";
+import { isEditableGoalMetric, type GoalMetric } from "@/lib/metas/schema";
 import type { ResolvedPeriod } from "@/lib/time/period";
 import type { Database } from "@/lib/types/database";
 
@@ -70,7 +70,12 @@ export async function snapshotMonthlyGoals(input: {
     return { written: 0, skipped: true, alreadyExists, rows: [] };
   }
 
-  const goals = await listGoals({ onlyActive: true });
+  // Solo metas con objetivo capturado. Cotizaciones y % de cierre ya no llevan
+  // meta: se calculan solos y el % de un mes cerrado se recalcula por cohorte
+  // (loadCloseRatesForMonth), así que congelarlos aquí solo duplicaría datos.
+  const goals = (await listGoals({ onlyActive: true })).filter((g) =>
+    isEditableGoalMetric(g.metric),
+  );
   if (goals.length === 0) {
     return { written: 0, skipped: false, alreadyExists, rows: [] };
   }

@@ -4,7 +4,7 @@ import {
   type GoalScope,
   type ScopeAchievement,
 } from "@/lib/services/dashboard-metrics";
-import { achievedForMetric } from "@/lib/metas/achievement";
+import { achievedForMetric, closeRateOf, type CloseRate } from "@/lib/metas/achievement";
 import { readGoalThresholds } from "@/lib/services/metas-config";
 import { listGoals } from "@/lib/db/metas";
 import { getOrganizationById } from "@/lib/db/organizations";
@@ -15,8 +15,13 @@ import {
   type GoalThresholds,
   type GoalZone,
 } from "@/lib/metas/semaphore";
-import type { GoalMetric, GoalSubject } from "@/lib/metas/schema";
-import { currentMonthKey, resolveCurrentMonthPeriod } from "@/lib/time/period";
+import { isEditableGoalMetric, type GoalMetric, type GoalSubject } from "@/lib/metas/schema";
+import {
+  currentMonthKey,
+  resolveCurrentMonthPeriod,
+  resolveMonthPeriod,
+  type ResolvedPeriod,
+} from "@/lib/time/period";
 import type { GoalRow, UUID } from "@/lib/types/database";
 
 /**
@@ -52,6 +57,8 @@ export interface VendorGoals {
   name: string;
   color: string | null;
   goals: GoalProgress[];
+  /** % de cierre automático del mes (sin objetivo). */
+  closeRate: CloseRate;
 }
 
 export interface AdminGoalProgress {
@@ -60,13 +67,37 @@ export interface AdminGoalProgress {
   team: GoalProgress[]; // metas de la organización completa
   /** Meta(s) de la venta que entra sola por la tienda online (0051). */
   organic: GoalProgress[];
-  byVendor: VendorGoals[]; // vendedores CON al menos una meta activa
+  /** Vendedores con al menos una meta activa O con cotizaciones en el mes. */
+  byVendor: VendorGoals[];
+  /** % de cierre automático de toda la organización en el mes. */
+  teamCloseRate: CloseRate;
 }
 
 export interface VendorGoalProgress {
   thresholds: GoalThresholds;
   monthKey: string;
   goals: GoalProgress[]; // SOLO las del vendedor
+  /** Su % de cierre automático del mes (aunque no tenga metas). */
+  closeRate: CloseRate;
+}
+
+/** Fila del % de cierre de un mes cualquiera (Admin → Metas, meses cerrados). */
+export interface CloseRateRow {
+  key: string; // "team" | membershipId
+  subject: "team" | "advisor";
+  name: string;
+  color: string | null;
+  closeRate: CloseRate;
+}
+
+/**
+ * Metas activas que se miden contra un objetivo. Las de `quotes`/`close_rate`
+ * capturadas antes del cambio siguen en BD pero ya no cuentan: esos números
+ * ahora se calculan solos (ver `EDITABLE_GOAL_METRICS`).
+ */
+async function listMeasuredGoals(): Promise<GoalRow[]> {
+  const goals = await listGoals({ onlyActive: true });
+  return goals.filter((g) => isEditableGoalMetric(g.metric));
 }
 
 const ZERO: ScopeAchievement = { quotes: 0, won: 0, amount: 0, quotesWon: 0 };
@@ -111,7 +142,7 @@ export async function loadAdminGoalProgress(
 ): Promise<AdminGoalProgress> {
   const [org, goals, vendors] = await Promise.all([
     getOrganizationById(organizationId),
-    listGoals({ onlyActive: true }),
+    listMeasuredGoals(),
     listRealVendorsForMapping(organizationId),
   ]);
   const thresholds = readGoalThresholds(org?.config ?? null);
@@ -124,17 +155,22 @@ export async function loadAdminGoalProgress(
   const teamGoals = goals.filter((g) => g.subject === "team");
   const organicGoals = goals.filter((g) => g.subject === "organic");
   const vendorGoals = goals.filter((g) => g.subject === "advisor");
+  // Todo asesor entra, tenga meta o no: el % de cierre es automático y la
+  // dirección lo quiere ver de cada vendedor sin tener que capturar nada.
   const vendorIds = Array.from(
-    new Set(vendorGoals.map((g) => g.advisor_membership_id as UUID)),
+    new Set([
+      ...vendors.map((v) => v.id),
+      ...vendorGoals.map((g) => g.advisor_membership_id as UUID),
+    ]),
   );
 
-  // Solo se computa el avance de los sujetos que tienen meta activa.
-  const scopes: GoalScope[] = [];
-  if (teamGoals.length > 0) scopes.push({ kind: "team" });
+  // Equipo y vendedores siempre (el % de cierre no depende de metas); la
+  // orgánica solo si tiene meta — no tiene cotizaciones que medir.
+  const scopes: GoalScope[] = [{ kind: "team" }];
   if (organicGoals.length > 0) scopes.push({ kind: "organic" });
   scopes.push(...vendorIds.map((id) => ({ kind: "advisor" as const, membershipId: id })));
 
-  const achievements = scopes.length > 0 ? await computeGoalAchievement(period, scopes) : [];
+  const achievements = await computeGoalAchievement(period, scopes);
   const achByScope = new Map<string, ScopeAchievement>();
   scopes.forEach((s, i) => achByScope.set(scopeKey(s), achievements[i]));
 
@@ -145,20 +181,66 @@ export async function loadAdminGoalProgress(
     toProgress(g, achievedFor(g.metric, achByScope.get("organic") ?? ZERO), thresholds, null),
   );
 
-  const byVendor: VendorGoals[] = vendorIds.map((id) => {
-    const ach = achByScope.get(id) ?? ZERO;
-    const gs = vendorGoals
-      .filter((g) => g.advisor_membership_id === id)
-      .map((g) => toProgress(g, achievedFor(g.metric, ach), thresholds, nameById.get(id) ?? null));
-    return {
-      membershipId: id,
-      name: nameById.get(id) ?? "Vendedor",
-      color: colorById.get(id) ?? null,
-      goals: gs,
-    };
-  });
+  const byVendor: VendorGoals[] = vendorIds
+    .map((id) => {
+      const ach = achByScope.get(id) ?? ZERO;
+      const gs = vendorGoals
+        .filter((g) => g.advisor_membership_id === id)
+        .map((g) => toProgress(g, achievedFor(g.metric, ach), thresholds, nameById.get(id) ?? null));
+      return {
+        membershipId: id,
+        name: nameById.get(id) ?? "Vendedor",
+        color: colorById.get(id) ?? null,
+        goals: gs,
+        closeRate: closeRateOf(ach),
+      };
+    })
+    // Un asesor sin meta ni cotizaciones en el mes no aporta nada que ver.
+    .filter((v) => v.goals.length > 0 || v.closeRate.quotes > 0);
 
-  return { thresholds, monthKey: currentMonthKey(), team, organic, byVendor };
+  return {
+    thresholds,
+    monthKey: currentMonthKey(),
+    team,
+    organic,
+    byVendor,
+    teamCloseRate: closeRateOf(achByScope.get("team") ?? ZERO),
+  };
+}
+
+/**
+ * % de cierre automático de un mes cualquiera (equipo + cada asesor con
+ * cotizaciones). No hay snapshot que leer: por cohorte, el % de un mes cerrado
+ * se recalcula de los datos — y es lo correcto, porque una cotización de julio
+ * que se paga en septiembre SÍ mejora el cierre de julio.
+ */
+export async function loadCloseRatesForMonth(
+  organizationId: UUID,
+  monthKey: string,
+): Promise<CloseRateRow[] | null> {
+  const period: ResolvedPeriod | null = resolveMonthPeriod(monthKey);
+  if (!period) return null;
+  const vendors = await listRealVendorsForMapping(organizationId);
+  const scopes: GoalScope[] = [
+    { kind: "team" },
+    ...vendors.map((v) => ({ kind: "advisor" as const, membershipId: v.id })),
+  ];
+  const achievements = await computeGoalAchievement(period, scopes);
+  const rows: CloseRateRow[] = [
+    { key: "team", subject: "team", name: "Equipo", color: null, closeRate: closeRateOf(achievements[0]) },
+  ];
+  vendors.forEach((v, i) => {
+    const closeRate = closeRateOf(achievements[i + 1]);
+    if (closeRate.quotes === 0) return;
+    rows.push({
+      key: v.id,
+      subject: "advisor",
+      name: v.profile.full_name,
+      color: v.profile.color,
+      closeRate,
+    });
+  });
+  return rows;
 }
 
 /**
@@ -172,7 +254,7 @@ export async function loadVendorGoalProgress(
 ): Promise<VendorGoalProgress> {
   const [org, goals] = await Promise.all([
     getOrganizationById(organizationId),
-    listGoals({ onlyActive: true }),
+    listMeasuredGoals(),
   ]);
   const thresholds = readGoalThresholds(org?.config ?? null);
   // Un vendedor ve SOLO sus metas: ni la de equipo ni la orgánica (que no es
@@ -180,13 +262,20 @@ export async function loadVendorGoalProgress(
   const mine = goals.filter(
     (g) => g.subject === "advisor" && g.advisor_membership_id === membershipId,
   );
-  if (mine.length === 0) {
-    return { thresholds, monthKey: currentMonthKey(), goals: [] };
+  // Sin membership (usuario sin cartera en la org) no hay nada que medir.
+  if (!membershipId) {
+    return { thresholds, monthKey: currentMonthKey(), goals: [], closeRate: closeRateOf(ZERO) };
   }
+  // Se computa aunque no tenga metas: su % de cierre es automático.
   const period = resolveCurrentMonthPeriod();
   const [ach] = await computeGoalAchievement(period, [
     { kind: "advisor", membershipId },
   ]);
   const progress = mine.map((g) => toProgress(g, achievedFor(g.metric, ach), thresholds, null));
-  return { thresholds, monthKey: currentMonthKey(), goals: progress };
+  return {
+    thresholds,
+    monthKey: currentMonthKey(),
+    goals: progress,
+    closeRate: closeRateOf(ach),
+  };
 }

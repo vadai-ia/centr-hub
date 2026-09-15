@@ -81,6 +81,14 @@ export function currentMonthKey(): string {
   return nowInTz().toFormat("yyyy-MM");
 }
 
+/** Los últimos `n` meses (`yyyy-MM`, MX), del en curso hacia atrás. */
+export function recentMonthKeys(n: number): string[] {
+  const now = nowInTz().startOf("month");
+  return Array.from({ length: Math.max(0, n) }, (_, i) =>
+    now.minus({ months: i }).toFormat("yyyy-MM"),
+  );
+}
+
 export interface WeekSegment {
   /** Primer día (`yyyy-MM-dd`, MX). */
   from: string;

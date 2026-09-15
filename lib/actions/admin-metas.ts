@@ -18,6 +18,7 @@ import {
   goalInputSchema,
   goalThresholdsInputSchema,
   isCountMetric,
+  isEditableGoalMetric,
   type GoalMetric,
   type GoalSubject,
 } from "@/lib/metas/schema";
@@ -26,8 +27,16 @@ import {
   readGoalThresholds,
 } from "@/lib/services/metas-config";
 import { sanitizeGoalThresholds, type GoalThresholds } from "@/lib/metas/semaphore";
-import { monthLabel } from "@/lib/time/period";
-import { loadAdminGoalProgress, type GoalProgress } from "@/lib/services/goal-progress";
+import { monthLabel, recentMonthKeys } from "@/lib/time/period";
+import {
+  loadAdminGoalProgress,
+  loadCloseRatesForMonth,
+  type CloseRateRow,
+  type GoalProgress,
+} from "@/lib/services/goal-progress";
+
+/** Meses hacia atrás que ofrece "Avance por mes" para ver el % de cierre. */
+const CLOSE_RATE_MONTHS = 6;
 import type { GoalRow, Json, UUID } from "@/lib/types/database";
 
 /**
@@ -72,12 +81,25 @@ export interface MetaHistoryRow {
   achieved: number;
   pct: number;
 }
+export interface MetaMonthOption {
+  key: string; // yyyy-MM
+  label: string;
+  live: boolean; // mes en curso
+}
 export interface AdminMetasData {
   vendors: MetaVendorView[];
   goals: MetaGoalView[];
   thresholds: GoalThresholds;
   history: MetaHistoryRow[];
+  /** Meses de "Avance por mes", más reciente primero. */
+  months: MetaMonthOption[];
+  /** % de cierre del mes en curso ya calculado; los demás se piden al abrirlos. */
+  currentCloseRates: { monthKey: string; rows: CloseRateRow[] };
 }
+
+export type LoadCloseRatesResult =
+  | { ok: true; rows: CloseRateRow[] }
+  | { ok: false; message: string };
 
 export type LoadAdminMetasResult =
   | { ok: true; data: AdminMetasData }
@@ -126,7 +148,9 @@ export async function loadAdminMetas(): Promise<LoadAdminMetasResult> {
       const thresholds = readGoalThresholds(org?.config ?? null);
       const nameById = new Map(vendors.map((v) => [v.id, v.profile.full_name]));
 
-      const historyRows: MetaHistoryRow[] = history.map((r) => {
+      // Los snapshots viejos de cotizaciones / % de cierre se omiten: ya no
+      // llevan meta y el % de cualquier mes se recalcula solo (MonthCloseRate).
+      const historyRows: MetaHistoryRow[] = history.filter((r) => isEditableGoalMetric(r.metric)).map((r) => {
         const monthKey = r.period_month.slice(0, 7);
         return {
           id: r.id,
@@ -175,9 +199,37 @@ export async function loadAdminMetas(): Promise<LoadAdminMetasResult> {
         ...live.byVendor.flatMap((v) => v.goals.map((p) => toLiveRow(p, v.name))),
       ];
 
+      // Meses a ofrecer: los últimos N (el % de cierre se recalcula de los
+      // datos, no necesita snapshot) + cualquier mes más viejo con histórico.
+      const monthKeys = new Set([
+        ...recentMonthKeys(CLOSE_RATE_MONTHS),
+        ...historyRows.map((r) => r.monthKey),
+      ]);
+      const months: MetaMonthOption[] = Array.from(monthKeys)
+        .sort((a, b) => b.localeCompare(a))
+        .map((key) => ({
+          key,
+          label: key === live.monthKey ? liveLabel : monthLabel(key),
+          live: key === live.monthKey,
+        }));
+      const currentCloseRates: CloseRateRow[] = [
+        { key: "team", subject: "team", name: "Equipo", color: null, closeRate: live.teamCloseRate },
+        ...live.byVendor
+          .filter((v) => v.closeRate.quotes > 0)
+          .map((v) => ({
+            key: v.membershipId,
+            subject: "advisor" as const,
+            name: v.name,
+            color: v.color,
+            closeRate: v.closeRate,
+          })),
+      ];
+
       return {
         ok: true as const,
         data: {
+          months,
+          currentCloseRates: { monthKey: live.monthKey, rows: currentCloseRates },
           vendors: vendors.map((v) => ({
             membershipId: v.id,
             name: v.profile.full_name,
@@ -190,6 +242,25 @@ export async function loadAdminMetas(): Promise<LoadAdminMetasResult> {
           history: [...liveRows, ...historyRows.filter((r) => r.monthKey !== live.monthKey)],
         },
       };
+    },
+    { source: "user_session" },
+  );
+}
+
+// ── % de cierre de un mes cerrado (se pide al abrir el mes) ──────────────
+const monthKeySchema = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/);
+
+export async function loadCloseRatesForMonthAction(raw: unknown): Promise<LoadCloseRatesResult> {
+  const parsed = monthKeySchema.safeParse(raw);
+  if (!parsed.success) return { ok: false, message: "Mes inválido." };
+  const admin = await resolveAdminContext("admin-metas");
+  if (!admin.ok) return admin;
+  return withTenantContext(
+    admin.ctx.orgId,
+    async () => {
+      const rows = await loadCloseRatesForMonth(admin.ctx.orgId, parsed.data);
+      if (!rows) return { ok: false as const, message: "Mes inválido." };
+      return { ok: true as const, rows };
     },
     { source: "user_session" },
   );

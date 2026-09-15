@@ -1,9 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { tallyAchievement } from "@/lib/services/dashboard-metrics";
-import { achievedForMetric } from "@/lib/metas/achievement";
+import { achievedForMetric, closeRateOf } from "@/lib/metas/achievement";
 import { formatGoalValue, goalInputSchema, metricsForSubject } from "@/lib/metas/schema";
+import { recentMonthKeys } from "@/lib/time/period";
 
 /**
  * % de cierre de cotizaciones como meta (0053).
@@ -59,19 +60,25 @@ describe("close_rate", () => {
     expect(achievedForMetric("amount", t)).toBe(900);
   });
 
-  it("la venta orgánica no la admite (no tiene cotizaciones)", () => {
-    expect(metricsForSubject("organic")).not.toContain("close_rate");
-    expect(metricsForSubject("advisor")).toContain("close_rate");
+  it("ya no se ofrece como meta a ningún sujeto (se calcula sola)", () => {
+    for (const s of ["team", "advisor", "organic"] as const) {
+      expect(metricsForSubject(s)).not.toContain("close_rate");
+      expect(metricsForSubject(s)).not.toContain("quotes");
+    }
   });
 
   it("se muestra como porcentaje, no como monto", () => {
     expect(formatGoalValue("close_rate", 25)).toBe("25%");
   });
 
-  it("el objetivo no puede pasar de 100", () => {
+  it("el schema rechaza capturar meta de % de cierre o de cotizaciones", () => {
     const base = { subject: "advisor", advisorMembershipId: "11111111-1111-4111-8111-111111111111", isActive: true };
-    expect(goalInputSchema.safeParse({ ...base, metric: "close_rate", targetValue: 30 }).success).toBe(true);
-    expect(goalInputSchema.safeParse({ ...base, metric: "close_rate", targetValue: 130 }).success).toBe(false);
+    for (const metric of ["close_rate", "quotes"]) {
+      const r = goalInputSchema.safeParse({ ...base, metric, targetValue: 30 });
+      expect(r.success).toBe(false);
+      if (!r.success) expect(r.error.issues[0].message).toContain("se calculan solos");
+    }
+    expect(goalInputSchema.safeParse({ ...base, metric: "won", targetValue: 30 }).success).toBe(true);
   });
 
   it("la migración 0053 amplía el CHECK y acota el objetivo a 0–100", () => {
@@ -85,5 +92,35 @@ describe("close_rate", () => {
     expect(sql).toContain("'close_rate'");
     expect(sql).toContain("goals_close_rate_is_percent");
     expect(sql).toContain("not ilike '%organic%'");
+  });
+});
+
+describe("closeRateOf (% de cierre automático, sin objetivo)", () => {
+  it("100 cotizaciones y 30 pagadas = 30%", () => {
+    expect(closeRateOf({ quotes: 100, quotesWon: 30 })).toEqual({ quotes: 100, quotesWon: 30, pct: 30 });
+  });
+
+  it("sin cotizaciones no hay % que medir (null, no 0%)", () => {
+    expect(closeRateOf({ quotes: 0, quotesWon: 0 }).pct).toBeNull();
+  });
+
+  it("sale del mismo tally por cohorte que el dashboard", () => {
+    const t = tallyAchievement(
+      [],
+      [quote("2026-05-11T06:00:00.000Z"), quote(null), quote(null), quote(null)],
+      [wonOpp(), wonOpp()],
+      A,
+    );
+    expect(closeRateOf(t)).toEqual({ quotes: 4, quotesWon: 1, pct: 25 });
+  });
+});
+
+describe("recentMonthKeys", () => {
+  afterEach(() => vi.useRealTimers());
+
+  it("del mes en curso hacia atrás, en MX y cruzando el año", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-02-01T03:00:00.000Z")); // 31-ene 21:00 MX
+    expect(recentMonthKeys(3)).toEqual(["2026-01", "2025-12", "2025-11"]);
   });
 });

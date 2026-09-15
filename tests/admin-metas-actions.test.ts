@@ -95,7 +95,7 @@ describe("upsertGoalAction", () => {
     mGetGoalFor.mockResolvedValue(null);
     const res = await upsertGoalAction({
       advisorMembershipId: A,
-      metric: "quotes",
+      metric: "won",
       targetValue: "20.4", // string + decimal
       isActive: true,
     });
@@ -103,7 +103,7 @@ describe("upsertGoalAction", () => {
     expect(mCreate).toHaveBeenCalledWith(
       expect.objectContaining({
         advisor_membership_id: A,
-        metric: "quotes",
+        metric: "won",
         target_value: "20", // redondeado
         is_active: true,
         created_by_user_id: USER,
@@ -140,6 +140,20 @@ describe("upsertGoalAction", () => {
     });
     expect(res.ok).toBe(false);
     expect(mCreate).not.toHaveBeenCalled();
+  });
+
+  it("rechaza meta de cotizaciones o de % de cierre: se calculan solos", async () => {
+    for (const metric of ["quotes", "close_rate"]) {
+      const res = await upsertGoalAction({
+        advisorMembershipId: A,
+        metric,
+        targetValue: 30,
+        isActive: true,
+      });
+      expect(res.ok).toBe(false);
+    }
+    expect(mCreate).not.toHaveBeenCalled();
+    expect(mUpdate).not.toHaveBeenCalled();
   });
 
   it("rechaza objetivo negativo (Zod)", async () => {

@@ -14,6 +14,20 @@ import { z } from "zod";
 export const GOAL_METRICS = ["quotes", "won", "amount", "close_rate"] as const;
 export type GoalMetric = (typeof GOAL_METRICS)[number];
 
+/**
+ * Métricas a las que el admin les FIJA un objetivo. `quotes` y `close_rate`
+ * siguen en `GOAL_METRICS` (espejo del CHECK de BD y del histórico viejo), pero
+ * ya no llevan meta: la dirección pidió no capturar esos números sino verlos
+ * calcularse solos — cuántas cotizaciones lleva cada vendedor en el mes, cuántas
+ * ya se pagaron, y el % que eso representa (ver `closeRateOf`).
+ */
+export const EDITABLE_GOAL_METRICS = ["won", "amount"] as const satisfies readonly GoalMetric[];
+
+/** `true` si la métrica admite objetivo capturado por el admin. */
+export function isEditableGoalMetric(metric: GoalMetric): boolean {
+  return (EDITABLE_GOAL_METRICS as readonly GoalMetric[]).includes(metric);
+}
+
 /** Etiqueta legible (español) de cada métrica. */
 export const GOAL_METRIC_LABELS: Record<GoalMetric, string> = {
   quotes: "Cotizaciones enviadas",
@@ -136,6 +150,14 @@ export const goalInputSchema = z
         path: ["metric"],
       });
     }
+    if (!isEditableGoalMetric(v.metric)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message:
+          "Las cotizaciones y el % de cierre se calculan solos cada mes; no llevan meta.",
+        path: ["metric"],
+      });
+    }
     if (v.metric === "close_rate" && v.targetValue > 100) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -178,9 +200,12 @@ export const GOAL_SUBJECT_LABELS: Record<GoalSubject, string> = {
  * tienen significado para ella — una meta así marcaría cero siempre. El mismo
  * invariante está en la migración 0051 como CHECK (`goals_organic_amount_only`);
  * aquí evita ofrecer en la UI una opción que la BD va a rechazar.
+ *
+ * Equipo y vendedor admiten solo las métricas con objetivo capturado
+ * (`EDITABLE_GOAL_METRICS`); cotizaciones y % de cierre se calculan solos.
  */
 export function metricsForSubject(subject: GoalSubject): readonly GoalMetric[] {
-  return subject === "organic" ? (["amount"] as const) : GOAL_METRICS;
+  return subject === "organic" ? (["amount"] as const) : EDITABLE_GOAL_METRICS;
 }
 
 /** ¿El sujeto apunta a una persona concreta? (exige membership). */

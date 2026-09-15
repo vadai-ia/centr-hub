@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import type { MiDiaSilentClient, MiDiaWeekDay } from "@/lib/services/mi-dia";
 import type { VendorGoalProgress } from "@/lib/services/goal-progress";
 import { GoalEmptyState, GoalProgressBar } from "@/components/metas/goal-progress-bar";
+import { CloseRateBar } from "@/components/metas/close-rate-bar";
 import { formatGoalValueShort, GOAL_METRIC_SHORT } from "@/lib/metas/schema";
 import { IconFlame } from "./mi-dia-icons";
 
@@ -85,6 +86,12 @@ export function MiDiaSidebar({
           </div>
         ) : (
           <GoalEmptyState hint="Sin meta asignada" size="sm" />
+        )}
+        {/* % de cierre automático: se muestra aunque no tenga metas. */}
+        {goal && (
+          <div className="mt-4">
+            <CloseRateBar rate={goal.closeRate} title="% de cierre" size="sm" compact />
+          </div>
         )}
       </Widget>
       )}

@@ -71,13 +71,13 @@ describe("snapshotMonthlyGoals", () => {
   it("congela target/logrado/pct por meta (equipo→all, vendedor→su scope)", async () => {
     mListGoals.mockResolvedValue([
       goal({ id: "g-team", metric: "amount", target_value: "100000", advisor_membership_id: null }),
-      goal({ id: "g-A", metric: "quotes", target_value: "20", advisor_membership_id: A }),
+      goal({ id: "g-A", metric: "won", target_value: "20", advisor_membership_id: A }),
     ]);
     mAch.mockImplementation(async (_p, scopes) =>
       scopes.map((s) =>
         s.kind === "team"
           ? { quotes: 0, won: 0, amount: 118000, quotesWon: 0 }
-          : { quotes: 17, won: 0, amount: 0, quotesWon: 0 },
+          : { quotes: 0, won: 17, amount: 0, quotesWon: 0 },
       ),
     );
 
@@ -97,10 +97,24 @@ describe("snapshotMonthlyGoals", () => {
     const gA = rows.find((r) => r.goal_id === "g-A")!;
     expect(gA).toMatchObject({
       advisor_membership_id: A,
-      metric: "quotes",
+      metric: "won",
       achieved_value: "17",
       pct: "85.00", // 17/20
     });
+  });
+});
+
+describe("snapshotMonthlyGoals — métricas automáticas", () => {
+  it("no congela metas viejas de cotizaciones ni de % de cierre", async () => {
+    mListGoals.mockResolvedValue([
+      goal({ id: "g-q", metric: "quotes", target_value: "120" }),
+      goal({ id: "g-cr", metric: "close_rate", target_value: "30" }),
+      goal({ id: "g-w", metric: "won", target_value: "40" }),
+    ]);
+    mAch.mockResolvedValue([{ quotes: 100, won: 35, amount: 0, quotesWon: 30 }]);
+    const res = await snapshotMonthlyGoals({ period: PERIOD, periodMonth: "2026-05-01" });
+    expect(res.written).toBe(1);
+    expect(mInsert.mock.calls[0][0].map((r) => r.goal_id)).toEqual(["g-w"]);
   });
 });
 
