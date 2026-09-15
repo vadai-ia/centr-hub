@@ -75,10 +75,10 @@ function ventaRaw(): VentaRaw {
     boundaries,
     lossReasonNames: new Map([["r1", "Precio"]]),
     paidOrders: [
-      { assigned_advisor_id: A, is_outbound: false, total_amount: "100", paid_at: "2026-05-10T18:00:00.000Z", source: "shopify_draft_order" },
-      { assigned_advisor_id: A, is_outbound: false, total_amount: "200", paid_at: "2026-05-12T18:00:00.000Z", source: "shopify_draft_order" },
-      { assigned_advisor_id: B, is_outbound: false, total_amount: "50", paid_at: "2026-05-12T18:00:00.000Z", source: "shopify_draft_order" },
-      { assigned_advisor_id: null, is_outbound: false, total_amount: "30", paid_at: "2026-05-12T18:00:00.000Z", source: "shopify_draft_order" },
+      { assigned_advisor_id: A, is_outbound: false, subtotal: "100", paid_at: "2026-05-10T18:00:00.000Z", source: "shopify_draft_order" },
+      { assigned_advisor_id: A, is_outbound: false, subtotal: "200", paid_at: "2026-05-12T18:00:00.000Z", source: "shopify_draft_order" },
+      { assigned_advisor_id: B, is_outbound: false, subtotal: "50", paid_at: "2026-05-12T18:00:00.000Z", source: "shopify_draft_order" },
+      { assigned_advisor_id: null, is_outbound: false, subtotal: "30", paid_at: "2026-05-12T18:00:00.000Z", source: "shopify_draft_order" },
     ],
     draftOpps: [{ assigned_advisor_id: A, is_outbound: false, won_at: null }, { assigned_advisor_id: A, is_outbound: false, won_at: null }, { assigned_advisor_id: B, is_outbound: false, won_at: null }],
     wonOpps: [
@@ -115,7 +115,7 @@ function ventaRaw(): VentaRaw {
     // Leads que compraron: o1 (lead de A, contacto c-o1) pagó un pedido;
     // o2 (lead de B) no.
     leadPurchases: [
-      { contact_id: "c-o1", total_amount: "500", paid_at: "2026-05-15T18:00:00.000Z" },
+      { contact_id: "c-o1", subtotal: "500", paid_at: "2026-05-15T18:00:00.000Z" },
     ],
     stageEntries: [
       { opportunity_id: "o1", to_stage_id: LEAD.id, assigned_advisor_id: A, is_outbound: false, contact_id: "c-o1" },
@@ -267,8 +267,8 @@ describe("computeVentaMetrics — corte por canal (F4)", () => {
       boundaries,
       lossReasonNames: new Map(),
       paidOrders: [
-        { assigned_advisor_id: A, is_outbound: true, total_amount: "100", paid_at: "2026-05-10T18:00:00.000Z", source: "shopify_draft_order" },
-        { assigned_advisor_id: A, is_outbound: false, total_amount: "50", paid_at: "2026-05-11T18:00:00.000Z", source: "shopify_draft_order" },
+        { assigned_advisor_id: A, is_outbound: true, subtotal: "100", paid_at: "2026-05-10T18:00:00.000Z", source: "shopify_draft_order" },
+        { assigned_advisor_id: A, is_outbound: false, subtotal: "50", paid_at: "2026-05-11T18:00:00.000Z", source: "shopify_draft_order" },
       ],
       draftOpps: [
         { assigned_advisor_id: A, is_outbound: true, won_at: null },
@@ -359,7 +359,7 @@ describe("Leads que compraron", () => {
     const r = ventaRaw();
     r.leadPurchases = [
       ...r.leadPurchases,
-      { contact_id: "c-o3", total_amount: "999", paid_at: "2026-05-16T18:00:00.000Z" },
+      { contact_id: "c-o3", subtotal: "999", paid_at: "2026-05-16T18:00:00.000Z" },
     ];
     const m = computeVentaMetrics(r, "all");
     // o3 entró a calificación, no a "Lead nuevo": no es lead del periodo.
@@ -385,7 +385,7 @@ describe("Leads archivados por absorción", () => {
     r.absorbedLeadEntries = [absorbed];
     r.leadPurchases = [
       ...r.leadPurchases,
-      { contact_id: "c-o9", total_amount: "250", paid_at: "2026-05-20T18:00:00.000Z" },
+      { contact_id: "c-o9", subtotal: "250", paid_at: "2026-05-20T18:00:00.000Z" },
     ];
     const m = computeVentaMetrics(r, "all");
     expect(m.leads).toBe(3);

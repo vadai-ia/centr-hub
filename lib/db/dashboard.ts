@@ -33,7 +33,12 @@ function fetchAllPaged<T>(build: () => RangeableQuery): Promise<T[]> {
 export interface PaidOrderRow {
   assigned_advisor_id: UUID | null;
   is_outbound: boolean;
-  total_amount: string;
+  /**
+   * Monto que cuenta en TODA métrica de venta: el `subtotal_price` de Shopify
+   * (productos con descuentos ya restados, sin envío). NUNCA el total del
+   * pedido, que suma el envío. Ver `ERRORES.md` ("La venta se mide por subtotal").
+   */
+  subtotal: string;
   paid_at: string | null;
   /** `source_name` de Shopify: 'web' (tienda online) | 'shopify_draft_order'
    *  (cotización de un vendedor) | 'pos' | null. Distingue la venta ORGÁNICA
@@ -123,7 +128,7 @@ export async function listPaidOrdersInPeriod(
   return fetchAllPaged<PaidOrderRow>(() =>
     supabase
       .from("orders")
-      .select("assigned_advisor_id, is_outbound, total_amount, paid_at, source")
+      .select("assigned_advisor_id, is_outbound, subtotal, paid_at, source")
       .eq("organization_id", organizationId)
       .eq("financial_status", "paid")
       .gte("paid_at", startUtc)
@@ -409,7 +414,8 @@ export async function listAbsorbedLeadEntriesInPeriod(
 
 export interface LeadPurchaseRow {
   contact_id: UUID;
-  total_amount: string;
+  /** Subtotal del pedido (sin envío, con descuentos), igual que `PaidOrderRow`. */
+  subtotal: string;
   paid_at: string | null;
 }
 
@@ -438,7 +444,7 @@ export async function listPaidOrdersForContactsSince(
     const page = await fetchAllPaged<LeadPurchaseRow>(() =>
       supabase
         .from("orders")
-        .select("contact_id, total_amount, paid_at")
+        .select("contact_id, subtotal, paid_at")
         .eq("organization_id", organizationId)
         .eq("financial_status", "paid")
         .in("contact_id", chunk)

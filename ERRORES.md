@@ -357,6 +357,10 @@ Toda entrada NUEVA sigue este mismo formato condensado — **solo la lección ac
 
 ## Dashboard y KPIs (fechas reales de Shopify, win rate)
 
+### La venta se mide por subtotal, no por total (el total suma el envío)
+- **Causa raíz:** métricas y monto de oportunidad leían `total_price` de Shopify (`orders.total_amount`, `normalized.totalAmount`), que incluye envío. El envío no es venta del asesor e inflaba metas, dashboard y pipeline.
+- **Regla:** toda métrica de venta suma `orders.subtotal` y `opportunities.actual_amount` nace del `subtotalAmount` de la cotización/pedido. El `subtotal_price` de Shopify **ya trae restados los descuentos** (de línea y de pedido) y excluye envío — NO restar `discount_amount` otra vez (se contaría doble). Con impuestos incluidos (MX) el subtotal lleva IVA, igual que antes el total. `total_amount` queda solo como dato mostrado del pedido (timeline). Guard: `tests/amount-subtotal-contract.test.ts`. Correctivo de montos existentes: `maintenance:recompute-opportunity-amounts-subtotal` (dry-run por defecto). Los snapshots de `goal_results` de meses ya cerrados quedan congelados con el criterio viejo.
+
 ### Orders fechadas por `created_at` de BD en vez de la fecha real de Shopify (migración 0024)
 - **Causa raíz:** `orders` nunca guardó la fecha de creación del Order en Shopify; el dashboard filtraba/agrupaba por `created_at` (= hora del INSERT local) → órdenes históricas importadas contadas en el mes de importación. El mapper ya extraía `normalized.createdAt` pero el worker no lo persistía.
 - **Regla:** columna `orders.shopify_created_at` (nullable, índice parcial); worker + backfill la pueblan (`coalesce` defensivo en update). Dashboard cuenta "Pedidos en el periodo" por `shopify_created_at` (pagados + pendientes). **Revenue NO se toca (sigue por `paid_at`, R5).** Filtro excluye NULL (no se inventa fecha). **Distinguir SIEMPRE "fecha del evento en el sistema externo" de "fecha de entrada a la BD".** Correctivo verifica existencia (GET 404) y reporta ANTES de actuar; un huérfano (sin `opportunity_id`) puede ser válido (O6) — nunca borrar por inferencia.

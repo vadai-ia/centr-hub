@@ -42,6 +42,7 @@
     "maintenance:swap-user-email-domain": "tsx --tsconfig scripts/tsconfig.json scripts/maintenance/swap-user-email-domain.ts",
     "maintenance:inspect-duplicate-contacts": "tsx --tsconfig scripts/tsconfig.json scripts/maintenance/inspect-duplicate-contacts.ts",
     "maintenance:merge-duplicate-leads": "tsx --tsconfig scripts/tsconfig.json scripts/maintenance/merge-duplicate-leads.ts",
+    "maintenance:recompute-opportunity-amounts-subtotal": "tsx --tsconfig scripts/tsconfig.json scripts/maintenance/recompute-opportunity-amounts-subtotal.ts",
     "maintenance:seed-test-vendor": "tsx --tsconfig scripts/tsconfig.json scripts/maintenance/seed-test-vendor.ts",
     "maintenance:seed-customer-success": "tsx --tsconfig scripts/tsconfig.json scripts/maintenance/seed-customer-success.ts",
     "maintenance:snapshot-goal-results": "tsx --tsconfig scripts/tsconfig.json scripts/maintenance/snapshot-goal-results.ts",

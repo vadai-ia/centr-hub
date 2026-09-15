@@ -132,7 +132,8 @@ export async function listOrdersMissingShopifyCreatedAt(): Promise<
 
 /**
  * Suma de revenue real para el periodo. R5: solo órdenes con
- * financial_status = 'paid' cuentan; usa total_amount y paid_at.
+ * financial_status = 'paid' cuentan; usa subtotal (sin envío, con
+ * descuentos) y paid_at.
  */
 export async function sumPaidRevenueBetween(
   periodStart: string,
@@ -141,13 +142,13 @@ export async function sumPaidRevenueBetween(
   const { supabase, organizationId } = getTenantScopedClient();
   const { data, error } = await supabase
     .from("orders")
-    .select("total_amount")
+    .select("subtotal")
     .eq("organization_id", organizationId)
     .eq("financial_status", "paid")
     .gte("paid_at", periodStart)
     .lte("paid_at", periodEnd);
   if (error) throw error;
-  return (data ?? []).reduce((acc, row) => acc + Number(row.total_amount), 0);
+  return (data ?? []).reduce((acc, row) => acc + Number(row.subtotal), 0);
 }
 
 /**
@@ -173,17 +174,17 @@ export async function sumPaidOrdersForContact(
   const { supabase, organizationId } = getTenantScopedClient();
   const { data, error } = await supabase
     .from("orders")
-    .select("total_amount, currency")
+    .select("subtotal, currency")
     .eq("organization_id", organizationId)
     .eq("contact_id", contactId)
     .eq("financial_status", "paid")
     .is("cancelled_at", null);
   if (error) throw error;
-  const rows = (data ?? []) as Array<{ total_amount: string; currency: string }>;
+  const rows = (data ?? []) as Array<{ subtotal: string; currency: string }>;
   let total = 0;
   let currency = "MXN";
   for (const row of rows) {
-    total += Number(row.total_amount);
+    total += Number(row.subtotal);
     if (row.currency) currency = row.currency;
   }
   return {

@@ -22,7 +22,7 @@ const CCY = DEFAULT_CURRENCY;
  */
 const TT = {
   revenue:
-    "Suma de pedidos pagados en el periodo, contados por la fecha de pago real de Shopify. Solo pedidos con estado pagado.",
+    "Suma del subtotal de los pedidos pagados en el periodo (productos con descuentos aplicados, sin envío), contados por la fecha de pago real de Shopify. Solo pedidos con estado pagado.",
   pipelineNow:
     "Foto del momento: suma de los montos de las oportunidades vivas AHORA (ni ganadas, ni perdidas, ni canceladas). NO depende del filtro de fecha, solo del asesor. Es bruto: sin ponderar. Usa el monto real, o el estimado si aún no hay real.",
   pipelinePeriod:
@@ -33,7 +33,7 @@ const TT = {
   leads:
     "Oportunidades que entraron a la etapa inicial 'Lead nuevo' durante el periodo. Incluye los leads que ya avanzaron a cotización (el sistema los archiva al avanzar); no incluye los cancelados por otra razón, como duplicados o pruebas.",
   leadsConverted:
-    "De los leads que entraron en el periodo, cuántos ya compraron: la persona tiene al menos un pedido pagado desde el inicio del periodo. El monto es lo que pagaron. Si esa persona quedó registrada como dos contactos distintos, su compra no se liga al lead.",
+    "De los leads que entraron en el periodo, cuántos ya compraron: la persona tiene al menos un pedido pagado desde el inicio del periodo. El monto es el subtotal de lo que pagaron (sin envío). Si esa persona quedó registrada como dos contactos distintos, su compra no se liga al lead.",
   qualified:
     "Oportunidades que entraron a una etapa de calificación durante el periodo. No incluye canceladas.",
   quotes:
@@ -45,7 +45,7 @@ const TT = {
   cycle:
     "Promedio de días desde la creación real de la oportunidad hasta su fecha de ganada, sobre las oportunidades ganadas en el periodo.",
   revenueByMonth:
-    "Venta cobrada (pedidos pagados) distribuida por mes, según la fecha de pago real de Shopify.",
+    "Venta cobrada (subtotal de pedidos pagados, sin envío) distribuida por mes, según la fecha de pago real de Shopify.",
   wonVsLost: "Conteo de oportunidades ganadas y perdidas en el periodo.",
   lossesByReason:
     "Oportunidades perdidas en el periodo agrupadas por su motivo de pérdida (conteo y monto).",

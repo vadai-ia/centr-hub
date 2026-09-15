@@ -32,7 +32,8 @@ interface Props {
  *
  * Lote polish M6:
  *  - Header con jerarquía clara: nombre primario + monto destacado.
- *  - Total etiquetado "Total de la orden" (incluye envío + impuestos).
+ *  - Monto etiquetado "Subtotal": productos con descuentos, SIN envío —
+ *    el mismo que cuentan dashboard y metas.
  *  - Enlace al customer en Shopify Admin si existe (reemplaza al
  *    botón viejo "Ver link de cobro").
  *  - Secciones de productos / tareas / historia con encabezados
@@ -79,7 +80,7 @@ export function OpportunityDialogContent({
     onClose();
   }, [onClose]);
 
-  // Diferencia entre total (orden Shopify) y subtotal (suma productos).
+  // Diferencia entre el subtotal (con descuentos) y la suma bruta de productos.
   const hasDeltaFromShopifyTotal =
     amount.value !== null &&
     bundle.lineItemsSubtotal > 0 &&
@@ -181,7 +182,7 @@ export function OpportunityDialogContent({
 
           <div className="flex flex-col items-end gap-1 flex-shrink-0">
             <span className="text-[10px] uppercase tracking-wider text-gray-500 dark:text-gray-400 font-semibold">
-              Total de la orden
+              Subtotal (sin envío)
             </span>
             <span
               className={[
@@ -192,7 +193,7 @@ export function OpportunityDialogContent({
                     ? "text-amber-700 dark:text-amber-300"
                     : "text-gray-900 dark:text-gray-50",
               ].join(" ")}
-              title={hasDeltaFromShopifyTotal ? "Incluye envío + impuestos + ajustes (total de la orden Shopify)" : undefined}
+              title={hasDeltaFromShopifyTotal ? "Productos con descuentos aplicados, sin envío (subtotal de Shopify)" : undefined}
             >
               {totalText ?? "Sin monto"}
             </span>

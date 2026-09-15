@@ -70,7 +70,7 @@ export interface OpportunityDialogBundle {
    *  Reemplaza al "Ver link de cobro" pedido en el lote polish M6. */
   shopifyCustomerUrl: string | null;
   /** Subtotal de productos = sum(final_price * quantity). Para
-   *  desambiguar contra el total del header (incluye envío + impuestos). */
+   *  desambiguar contra el monto del header (subtotal con descuentos, sin envío). */
   lineItemsSubtotal: number;
   /** Vendedor asignado o admin pueden añadir nota / crear tarea. */
   canAddNote: boolean;
@@ -201,9 +201,9 @@ export async function loadOpportunityDetailForDialog(
     const canAct = isAdmin || detail.opportunity.assigned_advisor_id === membership?.id;
 
     // Subtotal de productos para etiqueta de monto del popup. Se calcula
-    // server-side para que el header pueda mostrar la diferencia entre
-    // "total de la orden Shopify" (incluye envío + impuestos) y "subtotal
-    // de productos" sin que la UI tenga que sumar.
+    // server-side para que el header pueda mostrar la diferencia entre el
+    // subtotal de Shopify (con descuentos, sin envío) y la suma de productos
+    // sin que la UI tenga que sumar.
     const lineItemsSubtotal = detail.lineItems.reduce(
       (acc, it) => acc + Number(it.final_price) * it.quantity,
       0,

@@ -89,7 +89,8 @@ export async function ensureOnlineOrderOpportunity(
     // Sin borrador que mostrar: la card enseña el folio del PEDIDO, que la
     // capa de datos resuelve desde `orders.shopify_name`.
     display_reference: null,
-    actual_amount: order.total_amount,
+    // Subtotal (sin envío, con descuentos), igual que las cotizaciones.
+    actual_amount: order.subtotal,
     estimated_amount: null,
     currency: order.currency,
     probability_override: null,

@@ -401,7 +401,7 @@ async function main() {
               assigned_advisor_id: advisor, parent_opportunity_id: null,
               shopify_draft_order_id: d.shopifyDraftOrderId, shopify_order_id: null,
               shopify_created_at: d.createdAt, display_reference: d.displayReference,
-              actual_amount: d.totalAmount, estimated_amount: null, currency: d.currency,
+              actual_amount: d.subtotalAmount, estimated_amount: null, currency: d.currency,
               probability_override: null, weighted_amount: null, loss_reason_id: null,
               invoice_url: d.invoiceUrl, note: d.note,
               shipping_address: (d.shippingAddress ?? null) as Json | null,

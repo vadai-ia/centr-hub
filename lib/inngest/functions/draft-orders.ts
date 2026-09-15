@@ -275,7 +275,9 @@ function buildOpportunityInsertFromDraftOrder(args: {
     // created_at de BD (migración 0025). El mapper ya la extrae.
     shopify_created_at: args.normalized.createdAt,
     display_reference: args.normalized.displayReference,
-    actual_amount: args.normalized.totalAmount,
+    // Subtotal de la cotización (productos con descuento, sin envío): es lo
+    // que se mide al vendedor. Nunca el total, que suma el envío.
+    actual_amount: args.normalized.subtotalAmount,
     estimated_amount: null,
     currency: args.normalized.currency,
     probability_override: null,
@@ -300,7 +302,7 @@ function buildOpportunityPatchFromDraftOrder(
   effectiveUpdatedAt: string,
 ): Record<string, unknown> {
   return {
-    actual_amount: normalized.totalAmount,
+    actual_amount: normalized.subtotalAmount,
     currency: normalized.currency,
     display_reference: normalized.displayReference,
     invoice_url: normalized.invoiceUrl,

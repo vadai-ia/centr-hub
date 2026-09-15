@@ -45,7 +45,7 @@ interface OrderRow {
   source: string | null;
   assigned_advisor_id: string | null;
   financial_status: string;
-  total_amount: string;
+  subtotal: string;
   paid_at: string | null;
 }
 
@@ -65,7 +65,7 @@ async function main() {
     return fetchAllPaged<OrderRow>(() =>
       supabase
         .from("orders")
-        .select("source, assigned_advisor_id, financial_status, total_amount, paid_at")
+        .select("source, assigned_advisor_id, financial_status, subtotal, paid_at")
         .eq("organization_id", organizationId),
     );
   }, { source: "script" });
@@ -81,7 +81,7 @@ async function main() {
     cur.n += 1;
     if (r.financial_status === "paid") {
       cur.paid += 1;
-      cur.revenue += Number(r.total_amount) || 0;
+      cur.revenue += Number(r.subtotal) || 0;
     }
     bySource.set(key, cur);
   }
@@ -126,7 +126,7 @@ async function main() {
     const key = r.source ?? "(null)";
     const cur = inner.get(key) ?? { n: 0, revenue: 0 };
     cur.n += 1;
-    cur.revenue += Number(r.total_amount) || 0;
+    cur.revenue += Number(r.subtotal) || 0;
     inner.set(key, cur);
     byMonth.set(mk, inner);
   }

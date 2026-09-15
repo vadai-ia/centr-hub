@@ -500,6 +500,21 @@ Después, el admin captura el reparto en Admin → Metas: un renglón por vended
 
 **Aplicar la migración 0053 ANTES de desplegar.** Amplía el CHECK de `metric` en `goals` y `goal_results` a `close_rate` y acota su objetivo a 0–100. Hoy ya no se capturan metas de `close_rate` (el % es automático), pero las filas guardadas antes del cambio siguen en BD y dependen de ese CHECK. Localiza los CHECK viejos de 0031 por definición (se crearon sin nombre) y nunca toca el invariante de orgánica de 0051. Idempotente.
 
+## Montos de venta: subtotal, no total
+
+**Toda métrica de venta se mide por el SUBTOTAL de Shopify** — Venta cobrada, serie por mes, metas de monto (asesor, equipo y orgánica), Leads que compraron, indicadores del contacto — y el monto de la oportunidad (`actual_amount`, que alimenta Pipeline $ y pérdidas por motivo) nace del subtotal de la cotización o del pedido. Pedido de la dirección: el envío no es venta del vendedor.
+
+El `subtotal_price` de Shopify **ya viene con los descuentos restados** y sin envío (verificado en pedidos y borradores reales: productos − descuento = subtotal). **NO restar `discount_amount` encima** — se contaría dos veces. Centr maneja precios con IVA incluido, así que el subtotal lleva IVA, igual que antes el total. `orders.total_amount` se sigue guardando y solo se muestra como dato del pedido (timeline). Guard: `tests/amount-subtotal-contract.test.ts`.
+
+### Paso operativo obligatorio (NO es código del repo)
+
+**Corregir el monto de las oportunidades existentes**, dry-run primero:
+```
+npm run maintenance:recompute-opportunity-amounts-subtotal -- --org-slug centr
+npm run maintenance:recompute-opportunity-amounts-subtotal -- --org-slug centr --apply
+```
+Toma el subtotal del pedido local si existe; si no, del borrador vía Shopify (read-only). Borradores que ya no existen en Shopify se reportan y no se tocan. Idempotente, con audit `opportunity_amount_recomputed_to_subtotal`. Las métricas que salen de `orders` NO necesitan correctivo: `orders.subtotal` ya estaba poblado. Los snapshots de `goal_results` de meses ya cerrados quedan con el criterio anterior.
+
 ## Contactos duplicados: fusión automática lead → cliente (migración 0054)
 
 **El problema.** El vendedor crea el cliente en Shopify al vuelo —al cotizar— solo con nombre o correo, y le agrega el teléfono minutos después. `customers/create` llega sin teléfono, no empata con el lead que ya existía (WhatsApp o formulario) y nace una segunda tarjeta. Cuando el teléfono llega por `customers/update`, el contacto ya existe por su `shopify_customer_id` y nadie vuelve a buscar coincidencias. Verificado en los webhooks crudos.

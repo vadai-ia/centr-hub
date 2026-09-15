@@ -111,10 +111,12 @@ export function tallyAchievement(
   scope: Scope,
   channel: Channel = "all",
 ): ScopeAchievement {
+  // Monto = subtotal del pedido (productos con descuento, sin envío). El envío
+  // no es venta del asesor; el total del pedido NO se usa en ninguna métrica.
   let amount = 0;
   for (const o of paidOrders) {
     if (matchScope(o.assigned_advisor_id, scope) && matchChannel(o.is_outbound, channel))
-      amount += Number(o.total_amount);
+      amount += Number(o.subtotal);
   }
   const scopedQuotes = draftOpps.filter(
     (d) => matchScope(d.assigned_advisor_id, scope) && matchChannel(d.is_outbound, channel),
@@ -304,7 +306,7 @@ export function computeVentaMetrics(
     if (o.paid_at) {
       const key = monthKeyInTz(o.paid_at);
       if (monthRevenue.has(key)) {
-        monthRevenue.set(key, monthRevenue.get(key)! + Number(o.total_amount));
+        monthRevenue.set(key, monthRevenue.get(key)! + Number(o.subtotal));
       }
     }
   }
@@ -376,7 +378,7 @@ export function computeVentaMetrics(
   for (const p of raw.leadPurchases) {
     if (!scopedLeadContacts.has(p.contact_id)) continue;
     buyers.add(p.contact_id);
-    leadsConvertedRevenue += Number(p.total_amount);
+    leadsConvertedRevenue += Number(p.subtotal);
   }
   let leadsConverted = 0;
   leadContactByOpp.forEach((contactId) => {
@@ -504,7 +506,7 @@ export type GoalScope =
 function tallyOrganic(paidOrders: VentaRaw["paidOrders"]): ScopeAchievement {
   let amount = 0;
   for (const o of paidOrders) {
-    if (o.source === ONLINE_ORDER_SOURCE) amount += Number(o.total_amount);
+    if (o.source === ONLINE_ORDER_SOURCE) amount += Number(o.subtotal);
   }
   return { quotes: 0, won: 0, amount, quotesWon: 0 };
 }

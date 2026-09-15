@@ -43,7 +43,9 @@ function order(over: Partial<OrderRow> = {}): OrderRow {
     shopify_name: "#1950",
     financial_status: "paid",
     source: "web",
+    // Total incluye envío; la opp debe llevar el subtotal.
     total_amount: "4300.00",
+    subtotal: "3900.00",
     currency: "MXN",
     shopify_created_at: "2026-09-10T01:29:19.000Z",
     ...over,
@@ -91,7 +93,7 @@ describe("compra online — creación", () => {
     expect(created.shopify_order_id).toBe("gid://shopify/Order/999");
     // Sin borrador: la card enseña el folio del pedido, resuelto de orders.
     expect(created.display_reference).toBeNull();
-    expect(created.actual_amount).toBe("4300.00");
+    expect(created.actual_amount).toBe("3900.00");
   });
 
   it("enlaza la opp al pedido — es lo que hace idempotente al siguiente webhook", async () => {
