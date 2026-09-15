@@ -32,6 +32,7 @@ import { findOrderByShopifyOrderId } from "@/lib/db/orders";
 import { listPipelineStages } from "@/lib/db/pipeline";
 import { shopifyGraphql } from "@/lib/shopify/admin-client";
 import {
+  collectTrackingNumbers,
   normalizeDeliveryStatus,
   type DeliveryFulfillmentSnapshot,
 } from "@/lib/shopify/delivery-status";
@@ -93,6 +94,9 @@ function toSnapshots(fulfillments: RawFulfillment[]): DeliveryFulfillmentSnapsho
       displayStatus: fu.displayStatus,
       deliveredAt: fu.deliveredAt,
       hasTracking,
+      trackingNumbers: collectTrackingNumbers(
+        (fu.trackingInfo ?? []).map((t) => t?.number),
+      ),
     };
   });
 }

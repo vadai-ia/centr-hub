@@ -1,6 +1,7 @@
 import "server-only";
 import { z } from "zod";
 import {
+  collectTrackingNumbers,
   normalizeDeliveryStatus,
   type DeliveryFulfillmentSnapshot,
 } from "@/lib/shopify/delivery-status";
@@ -691,6 +692,7 @@ function mapEmbeddedFulfillment(raw: EmbeddedFulfillment): DeliveryFulfillmentSn
     cancelled: status === "cancelled" || status === "error" || status === "failure",
     shipmentStatus: raw.shipment_status ?? null,
     hasTracking: Boolean(raw.tracking_number) || trackingNumbers.length > 0,
+    trackingNumbers: collectTrackingNumbers([raw.tracking_number, ...trackingNumbers]),
   };
 }
 
@@ -714,5 +716,10 @@ function mapGraphqlFulfillment(node: Record<string, unknown>): DeliveryFulfillme
     displayStatus: (node.displayStatus as string | null) ?? null,
     deliveredAt: (node.deliveredAt as string | null) ?? null,
     hasTracking,
+    trackingNumbers: collectTrackingNumbers(
+      (Array.isArray(trackingInfo) ? trackingInfo : [trackingInfo]).map(
+        (t) => (t as { number?: string | null } | null)?.number,
+      ),
+    ),
   };
 }

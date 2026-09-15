@@ -45,6 +45,15 @@ export interface DeliveryFulfillmentSnapshot {
   deliveredAt?: string | null;
   /** Hay número de seguimiento asociado. */
   hasTracking?: boolean;
+  /** Números de guía del fulfillment (para detectar registros duplicados). */
+  trackingNumbers?: string[];
+}
+
+/** Guías de un fulfillment, normalizadas y sin vacíos. */
+export function collectTrackingNumbers(
+  values: Array<string | null | undefined>,
+): string[] {
+  return values.map((v) => norm(v)).filter((v) => v !== "");
 }
 
 const DELIVERED_TOKENS = new Set(["delivered"]);
@@ -85,6 +94,14 @@ function classify(f: DeliveryFulfillmentSnapshot): FulfillmentClass {
  *   - Si ALGUNO tiene señal de envío (entregado o en curso) pero no todos
  *     entregados ⇒ 'in_progress' (parcial cuenta como en curso).
  *   - Si ninguno tiene señal de entrega ⇒ null.
+ *
+ * Excepción — MISMA guía: un fulfillment en curso cuya guía coincide con la
+ * de uno ya entregado cuenta como entregado. Shopify a veces registra el
+ * mismo paquete dos veces (visto en Centr: F3 "Seguimiento añadido" y F4
+ * "Entregado" con la misma guía de FedEx) y el carrier solo confirma uno;
+ * sin esto la opp se queda para siempre en "Envío en curso" salvo que alguien
+ * marque el duplicado a mano. Un parcial real lleva guías distintas y sigue
+ * esperando.
  */
 export function normalizeDeliveryStatus(
   fulfillments: DeliveryFulfillmentSnapshot[],
@@ -93,12 +110,24 @@ export function normalizeDeliveryStatus(
   let anyNonDelivered = false;
   let anyDelivered = false;
 
-  for (const f of fulfillments) {
-    const c = classify(f);
+  const classified = fulfillments.map((f) => ({ f, c: classify(f) }));
+  const deliveredTracking = new Set(
+    classified
+      .filter((x) => x.c === "delivered")
+      .flatMap((x) => collectTrackingNumbers(x.f.trackingNumbers ?? [])),
+  );
+
+  for (const { f, c } of classified) {
     if (c === "none") continue;
     anySignal = true;
     if (c === "delivered") anyDelivered = true;
-    else anyNonDelivered = true;
+    else if (
+      collectTrackingNumbers(f.trackingNumbers ?? []).some((t) =>
+        deliveredTracking.has(t),
+      )
+    ) {
+      anyDelivered = true;
+    } else anyNonDelivered = true;
   }
 
   if (!anySignal) return null;

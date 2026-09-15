@@ -1,6 +1,7 @@
 import "server-only";
 import { shopifyGraphql, type ShopifyAdminClientOptions } from "@/lib/shopify/admin-client";
 import {
+  collectTrackingNumbers,
   normalizeDeliveryStatus,
   type DeliveryStatus,
   type DeliveryFulfillmentSnapshot,
@@ -95,6 +96,9 @@ export async function fetchOrderDeliveryStatus(
       displayStatus: fu.displayStatus,
       deliveredAt: fu.deliveredAt,
       hasTracking,
+      trackingNumbers: collectTrackingNumbers(
+        (fu.trackingInfo ?? []).map((t) => t?.number),
+      ),
     };
   });
 

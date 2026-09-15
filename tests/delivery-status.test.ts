@@ -90,6 +90,43 @@ describe("normalizeDeliveryStatus — multi-fulfillment (envíos parciales)", ()
     ).toBe("in_progress");
   });
 
+  it("duplicado con la MISMA guía que uno entregado → delivered", () => {
+    // Caso real Centr: F4 Entregado y F3 "Seguimiento añadido", misma guía FedEx.
+    expect(
+      normalizeDeliveryStatus([
+        f({ displayStatus: "DELIVERED", deliveredAt: "2026-09-14T00:00:00Z", trackingNumbers: ["300470321767"] }),
+        f({ displayStatus: "FULFILLED", hasTracking: true, trackingNumbers: [" 300470321767 "] }),
+      ]),
+    ).toBe("delivered");
+  });
+
+  it("parcial real con guías DISTINTAS → in_progress", () => {
+    expect(
+      normalizeDeliveryStatus([
+        f({ displayStatus: "DELIVERED", trackingNumbers: ["AAA111"] }),
+        f({ hasTracking: true, trackingNumbers: ["BBB222"] }),
+      ]),
+    ).toBe("in_progress");
+  });
+
+  it("en curso sin guía junto a uno entregado → in_progress", () => {
+    expect(
+      normalizeDeliveryStatus([
+        f({ displayStatus: "DELIVERED", trackingNumbers: ["AAA111"] }),
+        f({ shipmentStatus: "in_transit" }),
+      ]),
+    ).toBe("in_progress");
+  });
+
+  it("dos en curso con la misma guía (ninguno entregado) → in_progress", () => {
+    expect(
+      normalizeDeliveryStatus([
+        f({ hasTracking: true, trackingNumbers: ["AAA111"] }),
+        f({ hasTracking: true, trackingNumbers: ["AAA111"] }),
+      ]),
+    ).toBe("in_progress");
+  });
+
   it("entregado + un fulfillment cancelado (ignorado) → delivered", () => {
     expect(
       normalizeDeliveryStatus([
