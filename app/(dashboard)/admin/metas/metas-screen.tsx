@@ -20,6 +20,7 @@ import type { UUID } from "@/lib/types/database";
 import { GoalProgressBar } from "@/components/metas/goal-progress-bar";
 import { GoalEditModal } from "./goal-edit-modal";
 import { MonthCloseRate } from "./close-rate-section";
+import { AmountBreakdownModal } from "./amount-breakdown-modal";
 
 interface Props {
   initialData: AdminMetasData;
@@ -488,8 +489,10 @@ function MonthHistory({
   closeRates: MetaCloseRateRows | null;
   thresholds: GoalThresholds;
 }) {
+  // Renglón de monto cuyo desglose de pedidos está abierto.
+  const [breakdownRow, setBreakdownRow] = useState<MetaHistoryRow | null>(null);
   // Solo las métricas con datos en el mes, en el orden canónico.
-  const metrics = EDITABLE_GOAL_METRICS.filter((m) => rows.some((r) => r.metric === m));
+  const metrics =EDITABLE_GOAL_METRICS.filter((m) => rows.some((r) => r.metric === m));
   return (
     <div>
       <h3 className="mb-1 text-sm font-semibold capitalize text-slate-700 dark:text-slate-200">
@@ -513,21 +516,39 @@ function MonthHistory({
               </h4>
               <div className="grid gap-x-8 gap-y-4 sm:grid-cols-2">
                 {subjectRows.map((r) => (
-                  <GoalProgressBar
-                    key={r.id}
-                    pct={r.pct}
-                    thresholds={thresholds}
-                    title={r.advisorName}
-                    valueLabel={`${formatGoalValue(m, r.achieved)} / ${formatGoalValue(m, r.target)}`}
-                    size="sm"
-                    showStatus={false}
-                  />
+                  <div key={r.id} className="space-y-1">
+                    <GoalProgressBar
+                      pct={r.pct}
+                      thresholds={thresholds}
+                      title={r.advisorName}
+                      valueLabel={`${formatGoalValue(m, r.achieved)} / ${formatGoalValue(m, r.target)}`}
+                      size="sm"
+                      showStatus={false}
+                    />
+                    {m === "amount" && (
+                      <button
+                        type="button"
+                        onClick={() => setBreakdownRow(r)}
+                        className="text-xs font-medium text-indigo-600 hover:underline dark:text-indigo-400"
+                      >
+                        Ver pedidos
+                      </button>
+                    )}
+                  </div>
                 ))}
               </div>
             </div>
           );
         })}
       </div>
+      {breakdownRow && (
+        <AmountBreakdownModal
+          monthKey={monthKey}
+          monthLabel={label}
+          row={breakdownRow}
+          onClose={() => setBreakdownRow(null)}
+        />
+      )}
     </div>
   );
 }

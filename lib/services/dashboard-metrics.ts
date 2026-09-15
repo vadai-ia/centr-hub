@@ -498,6 +498,21 @@ export type GoalScope =
   | { kind: "organic" };
 
 /**
+ * ¿Este pedido pagado cuenta para el monto de ese sujeto de meta? Misma regla
+ * que `tallyAchievement` (equipo = todo, asesor = su asignación) y
+ * `tallyOrganic` (origen tienda online, NUNCA "sin asesor"). La usa el desglose
+ * "Ver pedidos" para que la tabla sume lo mismo que la barra.
+ */
+export function paidOrderInGoalScope(
+  o: { assigned_advisor_id: UUID | null; source: string | null },
+  scope: GoalScope,
+): boolean {
+  if (scope.kind === "organic") return o.source === ONLINE_ORDER_SOURCE;
+  if (scope.kind === "team") return true;
+  return o.assigned_advisor_id === scope.membershipId;
+}
+
+/**
  * Avance de la venta orgánica. Solo `amount` tiene sentido: un pedido de la
  * tienda online no lleva cotización enviada ni oportunidad trabajada, así que
  * `quotes` y `won` quedan en cero por definición, no por falta de datos (el
