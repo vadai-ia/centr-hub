@@ -460,6 +460,29 @@ Una persona tiene **dos ejes**, no uno: el **rol** dice qué ve y qué alcanza (
 
 Está **dirigido por datos a propósito: no nombra ninguna organización.** Corrige cada tenant donde la persona tenga historia (Centr y Rustr) y deja intacto aquel donde nunca ha operado — una membresía recién creada en un tenant nuevo (p. ej. Centr Colombia) NO se enciende sola. Es idempotente y no destructivo: no toca ni una fila de negocio, solo vuelve visible a quien ya era dueño de ella. Tras aplicarla, verificar en Admin → Usuarios que quien deba operar cartera trae el badge "También asesor", y en el Dashboard que reaparece en el desglose por vendedor.
 
+## Ranura de atribución: un "vendedor" que no es una persona (Dirección)
+
+En Centr existe la membresía **"Dirección"**: rol `vendedor`, `is_advisor = true`, activa, **sin login** (auth user sin contraseña, correo interno `direccion@centr.centrhub.local`). No es una persona — es el **canal de venta de la dirección**, que la dirección pidió medir junto a los vendedores aunque no tenga meta propia.
+
+**Por qué una membresía y no un campo nuevo:** toda la atribución del sistema cuelga de `memberships.id` (pedidos, oportunidades, contactos, metas, desglose del dashboard). Un canal que quiere verse "como un vendedor más" ES una membresía; cualquier otra forma obligaría a ensanchar cada una de esas lecturas.
+
+**NO es usuario sistema.** `is_system_user = true` (el usuario "Histórico") queda FUERA del selector de asesor, del mapeo de tags y de las metas — exactamente lo contrario de lo que se busca aquí. La ranura es un usuario normal cuyo login simplemente nunca se activó; si algún día esa persona necesita entrar, se le cambia el correo desde Admin → Usuarios (repair-in-place, mismo `user_id`) y **la atribución acumulada se conserva**.
+
+**Etiquetas mapeadas a la ranura:** `Dirección`, `VentaDirección` y `Fer` (el histórico personal de la misma persona). Al mapearlas como `vendor` se corrió el re-proceso retroactivo: 80 pedidos, $11.3M que estaban **sin asesor** pasaron a Dirección.
+
+**Guarda del re-proceso:** `reattributeOrders` ([lib/db/tag-aggregation.ts](lib/db/tag-aggregation.ts)) **PISA** el asesor actual — no es "solo NULL" como los hooks 0022/0023. Por eso `maintenance:seed-attribution-slot` **se niega a re-procesar una tag si alguna de sus órdenes ya tiene otro asesor** y la lista para decidir a mano (en Centr quedó fuera un pedido con doble etiqueta). Al re-procesar desde Admin → Mapeo de tags esa guarda NO existe: la pantalla re-atribuye todo lo que lleve la tag.
+
+**Consecuencia a comunicar:** esos pedidos no tienen oportunidad ligada, así que Dirección aparece con **monto vendido pero con cero cotizaciones y cero ganadas** (y sin % de cierre). Es correcto: es venta directa etiquetada, no pipeline trabajado.
+
+### Paso operativo (NO es código del repo)
+
+Para replicarlo en otra organización:
+```
+npm run maintenance:seed-attribution-slot -- --org-slug <slug> --name "Dirección" --email direccion@<slug>.centrhub.local
+npm run maintenance:seed-attribution-slot -- --org-slug <slug> --name "Dirección" --email direccion@<slug>.centrhub.local --apply --reprocess
+```
+El primer comando es dry-run (imprime qué crearía y cuántos pedidos movería). Idempotente: si la membresía ya existe, solo asegura los mapeos.
+
 ## Metas: el SUJETO es explícito, y la venta orgánica es una cubeta más (migración 0051)
 
 Una meta tiene un **sujeto** (`goals.subject`): `team` (toda la organización), `advisor` (un vendedor) u `organic` (la venta que entra sola por la tienda online). Antes el sujeto se INFERÍA de `advisor_membership_id IS NULL` = equipo; ese truco alcanzaba para dos sujetos y se rompió con el tercero, que también va sin vendedor.

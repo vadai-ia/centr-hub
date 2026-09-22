@@ -45,6 +45,7 @@
     "maintenance:recompute-opportunity-amounts-subtotal": "tsx --tsconfig scripts/tsconfig.json scripts/maintenance/recompute-opportunity-amounts-subtotal.ts",
     "maintenance:seed-test-vendor": "tsx --tsconfig scripts/tsconfig.json scripts/maintenance/seed-test-vendor.ts",
     "maintenance:seed-customer-success": "tsx --tsconfig scripts/tsconfig.json scripts/maintenance/seed-customer-success.ts",
+    "maintenance:seed-attribution-slot": "tsx --tsconfig scripts/tsconfig.json scripts/maintenance/seed-attribution-slot.ts",
     "maintenance:snapshot-goal-results": "tsx --tsconfig scripts/tsconfig.json scripts/maintenance/snapshot-goal-results.ts",
     "maintenance:preview-postventa-transitions": "tsx --tsconfig scripts/tsconfig.json scripts/maintenance/preview-postventa-transitions.ts",
     "maintenance:backfill-order-delivery-status": "tsx --tsconfig scripts/tsconfig.json scripts/maintenance/backfill-order-delivery-status.ts",
