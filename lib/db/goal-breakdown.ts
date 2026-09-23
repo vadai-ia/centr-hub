@@ -43,6 +43,8 @@ export async function listPaidOrderDetailsInPeriod(
       )
       .eq("organization_id", organizationId)
       .eq("financial_status", "paid")
+      // Cancelado no es venta: el detalle exportado debe cuadrar con el KPI.
+      .is("cancelled_at", null)
       .gte("paid_at", startUtc)
       .lte("paid_at", endUtc)
       .order("paid_at", { ascending: true }),

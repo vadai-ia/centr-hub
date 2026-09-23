@@ -538,6 +538,18 @@ npm run maintenance:recompute-opportunity-amounts-subtotal -- --org-slug centr -
 ```
 Toma el subtotal del pedido local si existe; si no, del borrador vía Shopify (read-only). Borradores que ya no existen en Shopify se reportan y no se tocan. Idempotente, con audit `opportunity_amount_recomputed_to_subtotal`. Las métricas que salen de `orders` NO necesitan correctivo: `orders.subtotal` ya estaba poblado. Los snapshots de `goal_results` de meses ya cerrados quedan con el criterio anterior.
 
+## Un pedido CANCELADO no es venta (aunque siga "pagado")
+
+**Shopify permite cancelar un pedido SIN reembolsarlo, y en ese caso `financial_status` se queda en `paid`.** Filtrar solo por `financial_status = 'paid'` deja entrar ventas revocadas. Medido en Centr: **18 pedidos cancelados sumaban $5,214,312** al KPI de venta — entre ellos uno de $1.88M y el par de un cliente al que se le rehizo el pedido (se canceló el de julio y se creó otro en septiembre por el mismo monto, así que la venta se contaba dos veces).
+
+La regla ya existía en `sumPaidOrdersForContact` (indicadores del contacto, con su comentario R5) pero **faltaba en las consultas que alimentan los números de la dirección**. Hoy la aplican las cinco: `listPaidOrdersInPeriod` (KPI de venta, serie por mes, desglose por vendedor y metas de monto), `listPaidOrdersForContactsSince` ("Leads que compraron"), `listPaidOrderDetailsInPeriod` (exportación), `sumPaidOrdersForContact` y `sumPaidRevenueBetween`.
+
+**Al agregar cualquier consulta de venta, filtrar `cancelled_at IS NULL` junto con `financial_status`.** Es invisible para `tsc` y para la suite mockeada; lo cubre el guard `tests/revenue-excludes-cancelled-orders.test.ts`.
+
+**NO confundir con la cancelación de OPORTUNIDADES** (migración 0014, "Cancelado ≠ Perdido"): ahí la regla es la contraria — cancelar una opp NO quita el revenue, porque el pedido sí se cobró. Son dos cancelaciones distintas: la de la opp es administrativa; la del PEDIDO significa que Shopify revocó la venta.
+
+**Consecuencia a comunicar:** al corregirlo, los meses ya reportados BAJAN (en Centr: abril −$2.69M, julio −$1.09M, mayo −$523k, marzo −$434k). No es que el sistema "pierda" venta: es venta que nunca debió contarse.
+
 ## Contactos duplicados: fusión automática lead → cliente (migración 0054)
 
 **El problema.** El vendedor crea el cliente en Shopify al vuelo —al cotizar— solo con nombre o correo, y le agrega el teléfono minutos después. `customers/create` llega sin teléfono, no empata con el lead que ya existía (WhatsApp o formulario) y nace una segunda tarjeta. Cuando el teléfono llega por `customers/update`, el contacto ya existe por su `shopify_customer_id` y nadie vuelve a buscar coincidencias. Verificado en los webhooks crudos.

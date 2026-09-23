@@ -119,7 +119,14 @@ export interface HistoryStageRow {
 // Funnel Venta
 // ============================================================
 
-/** KPI 1 — órdenes pagadas con paid_at en el periodo (revenue, R5). */
+/**
+ * KPI 1 — órdenes pagadas con paid_at en el periodo (revenue, R5).
+ *
+ * `cancelled_at IS NULL`: un pedido que Shopify revocó NO es venta, aunque
+ * conserve `financial_status = 'paid'` (cancelar sin reembolsar no cambia ese
+ * campo). Es la MISMA regla que ya aplicaban los indicadores del contacto
+ * (`sumPaidOrdersForContact`); faltaba justo en el Dashboard.
+ */
 export async function listPaidOrdersInPeriod(
   startUtc: string,
   endUtc: string,
@@ -131,6 +138,7 @@ export async function listPaidOrdersInPeriod(
       .select("assigned_advisor_id, is_outbound, subtotal, paid_at, source")
       .eq("organization_id", organizationId)
       .eq("financial_status", "paid")
+      .is("cancelled_at", null)
       .gte("paid_at", startUtc)
       .lte("paid_at", endUtc),
   );
@@ -447,6 +455,8 @@ export async function listPaidOrdersForContactsSince(
         .select("contact_id, subtotal, paid_at")
         .eq("organization_id", organizationId)
         .eq("financial_status", "paid")
+        // Un pedido cancelado no es compra (misma regla que el KPI de venta).
+        .is("cancelled_at", null)
         .in("contact_id", chunk)
         .gte("paid_at", sinceUtc),
     );

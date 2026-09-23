@@ -145,6 +145,8 @@ export async function sumPaidRevenueBetween(
     .select("subtotal")
     .eq("organization_id", organizationId)
     .eq("financial_status", "paid")
+    // Cancelado no es venta (misma regla que el Dashboard y el contacto).
+    .is("cancelled_at", null)
     .gte("paid_at", periodStart)
     .lte("paid_at", periodEnd);
   if (error) throw error;
