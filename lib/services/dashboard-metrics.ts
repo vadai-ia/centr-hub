@@ -7,7 +7,8 @@ import {
   listLivePostventaOpps,
   listLostEntriesInPeriod,
   listOrdersCreatedInPeriod,
-  listPaidOrdersInPeriod,
+  listRevenueOrdersInPeriod,
+  type PaidOrderRow,
   listProblematicCaseOpps,
   listStageEntriesInPeriod,
   listWonOppsInPeriod,
@@ -36,6 +37,7 @@ import {
 } from "@/lib/time/period";
 import type { UUID } from "@/lib/types/database";
 import { channelOutboundValue } from "@/lib/types/dashboard";
+import { recognitionSlicesInPeriod } from "@/lib/services/revenue-recognition";
 import {
   listAbsorbedLeadEntriesInPeriod,
   listPaidOrdersForContactsSince,
@@ -146,11 +148,35 @@ function rateOrNull(numerator: number, denominator: number): number | null {
   return numerator / denominator;
 }
 
+/**
+ * Venta del periodo como PORCIONES reconocidas, no como pedidos.
+ *
+ * Un pedido con etiqueta de anticipo aporta dos veces —su anticipo en el mes
+ * en que se procesó y el resto en el mes en que se liquidó (0055)— así que la
+ * unidad que suman las métricas ya no puede ser el pedido. Cada porción viaja
+ * con la atribución del pedido (asesor, canal, origen) y con la fecha que
+ * decide su mes, de modo que el KPI, la serie por mes, el desglose por
+ * vendedor, las metas de monto y la venta orgánica siguen sumando igual.
+ */
+async function loadRevenueEntries(period: ResolvedPeriod): Promise<PaidOrderRow[]> {
+  const orders = await listRevenueOrdersInPeriod(period.startUtc, period.endUtc);
+  return orders.flatMap((order) =>
+    recognitionSlicesInPeriod(order, period.startUtc, period.endUtc).map((slice) => ({
+      assigned_advisor_id: order.assigned_advisor_id,
+      is_outbound: order.is_outbound,
+      subtotal: String(slice.amount),
+      paid_at: slice.at,
+      source: order.source,
+    })),
+  );
+}
+
 // ------------------------------------------------------------
 // Bundles de datos crudos (fetch único por funnel).
 // ------------------------------------------------------------
 export interface VentaRaw {
-  paidOrders: Awaited<ReturnType<typeof listPaidOrdersInPeriod>>;
+  /** Porciones de venta YA reconocidas (ver `loadRevenueEntries`). */
+  paidOrders: PaidOrderRow[];
   draftOpps: Awaited<ReturnType<typeof listDraftOppsCreatedInPeriod>>;
   wonOpps: WonOppRow[];
   /** Opps vivas CREADAS en el periodo → "Pipeline $ en el periodo". */
@@ -213,7 +239,7 @@ async function fetchVentaRaw(
     stageEntries,
     lossReasons,
   ] = await Promise.all([
-      listPaidOrdersInPeriod(period.startUtc, period.endUtc),
+      loadRevenueEntries(period),
       listDraftOppsCreatedInPeriod(period.startUtc, period.endUtc),
       listWonOppsInPeriod(period.startUtc, period.endUtc),
       listLivePipelineOpps(period.startUtc, period.endUtc),
@@ -531,7 +557,7 @@ export async function computeGoalAchievement(
   scopes: GoalScope[],
 ): Promise<ScopeAchievement[]> {
   const [paidOrders, draftOpps, wonOpps] = await Promise.all([
-    listPaidOrdersInPeriod(period.startUtc, period.endUtc),
+    loadRevenueEntries(period),
     listDraftOppsCreatedInPeriod(period.startUtc, period.endUtc),
     listWonOppsInPeriod(period.startUtc, period.endUtc),
   ]);

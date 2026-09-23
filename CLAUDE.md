@@ -538,6 +538,24 @@ npm run maintenance:recompute-opportunity-amounts-subtotal -- --org-slug centr -
 ```
 Toma el subtotal del pedido local si existe; si no, del borrador vía Shopify (read-only). Borradores que ya no existen en Shopify se reportan y no se tocan. Idempotente, con audit `opportunity_amount_recomputed_to_subtotal`. Las métricas que salen de `orders` NO necesitan correctivo: `orders.subtotal` ya estaba poblado. Los snapshots de `goal_results` de meses ya cerrados quedan con el criterio anterior.
 
+## Anticipos: cada mitad se registra en SU mes (migración 0055)
+
+Centr cobra una parte por adelantado y el resto después, y lo marca con una etiqueta de Shopify. **Regla confirmada por la dirección: el anticipo cuenta en el mes en que entró y el resto en el mes en que el pedido se finaliza.**
+
+**El porcentaje sale del NOMBRE de la etiqueta** (`Anticipo50%`, `Anticipo60%`, `anticipo 40 %`…), no de una configuración: crear una etiqueta nueva en Shopify basta para que el sistema la respete, sin deploy ni captura. La definición vive en `lib/services/revenue-recognition.ts` (módulo PURO): `advancePercentFromTags` + `recognitionSlices`.
+
+**`settled_at` (0055) es la pieza que faltaba.** `paid_at` guarda el `processed_at` de Shopify —cuándo se PROCESÓ el pedido— y **un pedido `pending` ya lo trae**, así que no sirve para fechar la segunda mitad. `settled_at` se sella cuando `financial_status` pasa a `paid`, **solo si está NULL**: un cambio de nota dispara `orders/updated` y no debe correr esa fecha.
+
+**Un pedido `pending` CON etiqueta de anticipo sí cuenta su anticipo** (antes marcaba cero, y eso era lo que la dirección quería corregir). Por eso las consultas de venta ya **no filtran por estado**: traen candidatos por dos ventanas (`paid_at` o `settled_at` dentro del periodo, sin cancelados) y es `recognitionSlices` quien decide qué aporta cada pedido. Estados fuera de `paid`/`pending`/`partially_paid` (reembolsado, anulado) no aportan nada.
+
+**La unidad que suman las métricas ya no es el pedido sino la PORCIÓN reconocida** (`loadRevenueEntries` en dashboard-metrics): cada porción viaja con la atribución del pedido y con la fecha que decide su mes, de modo que el KPI, la serie por mes, el desglose por vendedor, las metas de monto y la venta orgánica siguen sumando igual. El desglose "Ver pedidos" aplica el MISMO reparto y marca la fila con "anticipo 50%" / "liquidación 50%" — si divergieran, la tabla no cuadraría con su propia barra.
+
+**Límite conocido:** "Leads que compraron" sigue contando por pedido pagado, no por porción — un lead con solo el anticipo entregado todavía no figura como compra.
+
+### Paso operativo obligatorio (NO es código del repo)
+
+**Aplicar la migración 0055 ANTES de desplegar.** El código selecciona `settled_at`; sin la columna, las consultas del Dashboard fallan. La migración backfillea `settled_at = paid_at` en lo ya pagado, así que **ningún número histórico se mueve**: las dos mitades de un pedido viejo caen en el mismo mes. El criterio nuevo aplica de aquí en adelante.
+
 ## Un pedido CANCELADO no es venta (aunque siga "pagado")
 
 **Shopify permite cancelar un pedido SIN reembolsarlo, y en ese caso `financial_status` se queda en `paid`.** Filtrar solo por `financial_status = 'paid'` deja entrar ventas revocadas. Medido en Centr: **18 pedidos cancelados sumaban $5,214,312** al KPI de venta — entre ellos uno de $1.88M y el par de un cliente al que se le rehizo el pedido (se canceló el de julio y se creó otro en septiembre por el mismo monto, así que la venta se contaba dos veces).

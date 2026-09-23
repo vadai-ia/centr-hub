@@ -171,6 +171,9 @@ async function upsertOrderShell(
       last_modified_at: effectiveUpdatedAt,
       last_modified_source: "shopify",
       paid_at: normalized.paidAt,
+      // Liquidado (0055): si el pedido ya nace pagado, se liquidó al
+      // procesarse. Si nace pendiente, queda NULL hasta que se finalice.
+      settled_at: normalized.financialStatus === "paid" ? normalized.paidAt : null,
       cancelled_at: normalized.cancelledAt,
       // Fecha real de creación del pedido en Shopify (no la de BD).
       // El dashboard cuenta pedidos por este campo (migración 0024).
@@ -206,6 +209,12 @@ async function upsertOrderShell(
     source: normalized.source,
     shopify_tags: normalized.tags,
     paid_at: normalized.paidAt ?? existing.paid_at,
+    // Liquidación (0055): se sella la PRIMERA vez que vemos el pedido en
+    // 'paid' y ya no se mueve — un cambio de nota dispara orders/updated y
+    // no debe correr la fecha con la que la segunda mitad cayó en su mes.
+    settled_at:
+      existing.settled_at ??
+      (normalized.financialStatus === "paid" ? effectiveUpdatedAt : null),
     cancelled_at: normalized.cancelledAt ?? existing.cancelled_at,
     // Estado de entrega (0036): refresca desde los fulfillments embebidos
     // del payload, pero NO lo borra si este update no trae fulfillments

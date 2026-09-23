@@ -142,7 +142,16 @@ function Body({ state, row }: { state: State; row: MetaHistoryRow }) {
           {rows.map((r, i) => (
             <tr key={`${r.orderName}-${i}`} className="border-b border-slate-100 dark:border-slate-700/50">
               <td className="py-2 pr-3 text-slate-400">{i + 1}</td>
-              <td className="py-2 pr-3 font-mono text-xs text-slate-600 dark:text-slate-300">{r.orderName}</td>
+              <td className="py-2 pr-3 font-mono text-xs text-slate-600 dark:text-slate-300">
+                {r.orderName}
+                {/* Un pedido con anticipo cuenta partido: la nota explica
+                    por qué el monto no es el del pedido completo. */}
+                {r.note && (
+                  <span className="ml-1.5 rounded-full bg-amber-100 px-1.5 py-0.5 font-sans text-[10px] font-medium text-amber-700 dark:bg-amber-950/50 dark:text-amber-300">
+                    {r.note}
+                  </span>
+                )}
+              </td>
               <td className="whitespace-nowrap py-2 pr-3 text-slate-500 dark:text-slate-400">
                 {r.paidAt
                   ? DateTime.fromISO(r.paidAt, { zone: "utc" }).setZone(TIMEZONE).setLocale("es").toFormat("dd LLL")

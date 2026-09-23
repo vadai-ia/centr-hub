@@ -30,6 +30,30 @@ function fetchAllPaged<T>(build: () => RangeableQuery): Promise<T[]> {
 // ------------------------------------------------------------
 // Filas crudas tipadas que devuelve cada query.
 // ------------------------------------------------------------
+/**
+ * Fila cruda de pedido candidata a aportar venta en un periodo. La reparte el
+ * módulo puro `revenue-recognition` (anticipo vs liquidación); esta capa solo
+ * la trae. Lleva los campos que decide esa repartición: estado, etiquetas y
+ * las dos fechas.
+ */
+export interface RevenueOrderRow {
+  id: UUID;
+  assigned_advisor_id: UUID | null;
+  is_outbound: boolean;
+  subtotal: string;
+  paid_at: string | null;
+  settled_at: string | null;
+  financial_status: string;
+  cancelled_at: string | null;
+  shopify_tags: string[] | null;
+  source: string | null;
+}
+
+/**
+ * Porción de venta ya reconocida: lo que las métricas suman. `subtotal` es el
+ * monto RECONOCIDO (el pedido completo, o solo su anticipo) y `paid_at` la
+ * fecha con la que esa porción cae en su mes.
+ */
 export interface PaidOrderRow {
   assigned_advisor_id: UUID | null;
   is_outbound: boolean;
@@ -120,28 +144,47 @@ export interface HistoryStageRow {
 // ============================================================
 
 /**
- * KPI 1 — órdenes pagadas con paid_at en el periodo (revenue, R5).
+ * Pedidos que pueden aportar venta al periodo (revenue, R5). El servicio los
+ * parte en porciones con `recognitionSlices` — un pedido con etiqueta de
+ * anticipo aporta su anticipo en el mes en que se procesó y el resto en el mes
+ * en que se liquidó (0055), así que NO basta con buscar por `paid_at`.
+ *
+ * Dos ventanas, unidas por id:
+ *   - `paid_at` en el periodo → el pedido (o su anticipo) entra aquí.
+ *   - `settled_at` en el periodo → aquí cae la segunda mitad de un pedido
+ *     procesado en un mes anterior.
  *
  * `cancelled_at IS NULL`: un pedido que Shopify revocó NO es venta, aunque
  * conserve `financial_status = 'paid'` (cancelar sin reembolsar no cambia ese
  * campo). Es la MISMA regla que ya aplicaban los indicadores del contacto
- * (`sumPaidOrdersForContact`); faltaba justo en el Dashboard.
+ * (`sumPaidOrdersForContact`). El filtro por estado NO vive aquí: lo decide
+ * `recognitionSlices`, que admite un `pending` solo si declara anticipo.
  */
-export async function listPaidOrdersInPeriod(
+export async function listRevenueOrdersInPeriod(
   startUtc: string,
   endUtc: string,
-): Promise<PaidOrderRow[]> {
+): Promise<RevenueOrderRow[]> {
   const { supabase, organizationId } = getTenantScopedClient();
-  return fetchAllPaged<PaidOrderRow>(() =>
+  const columns =
+    "id, assigned_advisor_id, is_outbound, subtotal, paid_at, settled_at, " +
+    "financial_status, cancelled_at, shopify_tags, source";
+  const base = () =>
     supabase
       .from("orders")
-      .select("assigned_advisor_id, is_outbound, subtotal, paid_at, source")
+      .select(columns)
       .eq("organization_id", organizationId)
-      .eq("financial_status", "paid")
-      .is("cancelled_at", null)
-      .gte("paid_at", startUtc)
-      .lte("paid_at", endUtc),
-  );
+      .is("cancelled_at", null);
+
+  const [byProcessed, bySettled] = await Promise.all([
+    fetchAllPaged<RevenueOrderRow>(() => base().gte("paid_at", startUtc).lte("paid_at", endUtc)),
+    fetchAllPaged<RevenueOrderRow>(() =>
+      base().gte("settled_at", startUtc).lte("settled_at", endUtc),
+    ),
+  ]);
+
+  const byId = new Map<string, RevenueOrderRow>();
+  for (const row of [...byProcessed, ...bySettled]) byId.set(row.id, row);
+  return Array.from(byId.values());
 }
 
 /**

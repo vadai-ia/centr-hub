@@ -338,6 +338,12 @@ export interface OrderRow {
   created_at: ISODateString;
   updated_at: ISODateString;
   paid_at: ISODateString | null;
+  // Momento en que el pedido quedó LIQUIDADO (financial_status pasó a
+  // 'paid'). Distinto de `paid_at`, que es el processed_at de Shopify —
+  // un pedido `pending` ya trae paid_at. El reconocimiento por anticipo
+  // cuenta el anticipo en el mes de `paid_at` y el resto en el de
+  // `settled_at` (migración 0055). NULL = todavía no se finaliza.
+  settled_at: ISODateString | null;
   cancelled_at: ISODateString | null;
   // Fecha real de creación del pedido en Shopify (created_at del objeto
   // Order de Shopify). Distinto de `created_at`, que es cuándo el
@@ -687,8 +693,10 @@ export interface Database {
         Row: OrderRow;
         // is_outbound (0040): NOT NULL DEFAULT false → opcional en Insert
         // (el estampado se cablea en la Fase 4; hasta entonces default false).
-        Insert: Omit<Insertable<OrderRow>, "is_outbound"> &
-          Partial<Pick<OrderRow, "is_outbound">>;
+        // settled_at (0055): nullable, la sella el worker al ver el pedido
+        // liquidado → opcional en Insert (los backfills no la conocen).
+        Insert: Omit<Insertable<OrderRow>, "is_outbound" | "settled_at"> &
+          Partial<Pick<OrderRow, "is_outbound" | "settled_at">>;
         Update: Updatable<OrderRow>;
       };
       order_line_items: { Row: OrderLineItemRow; Insert: Insertable<OrderLineItemRow>; Update: Updatable<OrderLineItemRow> };
