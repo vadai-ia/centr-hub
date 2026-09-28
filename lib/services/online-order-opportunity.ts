@@ -1,6 +1,6 @@
 import "server-only";
 import { createOpportunity } from "@/lib/db/opportunities";
-import { updateOrder } from "@/lib/db/orders";
+import { getOrderById, updateOrder } from "@/lib/db/orders";
 import { recordAuditEvent } from "@/lib/db/operational";
 import { resolvePostventaEngineStages } from "@/lib/services/postventa-transition";
 import { ONLINE_ORDER_SOURCE } from "@/lib/constants";
@@ -36,6 +36,17 @@ import type { Json, OrderRow, UUID } from "@/lib/types/database";
  * `order.opportunity_id`: si el pedido ya tiene opp, no se crea otra. Se
  * enlaza en la misma operación que la creación para que un reintento no deje
  * una opp huérfana y cree una segunda.
+ *
+ * Esa guarda sola NO basta: LEE y después ESCRIBE, y los webhooks de un mismo
+ * pedido llegan casi a la vez. Si los tres la leen vacía antes de que el
+ * primero enlace, los tres crean tarjeta (medido en producción: tres cards del
+ * mismo pedido en 241 ms). Por eso hay tres capas, de fuera hacia dentro:
+ *   1. la fila que llegó al worker — barata, atrapa el reintento tardío;
+ *   2. una RE-LECTURA fresca justo antes de insertar, que cierra la ventana
+ *      entre que el worker tomó el pedido y llega aquí;
+ *   3. el índice único de 0056, el ÚNICO atómico: si dos inserts compiten, la
+ *      BD rechaza al segundo y aquí se traduce a `already_linked` en vez de
+ *      reventar el webhook.
  */
 
 export type OnlineOrderOpportunityResult =
@@ -48,6 +59,11 @@ export type OnlineOrderSkipReason =
   | "already_linked"
   | "missing_contact"
   | "stages_unresolved";
+
+/** Violación de índice único en Postgres (23505). */
+function isUniqueViolation(error: unknown): boolean {
+  return (error as { code?: string } | null)?.code === "23505";
+}
 
 export async function ensureOnlineOrderOpportunity(
   order: OrderRow,
@@ -70,6 +86,13 @@ export async function ensureOnlineOrderOpportunity(
     return { created: false, reason: "missing_contact" };
   }
 
+  // Re-lectura fresca: entre que el worker tomó el pedido y llegamos aquí,
+  // otro webhook del MISMO pedido pudo haber creado y enlazado su opp.
+  const fresh = await getOrderById(order.id);
+  if (fresh?.opportunity_id) {
+    return { created: false, reason: "already_linked" };
+  }
+
   const stages = await resolvePostventaEngineStages();
   if (!stages) {
     // El funnel de Post-venta no tiene la forma esperada en esta org: el
@@ -77,40 +100,50 @@ export async function ensureOnlineOrderOpportunity(
     return { created: false, reason: "stages_unresolved" };
   }
 
-  const opp = await createOpportunity({
-    funnel: "post_venta",
-    stage_id: stages.zoneByPosition[2].id,
-    contact_id: order.contact_id,
-    // Sin asesor a propósito: nadie vendió esto (ver cabezal).
-    assigned_advisor_id: null,
-    parent_opportunity_id: null,
-    shopify_draft_order_id: null,
-    shopify_order_id: order.shopify_order_id,
-    // Sin borrador que mostrar: la card enseña el folio del PEDIDO, que la
-    // capa de datos resuelve desde `orders.shopify_name`.
-    display_reference: null,
-    // Subtotal (sin envío, con descuentos), igual que las cotizaciones.
-    actual_amount: order.subtotal,
-    estimated_amount: null,
-    currency: order.currency,
-    probability_override: null,
-    weighted_amount: null,
-    loss_reason_id: null,
-    invoice_url: null,
-    note: null,
-    shipping_address: null,
-    won_at: null,
-    lost_at: null,
-    invoice_sent_at: null,
-    cancelled_at: null,
-    cancellation_source: null,
-    cancellation_note: null,
-    // Fecha real del pedido en Shopify, no la de ingesta: el tablero y el
-    // dashboard cuentan por la fecha real (0024/0025).
-    shopify_created_at: order.shopify_created_at,
-    last_modified_at: new Date().toISOString(),
-    last_modified_source: "platform",
-  });
+  let opp: Awaited<ReturnType<typeof createOpportunity>>;
+  try {
+    opp = await createOpportunity({
+      funnel: "post_venta",
+      stage_id: stages.zoneByPosition[2].id,
+      contact_id: order.contact_id,
+      // Sin asesor a propósito: nadie vendió esto (ver cabezal).
+      assigned_advisor_id: null,
+      parent_opportunity_id: null,
+      shopify_draft_order_id: null,
+      shopify_order_id: order.shopify_order_id,
+      // Sin borrador que mostrar: la card enseña el folio del PEDIDO, que la
+      // capa de datos resuelve desde `orders.shopify_name`.
+      display_reference: null,
+      // Subtotal (sin envío, con descuentos), igual que las cotizaciones.
+      actual_amount: order.subtotal,
+      estimated_amount: null,
+      currency: order.currency,
+      probability_override: null,
+      weighted_amount: null,
+      loss_reason_id: null,
+      invoice_url: null,
+      note: null,
+      shipping_address: null,
+      won_at: null,
+      lost_at: null,
+      invoice_sent_at: null,
+      cancelled_at: null,
+      cancellation_source: null,
+      cancellation_note: null,
+      // Fecha real del pedido en Shopify, no la de ingesta: el tablero y el
+      // dashboard cuentan por la fecha real (0024/0025).
+      shopify_created_at: order.shopify_created_at,
+      last_modified_at: new Date().toISOString(),
+      last_modified_source: "platform",
+    });
+  } catch (error) {
+    // El índice único de 0056 rechazó al perdedor de la carrera: el ganador
+    // ya creó y enlazó la tarjeta. No es un fallo del webhook.
+    if (isUniqueViolation(error)) {
+      return { created: false, reason: "already_linked" };
+    }
+    throw error;
+  }
 
   // Enlace inmediato: es lo que hace idempotente al siguiente webhook.
   await updateOrder(order.id, { opportunity_id: opp.id as UUID });
