@@ -80,4 +80,11 @@ export function isPostventaFollowupMessageEnabled(): boolean {
 }
 
 /** Días entre el mensaje 1 (entrega) y el 2 (seguimiento). */
+/**
+ * Plantilla aprobada en la WABA de POST-VENTA (encuesta de los 7 días).
+ * El nombre es inmutable en Meta; la Automation de esa instancia manda esta
+ * misma plantilla en el flujo normal.
+ */
+export const POSTVENTA_SURVEY_TEMPLATE = "7_dias" as const;
+
 export const POSTVENTA_FOLLOWUP_DELAY_DAYS = 7;
