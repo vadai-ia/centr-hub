@@ -4,12 +4,9 @@ import { getContactById, updateContact } from "@/lib/db/contacts";
 import { recordAuditEvent } from "@/lib/db/operational";
 import { normalizePhone } from "@/lib/services/identity-matching";
 import {
-  findVentaContactByPhone,
-  getVentaContactStageId,
-  moveVentaContactToStage,
-  patchVentaContactCustomFields,
-  resolveVentaStageIdByKey,
-} from "@/lib/whaapy/funnel";
+  sendVentaTemplate,
+  VENTA_DELIVERY_TEMPLATE,
+} from "@/lib/whaapy/send-template";
 import {
   resolveCustomerFacingOrderRef,
   toTemplateOrderParam,
@@ -22,20 +19,25 @@ import type { Json, UUID } from "@/lib/types/database";
  *
  * Flujo completo:
  *   opp entra a "Entregado" en el pipeline de Post-venta de la plataforma
- *     → este servicio escribe el nº de pedido en el contacto de Venta
- *     → y lo mueve a la etapa "Entregado" del funnel de Venta
- *       → la Automation de Whaapy (Venta) dispara `send_template`
- *         → el cliente recibe el mensaje DESDE EL NÚMERO DE VENTAS
+ *     → este servicio manda la plantilla por la API de VENTA, con el nombre
+ *       y el nº de pedido ya resueltos
+ *       → el cliente recibe el mensaje DESDE EL NÚMERO DE VENTAS
+ *
+ * Antes la plataforma escribía el folio en un `custom_field` y movía al
+ * contacto de etapa para que una Automation mandara la plantilla. No
+ * funciona: **Whaapy no resuelve campos personalizados como variables de
+ * plantilla** y la Automation abortaba sin dejar rastro en la conversación
+ * (ver `lib/whaapy/send-template.ts`). El envío directo elimina de paso al
+ * intermediario: un fallo ahora es una excepción, no un silencio.
  *
  * Por qué desde Venta y no desde Post-venta: es el número con el que el
  * cliente cotizó, y la plantilla está aprobada en esa WABA. El mensaje de
  * seguimiento a 7 días sí sale del número de Post-venta — van separados a
  * propósito (decisión del operador).
  *
- * A quién mover: `contacts.whaapy_contact_id` cuando está poblado y, si no,
- * búsqueda por teléfono en esa instancia (con backfill del id local). En
- * producción solo el 13% de los contactos trae el id, así que el rescate NO
- * es un caso borde: es el camino habitual.
+ * A quién se le manda: al TELÉFONO del contacto maestro. El envío por
+ * teléfono hace innecesario el rescate por `whaapy_contact_id` que exigía
+ * la vía anterior — en producción solo el 13% de los contactos traía ese id.
  *
  * Contrato de errores, igual que `pushPostventaStage`:
  *   - Casos "no aplica" (sin contacto, sin teléfono, contacto ausente en
@@ -45,21 +47,22 @@ import type { Json, UUID } from "@/lib/types/database";
  *     opp ya movió antes de encolar, así que la operación de plataforma
  *     nunca se rompe por esto.
  *
- * Anti-duplicado: si el contacto YA está en "Entregado" no se re-mueve. El
- * trigger de Whaapy es ENTRAR a la etapa; un move redundante le mandaría el
- * mensaje al cliente por segunda vez.
+ * Anti-duplicado: `opportunities.delivery_message_sent_at`. Es el mismo
+ * sello que ancla el mensaje de 7 días, así que una sola marca gobierna
+ * "ya se le avisó a este cliente". Los reintentos de Inngest y un segundo
+ * paso por "Entregado" NO vuelven a escribirle.
  */
 
 export type VentaDeliveryPushResult =
-  | { ok: true; moved: boolean; whaapyContactId: string }
+  | { ok: true; sent: boolean }
   | { ok: false; skipped: VentaDeliveryPushSkipReason };
 
 export type VentaDeliveryPushSkipReason =
   | "opportunity_not_found"
   | "contact_not_found"
   | "missing_phone"
-  | "contact_not_in_whaapy"
-  | "stage_unresolved";
+  | "already_sent"
+  | "order_ref_missing";
 
 export async function pushVentaDeliveryMessage(input: {
   organizationId: UUID;
@@ -83,98 +86,13 @@ export async function pushVentaDeliveryMessage(input: {
     return { ok: false, skipped: "contact_not_found" };
   }
 
-  const stageId = await resolveVentaStageIdByKey(organizationId, "entregado");
-  if (!stageId) {
-    // Configuración pendiente: la etapa no existe en el funnel de Venta.
-    await audit(opportunityId, "venta_delivery_stage_unresolved", {
+  // Anti-duplicado: una sola marca gobierna "ya se le avisó al cliente".
+  if (opp.delivery_message_sent_at) {
+    await audit(opportunityId, "venta_delivery_already_sent", {
       contact_id: contact.id,
+      sent_at: opp.delivery_message_sent_at,
     });
-    return { ok: false, skipped: "stage_unresolved" };
-  }
-
-  // Resolver a quién mover. `whaapy_contact_id` solo está poblado en ~13% de
-  // los contactos, así que el camino normal es el rescate por teléfono.
-  const resolved = await resolveVentaContact(organizationId, contact, opportunityId);
-  if (!resolved.ok) return { ok: false, skipped: resolved.reason };
-  const { contactId: whaapyContactId, currentStageId } = resolved;
-
-  // Anti-duplicado ANTES de escribir: si ya está en la etapa, ni siquiera
-  // vale la pena tocar los custom_fields (ese PATCH rebotaría por webhook).
-  if (currentStageId === stageId) {
-    await audit(opportunityId, "venta_delivery_already_in_stage", {
-      whaapy_contact_id: whaapyContactId,
-      stage_id: stageId,
-    });
-    return { ok: true, moved: false, whaapyContactId };
-  }
-
-  // El nº que el cliente conoce (#1759), NUNCA el del borrador (#D903).
-  const orderRef = await resolveCustomerFacingOrderRef(opp.shopify_order_id);
-  if (!orderRef) {
-    await audit(opportunityId, "venta_delivery_order_ref_missing", {
-      shopify_order_id: opp.shopify_order_id ?? null,
-      display_reference: opp.display_reference ?? null,
-    });
-  }
-
-  // Sin el `#`: la plantilla aprobada ya lo trae en su texto fijo
-  // ("tu pedido #{{2}} ha sido entregado"), así que mandar "#1759" saldría
-  // como "pedido ##1759".
-  await patchVentaContactCustomFields(organizationId, whaapyContactId, {
-    centrhub_order_ref: toTemplateOrderParam(orderRef),
-    centrhub_opportunity_id: opportunityId,
-  });
-
-  await moveVentaContactToStage(organizationId, whaapyContactId, stageId);
-
-  // Sello del ANCLA: el mensaje 2 ("7 dias") se cuenta desde AQUÍ, no desde
-  // la fecha de entrega. Se escribe después del move — si el move falla,
-  // Inngest reintenta y no queremos un ancla de un mensaje que no salió.
-  // Solo la primera vez: un re-push no debe correr el reloj del seguimiento.
-  if (!opp.delivery_message_sent_at) {
-    await updateOpportunity(opportunityId, {
-      delivery_message_sent_at: new Date().toISOString(),
-    });
-  }
-
-  await audit(opportunityId, "venta_delivery_message_pushed", {
-    whaapy_contact_id: whaapyContactId,
-    stage_id: stageId,
-    order_ref: orderRef,
-  });
-  return { ok: true, moved: true, whaapyContactId };
-}
-
-/**
- * Resuelve el contacto en el Whaapy de Venta, por dos vías:
- *
- *  1. `contacts.whaapy_contact_id` si está poblado (cuesta un GET para saber
- *     su etapa actual).
- *  2. Si no, búsqueda por teléfono — que además devuelve la etapa, así que
- *     el camino de rescate cuesta UNA llamada, no dos. Al encontrarlo se
- *     **backfillea el id local**: la próxima entrega de ese cliente ya no
- *     paga la búsqueda, y el resto del sistema hereda la identidad enlazada.
- *
- * Devuelve null (con audit) cuando no hay teléfono o el contacto no existe
- * del otro lado. NO lo crea: Venta es la base conversacional maestra y su
- * creación la gobiernan las reglas de sincronización asimétrica, no un
- * mensaje de entrega.
- */
-type ResolvedVentaContact =
-  | { ok: true; contactId: string; currentStageId: string | null }
-  | { ok: false; reason: VentaDeliveryPushSkipReason };
-
-async function resolveVentaContact(
-  organizationId: UUID,
-  contact: { id: UUID; phone: string | null; whaapy_contact_id: string | null },
-  opportunityId: UUID,
-): Promise<ResolvedVentaContact> {
-  if (contact.whaapy_contact_id) {
-    const currentStageId = await getVentaContactStageId(
-      organizationId,
-      contact.whaapy_contact_id,
-    );
-    return { ok: true, contactId: contact.whaapy_contact_id, currentStageId };
+    return { ok: true, sent: false };
   }
 
   const phone = normalizePhone(contact.phone);
@@ -183,23 +101,53 @@ async function resolveVentaContact(
       reason: "missing_phone",
       contact_id: contact.id,
     });
-    return { ok: false, reason: "missing_phone" };
+    return { ok: false, skipped: "missing_phone" };
   }
 
-  const match = await findVentaContactByPhone(organizationId, phone);
-  if (!match) {
-    await audit(opportunityId, "venta_delivery_contact_not_in_whaapy", {
-      contact_id: contact.id,
+  // El nº que el cliente conoce (#1759), NUNCA el del borrador (#D903).
+  // Sin él NO se manda: Meta rechaza una plantilla con un parámetro vacío, y
+  // "tu pedido # ha sido entregado" sería peor que no escribir.
+  const orderRef = await resolveCustomerFacingOrderRef(opp.shopify_order_id);
+  const orderParam = toTemplateOrderParam(orderRef);
+  if (!orderParam) {
+    await audit(opportunityId, "venta_delivery_order_ref_missing", {
+      shopify_order_id: opp.shopify_order_id ?? null,
+      display_reference: opp.display_reference ?? null,
     });
-    return { ok: false, reason: "contact_not_in_whaapy" };
+    return { ok: false, skipped: "order_ref_missing" };
   }
 
-  await updateContact(contact.id, { whaapy_contact_id: match.contactId });
-  await audit(opportunityId, "venta_delivery_contact_linked_by_phone", {
-    contact_id: contact.id,
-    whaapy_contact_id: match.contactId,
+  // Sin el `#`: la plantilla ya lo trae en su texto fijo ("tu pedido
+  // #{{2}} ha sido entregado"), así que "#1759" saldría como "##1759".
+  await sendVentaTemplate(organizationId, {
+    to: phone,
+    templateName: VENTA_DELIVERY_TEMPLATE,
+    parameters: [firstName(contact.full_name), orderParam],
   });
-  return { ok: true, ...match };
+
+  // Sello del ANCLA: el mensaje 2 ("7 dias") se cuenta desde AQUÍ, no desde
+  // la fecha de entrega. Después del envío: si el POST falla, Inngest
+  // reintenta y no queremos anclar un mensaje que no salió.
+  await updateOpportunity(opportunityId, {
+    delivery_message_sent_at: new Date().toISOString(),
+  });
+
+  await audit(opportunityId, "venta_delivery_message_sent", {
+    contact_id: contact.id,
+    template: VENTA_DELIVERY_TEMPLATE,
+    order_ref: orderRef,
+  });
+  return { ok: true, sent: true };
+}
+
+/**
+ * {{1}} de la plantilla. Whaapy resolvía `{{contact.first_name}}` de su
+ * propia ficha; enviando nosotros, el nombre sale del contacto MAESTRO, que
+ * es la fuente de verdad (O11). Vacío → saludo genérico antes que "Hola, .".
+ */
+function firstName(fullName: string | null): string {
+  const first = (fullName ?? "").trim().split(/\s+/)[0];
+  return first || "Hola";
 }
 
 async function audit(

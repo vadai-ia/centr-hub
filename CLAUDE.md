@@ -79,7 +79,7 @@ Whaapy expone una matriz de scopes al crear la api_key. La doctrina v5 (Sección
 
 **Scopes NO marcados** (decisión consciente para minimizar superficie):
 
-- `messages` — la plataforma no envía mensajes server-side. El envío vive en el iframe (sesión nativa del navegador del vendedor). Si V2 introduce mensajería programática (campañas, follow-ups automáticos), se activa entonces.
+- ~~`messages`~~ — **ACTIVADO (sep-2026)**, junto con `templates`. La plataforma SÍ envía server-side: el mensaje de confirmación de entrega manda la plantilla con sus parámetros ya resueltos (`sendVentaTemplate`, [lib/whaapy/send-template.ts](lib/whaapy/send-template.ts)). Fue obligado, no una ampliación oportunista: Whaapy **no resuelve campos personalizados como variables de plantilla**, así que la vía indirecta (escribir el folio en un `custom_field` + mover de etapa para que su Automation enviara) no podía funcionar nunca. Ver `ERRORES.md` ("Whaapy no resuelve `custom_fields`…"). La conversación del día a día sigue en el iframe.
 - `templates`, `broadcasts` — mismo razonamiento que `messages`.
 - `media` — la plataforma no descarga ni sube media. Los archivos viven en Whaapy y se ven vía iframe.
 

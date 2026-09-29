@@ -2,227 +2,148 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { FakeSupabase } from "./helpers/fake-supabase";
 
 /**
- * MENSAJE 1 — servicio que mueve el contacto en el funnel de VENTA para que
- * su Automation mande la confirmación de entrega.
+ * MENSAJE 1 — la plataforma ENVÍA la plantilla de confirmación de entrega
+ * por la instancia de Venta, con los parámetros ya resueltos.
+ *
+ * Por qué envía la plataforma y no una Automation de Whaapy: **Whaapy no
+ * resuelve campos personalizados como variables de plantilla**. La vía
+ * anterior (escribir el folio en un `custom_field` y mover de etapa para que
+ * su Automation enviara) abortaba con "la variable no tiene valor" y NO
+ * dejaba ni un mensaje fallido en la conversación. Ver
+ * `lib/whaapy/send-template.ts`.
  *
  * Lo que protegen estos tests:
- *   - **Anti-duplicado**: el trigger de Whaapy es ENTRAR a la etapa. Si el
- *     contacto ya está ahí, re-moverlo le manda al cliente el mensaje otra
- *     vez. Ni siquiera se escriben los custom_fields (ese PATCH rebota por
- *     webhook en esta instancia).
- *   - **El número que ve el cliente** es el del PEDIDO, no el del borrador.
- *   - **Caminos "no aplica"** que NO deben lanzar (reintentar no ayuda).
+ *   - **Anti-duplicado** por `delivery_message_sent_at`: al cliente se le
+ *     escribe UNA vez, aunque la opp vuelva a pasar por "Entregado" o
+ *     Inngest reintente.
+ *   - **El número que ve el cliente** es el del PEDIDO, no el del borrador,
+ *     y va SIN `#` (la plantilla ya lo trae en su texto fijo).
+ *   - **Sin folio no se manda**: Meta rechaza la plantilla con un parámetro
+ *     vacío, y "tu pedido # ha sido entregado" es peor que no escribir.
+ *   - **El sello se escribe DESPUÉS del envío**: si el POST falla, la opp no
+ *     queda marcada como avisada.
  */
 
 const fake = new FakeSupabase();
 vi.mock("@/lib/supabase/admin", () => ({ getSupabaseAdminClient: () => fake }));
 
-vi.mock("@/lib/whaapy/funnel", () => ({
-  resolveVentaStageIdByKey: vi.fn(),
-  getVentaContactStageId: vi.fn(),
-  findVentaContactByPhone: vi.fn(),
-  patchVentaContactCustomFields: vi.fn().mockResolvedValue(undefined),
-  moveVentaContactToStage: vi.fn().mockResolvedValue(undefined),
+vi.mock("@/lib/whaapy/send-template", () => ({
+  sendVentaTemplate: vi.fn().mockResolvedValue(undefined),
+  VENTA_DELIVERY_TEMPLATE: "confirmacion_pedio_entregado",
 }));
 
 import { withTenantContext } from "@/lib/tenant/context";
 import { pushVentaDeliveryMessage } from "@/lib/whaapy/venta-delivery-push";
-import {
-  resolveVentaStageIdByKey,
-  getVentaContactStageId,
-  findVentaContactByPhone,
-  patchVentaContactCustomFields,
-  moveVentaContactToStage,
-} from "@/lib/whaapy/funnel";
+import { sendVentaTemplate } from "@/lib/whaapy/send-template";
+import type { UUID } from "@/lib/types/database";
 
 const mock = <T extends (...a: never[]) => unknown>(fn: T) =>
   fn as unknown as ReturnType<typeof vi.fn>;
 
 const ORG = "org-1";
-const STAGE = "venta-stage-entregado";
-const WHAAPY_ID = "wc-venta-1";
+const OPP = "opp-1";
 
-function seedOpp(overrides: Record<string, unknown> = {}) {
+function seed(opp: Record<string, unknown> = {}, contact: Record<string, unknown> = {}) {
   fake.setTable("opportunities", [
     {
-      id: "opp-1",
+      id: OPP,
       organization_id: ORG,
       funnel: "post_venta",
       contact_id: "contact-1",
+      shopify_order_id: "7026619941140",
       display_reference: "#D903",
-      shopify_order_id: "gid://shopify/Order/999",
-      last_modified_at: "2026-06-01T00:00:00Z",
-      ...overrides,
+      delivery_message_sent_at: null,
+      ...opp,
     },
   ]);
-}
-
-function seedContact(whaapyContactId: string | null) {
   fake.setTable("contacts", [
     {
       id: "contact-1",
       organization_id: ORG,
+      full_name: "Pamela Alvarez",
       phone: "+525512345678",
-      full_name: "Cliente Prueba",
-      email: null,
-      whaapy_contact_id: whaapyContactId,
+      whaapy_contact_id: null,
+      ...contact,
     },
   ]);
-}
-
-function seedOrder(shopifyName: string | null = "#1759") {
   fake.setTable("orders", [
     {
       id: "order-1",
       organization_id: ORG,
-      shopify_order_id: "gid://shopify/Order/999",
-      shopify_name: shopifyName,
+      shopify_order_id: "7026619941140",
+      shopify_name: "#1759",
+      source: "web",
     },
   ]);
+  fake.setTable("audit_log", []);
 }
 
-const push = () =>
+const run = () =>
   withTenantContext(
     ORG,
-    () => pushVentaDeliveryMessage({ organizationId: ORG, opportunityId: "opp-1" }),
+    () => pushVentaDeliveryMessage({ organizationId: ORG as UUID, opportunityId: OPP as UUID }),
     { source: "worker" },
   );
 
-const auditTypes = (): string[] =>
-  fake.getTable("audit_log").map((a) => (a as { event_type: string }).event_type);
-
 beforeEach(() => {
-  fake.reset();
   vi.clearAllMocks();
-  mock(resolveVentaStageIdByKey).mockResolvedValue(STAGE);
-  mock(getVentaContactStageId).mockResolvedValue("otra-etapa");
+  mock(sendVentaTemplate).mockResolvedValue(undefined);
+  seed();
 });
 
-describe("pushVentaDeliveryMessage", () => {
-  it("camino feliz: escribe el nº de PEDIDO y mueve a Entregado", async () => {
-    seedOpp();
-    seedOrder("#1759");
-    seedContact(WHAAPY_ID);
+describe("mensaje de entrega — envío directo", () => {
+  it("manda la plantilla con el nombre de pila y el folio del PEDIDO, sin #", async () => {
+    const res = await run();
 
-    const r = await push();
-
-    expect(r).toEqual({ ok: true, moved: true, whaapyContactId: WHAAPY_ID });
-    const [, , fields] = mock(patchVentaContactCustomFields).mock.calls[0];
-    expect((fields as Record<string, unknown>).centrhub_order_ref).toBe("1759");
-    expect((fields as Record<string, unknown>).centrhub_order_ref).not.toBe("#D903");
-    // sin "#": la plantilla ya lo trae en su texto fijo
-    expect((fields as Record<string, unknown>).centrhub_order_ref).not.toBe("#1759");
-    expect(moveVentaContactToStage).toHaveBeenCalledWith(ORG, WHAAPY_ID, STAGE);
-    expect(auditTypes()).toContain("venta_delivery_message_pushed");
+    expect(res).toEqual({ ok: true, sent: true });
+    expect(sendVentaTemplate).toHaveBeenCalledWith(ORG, {
+      to: "+525512345678",
+      templateName: "confirmacion_pedio_entregado",
+      // "Pamela", no "Pamela Alvarez"; "1759", no "#1759" ni el borrador "#D903".
+      parameters: ["Pamela", "1759"],
+    });
   });
 
-  it("anti-duplicado: ya está en Entregado → no mueve NI escribe", async () => {
-    seedOpp();
-    seedOrder();
-    seedContact(WHAAPY_ID);
-    mock(getVentaContactStageId).mockResolvedValue(STAGE);
+  it("sella delivery_message_sent_at para anclar el mensaje de 7 días", async () => {
+    await run();
 
-    const r = await push();
-
-    expect(r).toEqual({ ok: true, moved: false, whaapyContactId: WHAAPY_ID });
-    expect(moveVentaContactToStage).not.toHaveBeenCalled();
-    // El PATCH también se salta: en esta instancia rebota como contact.updated.
-    expect(patchVentaContactCustomFields).not.toHaveBeenCalled();
-    expect(auditTypes()).toContain("venta_delivery_already_in_stage");
+    const opp = fake.getTable("opportunities")[0] as { delivery_message_sent_at: string | null };
+    expect(opp.delivery_message_sent_at).toBeTruthy();
   });
 
+  it("no le escribe dos veces al cliente si ya tiene sello", async () => {
+    seed({ delivery_message_sent_at: "2026-09-20T10:00:00.000Z" });
 
-  it("etapa inexistente en el funnel de Venta → skip + audit (config pendiente)", async () => {
-    seedOpp();
-    seedOrder();
-    seedContact(WHAAPY_ID);
-    mock(resolveVentaStageIdByKey).mockResolvedValue(null);
+    const res = await run();
 
-    const r = await push();
-
-    expect(r).toEqual({ ok: false, skipped: "stage_unresolved" });
-    expect(moveVentaContactToStage).not.toHaveBeenCalled();
-    expect(auditTypes()).toContain("venta_delivery_stage_unresolved");
+    expect(res).toEqual({ ok: true, sent: false });
+    expect(sendVentaTemplate).not.toHaveBeenCalled();
   });
 
-  it("sin orden enlazada: mueve igual, pero audita que la variable irá vacía", async () => {
-    seedOpp({ shopify_order_id: null });
-    seedContact(WHAAPY_ID);
+  it("sin folio NO manda (Meta rechaza el parámetro vacío)", async () => {
+    fake.setTable("orders", []);
 
-    const r = await push();
+    const res = await run();
 
-    expect(r).toMatchObject({ ok: true, moved: true });
-    const [, , fields] = mock(patchVentaContactCustomFields).mock.calls[0];
-    expect((fields as Record<string, unknown>).centrhub_order_ref).toBeNull();
-    expect(auditTypes()).toContain("venta_delivery_order_ref_missing");
+    expect(res).toEqual({ ok: false, skipped: "order_ref_missing" });
+    expect(sendVentaTemplate).not.toHaveBeenCalled();
   });
 
-  it("contacto inexistente → skip sin lanzar", async () => {
-    seedOpp({ contact_id: null });
-    seedOrder();
+  it("sin teléfono NO lanza: audita y se salta (reintentar no ayuda)", async () => {
+    seed({}, { phone: null });
 
-    const r = await push();
+    const res = await run();
 
-    expect(r).toEqual({ ok: false, skipped: "contact_not_found" });
+    expect(res).toEqual({ ok: false, skipped: "missing_phone" });
+    expect(sendVentaTemplate).not.toHaveBeenCalled();
   });
 
-  // --- Rescate por teléfono ---------------------------------------------
-  // Solo el 13% de los contactos trae whaapy_contact_id, así que esta rama
-  // NO es un caso borde: es el camino habitual.
+  it("si el envío falla, propaga y NO deja la opp marcada como avisada", async () => {
+    mock(sendVentaTemplate).mockRejectedValue(new Error("whaapy_rest_failed: 500"));
 
-  it("sin id local: lo busca por teléfono, lo enlaza y mueve", async () => {
-    seedOpp();
-    seedOrder("#1759");
-    seedContact(null);
-    mock(findVentaContactByPhone).mockResolvedValue({ contactId: "wc-hallado", currentStageId: null });
+    await expect(run()).rejects.toThrow("whaapy_rest_failed");
 
-    const r = await push();
-
-    expect(r).toEqual({ ok: true, moved: true, whaapyContactId: "wc-hallado" });
-    expect(findVentaContactByPhone).toHaveBeenCalledWith(ORG, "+525512345678");
-    expect(moveVentaContactToStage).toHaveBeenCalledWith(ORG, "wc-hallado", STAGE);
-    // backfill: la próxima entrega ya no paga la búsqueda
-    const saved = fake.getTable("contacts")[0] as Record<string, unknown>;
-    expect(saved.whaapy_contact_id).toBe("wc-hallado");
-    expect(auditTypes()).toContain("venta_delivery_contact_linked_by_phone");
-  });
-
-  it("rescate: la búsqueda ya trae la etapa → anti-duplicado sin GET extra", async () => {
-    seedOpp();
-    seedOrder();
-    seedContact(null);
-    mock(findVentaContactByPhone).mockResolvedValue({ contactId: "wc-hallado", currentStageId: STAGE });
-
-    const r = await push();
-
-    expect(r).toEqual({ ok: true, moved: false, whaapyContactId: "wc-hallado" });
-    expect(getVentaContactStageId).not.toHaveBeenCalled();
-    expect(moveVentaContactToStage).not.toHaveBeenCalled();
-  });
-
-  it("no existe en Whaapy: skip con motivo propio y NO lo crea", async () => {
-    seedOpp();
-    seedOrder();
-    seedContact(null);
-    mock(findVentaContactByPhone).mockResolvedValue(null);
-
-    const r = await push();
-
-    expect(r).toEqual({ ok: false, skipped: "contact_not_in_whaapy" });
-    expect(moveVentaContactToStage).not.toHaveBeenCalled();
-    expect(auditTypes()).toContain("venta_delivery_contact_not_in_whaapy");
-  });
-
-  it("sin id local NI teléfono: skip por missing_phone, sin buscar", async () => {
-    seedOpp();
-    seedOrder();
-    fake.setTable("contacts", [
-      { id: "contact-1", organization_id: ORG, phone: null, full_name: "X", email: null, whaapy_contact_id: null },
-    ]);
-
-    const r = await push();
-
-    expect(r).toEqual({ ok: false, skipped: "missing_phone" });
-    expect(findVentaContactByPhone).not.toHaveBeenCalled();
+    const opp = fake.getTable("opportunities")[0] as { delivery_message_sent_at: string | null };
+    expect(opp.delivery_message_sent_at).toBeNull();
   });
 });

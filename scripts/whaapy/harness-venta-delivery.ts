@@ -31,15 +31,12 @@ import { resolve } from "node:path";
 import { getOrganizationBySlug } from "@/lib/db/organizations";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 import { withTenantContext } from "@/lib/tenant/context";
-import {
-  findVentaContactByPhone,
-  moveVentaContactToStage,
-  patchVentaContactCustomFields,
-  resolveVentaStageIdByKey,
-} from "@/lib/whaapy/funnel";
 import { normalizePhone } from "@/lib/services/identity-matching";
 import { pushVentaDeliveryMessage } from "@/lib/whaapy/venta-delivery-push";
-import { WHAAPY_VENTA_STAGE_NAMES } from "@/lib/whaapy/config";
+import {
+  sendVentaTemplate,
+  VENTA_DELIVERY_TEMPLATE,
+} from "@/lib/whaapy/send-template";
 import {
   resolveCustomerFacingOrderRef,
   toTemplateOrderParam,
@@ -94,7 +91,6 @@ async function listCandidates(organizationId: UUID) {
 async function runPhoneTest(
   organizationId: UUID,
   rawPhone: string,
-  stageId: string,
 ): Promise<void> {
   const phone = normalizePhone(rawPhone);
   if (!phone) {
@@ -107,29 +103,17 @@ async function runPhoneTest(
   const orderRefRaw = arg("--order-ref") ?? "#1759";
   const orderParam = toTemplateOrderParam(orderRefRaw);
 
-  const match = await findVentaContactByPhone(organizationId, phone);
+  const nombre = arg("--name") ?? "Jorge";
   console.log(`\n  MODO PRUEBA con tu número`);
   console.log(`  teléfono      : ${phone}`);
-  console.log(
-    `  en Whaapy     : ${match ? `✓ ${match.contactId} (etapa actual: ${match.currentStageId ?? "ninguna"})` : "✗ NO EXISTE"}`,
-  );
+  console.log(`  plantilla     : ${VENTA_DELIVERY_TEMPLATE}`);
+  console.log(`  {{1}} llevará : ${nombre}`);
   console.log(`  {{2}} llevará : ${orderParam ?? "(vacío)"}`);
 
-  if (!match) {
-    console.error(
-      `\n✗ Tu número no existe como contacto en el Whaapy de VENTA.\n` +
-        `  Mándale un WhatsApp cualquiera al número comercial desde tu celular\n` +
-        `  y vuelve a correr esto — el contacto se crea solo al escribir.\n` +
-        `  (El harness NO lo crea a propósito: Venta es la base maestra.)`,
-    );
-    process.exit(1);
-  }
-
-  if (match.currentStageId === stageId) {
-    console.error(
-      `\n⚠  Ya estás en la etapa "Entregado": Whaapy no re-dispara (el trigger\n` +
-        `   es ENTRAR). Muévete a otra etapa desde el dashboard y repite.`,
-    );
+  // Meta rechaza la plantilla con un parámetro vacío, y "tu pedido # ha sido
+  // entregado" sería peor que no escribir.
+  if (!orderParam) {
+    console.error(`\n✗ Sin número de pedido no se manda. Pasa --order-ref "#1759".`);
     process.exit(1);
   }
 
@@ -138,15 +122,14 @@ async function runPhoneTest(
     return;
   }
 
-  await patchVentaContactCustomFields(organizationId, match.contactId, {
-    centrhub_order_ref: orderParam,
-    centrhub_opportunity_id: "harness-prueba",
+  await sendVentaTemplate(organizationId, {
+    to: phone,
+    templateName: VENTA_DELIVERY_TEMPLATE,
+    parameters: [nombre, orderParam],
   });
-  await moveVentaContactToStage(organizationId, match.contactId, stageId);
-  console.log(`\n✓ Movido a "Entregado". Revisa tu WhatsApp.`);
-  console.log(`\nSi NO llega nada: falta la Automation, o no está activa.`);
-  console.log(`Si llega con el hueco vacío ("tu pedido # ha sido entregado"),`);
-  console.log(`la Automation no logró leer el custom field centrhub_order_ref.`);
+  console.log(`\n✓ Plantilla enviada. Revisa tu WhatsApp.`);
+  console.log(`\nSi falla, el error sale AQUÍ mismo: ya no depende de la Automation.`);
+  console.log(`Un 403 = la api_key no tiene scope de mensajes/plantillas.`);
 }
 
 async function main() {
@@ -168,20 +151,8 @@ async function main() {
     async () => {
       const orgId = org.id as UUID;
 
-      // Pre-vuelo: sin la etapa en el funnel de Venta nada puede funcionar.
-      const stageId = await resolveVentaStageIdByKey(orgId, "entregado");
       console.log(`\n=== MENSAJE 1 · confirmación de entrega (VENTA) — ${slug} ===\n`);
-      console.log(
-        `  etapa "${WHAAPY_VENTA_STAGE_NAMES.entregado}" en el funnel de Venta: ` +
-          (stageId ? `✓ ${stageId}` : "✗ NO EXISTE"),
-      );
-      if (!stageId) {
-        console.error(
-          `\n✗ Crea la etapa "${WHAAPY_VENTA_STAGE_NAMES.entregado}" en el funnel del Whaapy\n` +
-            `  de VENTA (nombre exacto, con mayúscula) y vuelve a correr esto.`,
-        );
-        process.exit(1);
-      }
+      console.log(`  plantilla: ${VENTA_DELIVERY_TEMPLATE} (WABA de Venta)`);
       console.log(
         `  kill switch VENTA_DELIVERY_MESSAGE_ENABLED: ${process.env.VENTA_DELIVERY_MESSAGE_ENABLED === "true" ? "ON" : "OFF (no afecta a este harness — llama al servicio directo)"}`,
       );
@@ -191,7 +162,7 @@ async function main() {
       // contexto del pedido + mover de etapa) sin depender de una opp.
       const testPhone = arg("--phone");
       if (testPhone) {
-        await runPhoneTest(orgId, testPhone, stageId);
+        await runPhoneTest(orgId, testPhone);
         return;
       }
 
@@ -239,13 +210,13 @@ async function main() {
         opportunityId: opportunityId as UUID,
       });
       console.log(`\nresultado: ${JSON.stringify(result)}`);
-      if ("ok" in result && result.ok && result.moved) {
-        console.log(`\n✓ Contacto movido. La Automation de Venta debería estar mandando el mensaje.`);
+      if ("ok" in result && result.ok && result.sent) {
+        console.log(`\n✓ Plantilla enviada desde el número de Venta.`);
         console.log(`  Revisa el WhatsApp de ${contact?.phone}.`);
       } else if ("ok" in result && result.ok) {
         console.log(
-          `\n⚠  El contacto YA estaba en la etapa: Whaapy no re-dispara (el trigger es\n` +
-            `   ENTRAR). Muévelo a otra etapa desde el dashboard y repite.`,
+          `\n⚠  Esta oportunidad YA tenía sello de envío: no se le escribe dos veces\n` +
+            `   al cliente. Para re-probar, usa el modo --phone.`,
         );
       }
     },
