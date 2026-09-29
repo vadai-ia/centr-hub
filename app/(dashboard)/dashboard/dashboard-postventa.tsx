@@ -21,9 +21,12 @@ const TT = {
 export function DashboardPostventa({
   m,
   breakdown,
+  currency,
 }: {
   m: PostventaMetrics;
   breakdown: AdvisorBreakdownRow[] | null;
+  /** Moneda de la organización (los agregados no la heredan de una fila). */
+  currency: string;
 }) {
   return (
     <DashboardSection tone="postventa" title="Post-venta" subtitle="Pedidos y atención post-cierre">
@@ -58,7 +61,9 @@ export function DashboardPostventa({
       </div>
 
       {/* Desglose por vendedor — posición prominente (#4) */}
-      {breakdown ? <AdvisorBreakdown rows={breakdown} funnel="post_venta" /> : null}
+      {breakdown ? (
+        <AdvisorBreakdown rows={breakdown} funnel="post_venta" currency={currency} />
+      ) : null}
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <OrdersByMonthChart data={m.ordersByMonth} tooltip={TT.ordersByMonth} />

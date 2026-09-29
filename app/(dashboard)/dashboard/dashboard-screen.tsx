@@ -149,9 +149,14 @@ export function DashboardScreen({
       <DashboardVenta
         m={data.venta}
         breakdown={data.ventaBreakdown}
+        currency={data.currency}
         snapshotSince={data.pipelineSnapshotSince}
       />
-      <DashboardPostventa m={data.postventa} breakdown={data.postventaBreakdown} />
+      <DashboardPostventa
+        m={data.postventa}
+        breakdown={data.postventaBreakdown}
+        currency={data.currency}
+      />
 
       {exportOpen ? (
         <DashboardExportModal

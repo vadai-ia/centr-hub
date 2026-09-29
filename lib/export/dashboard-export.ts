@@ -1,7 +1,7 @@
 import { DateTime } from "luxon";
 import { formatAmount } from "@/lib/format/money";
 import { DASH, formatCount, formatDays, formatPercent } from "@/lib/format/dashboard";
-import { DEFAULT_CURRENCY, TIMEZONE } from "@/lib/constants";
+import { TIMEZONE } from "@/lib/constants";
 import type { DashboardData } from "@/lib/types/dashboard";
 
 /**
@@ -17,7 +17,7 @@ import type { DashboardData } from "@/lib/types/dashboard";
  * y los filtros para que un tercero entienda el archivo sin la pantalla.
  */
 
-const CCY = DEFAULT_CURRENCY;
+
 
 export type ExportFormat = "excel" | "pdf";
 
@@ -112,6 +112,8 @@ export function buildExportModel(
   selected: Set<ExportKpiKey>,
   ctx: BuildCtx,
 ): ExportModel {
+  // Misma moneda que la pantalla: el snapshot exportado la trae consigo.
+  const CCY = data.currency;
   const range = `${fmtDate(data.period.startLabel)} al ${fmtDate(data.period.endLabel)}`;
   const advisorPart = ctx.advisorName ? ` — Asesor: ${ctx.advisorName}` : " — Toda la organización";
   const subtitle = `${ctx.orgName} · ${range}${advisorPart}`;

@@ -1,10 +1,10 @@
 import { formatAmount } from "@/lib/format/money";
 import { DASH, formatCivilDate, formatCount, formatPercent } from "@/lib/format/dashboard";
-import { DEFAULT_CURRENCY } from "@/lib/constants";
+
 import type { AdvisorBreakdownRow } from "@/lib/types/dashboard";
 import type { Funnel } from "@/lib/types/database";
 
-const CCY = DEFAULT_CURRENCY;
+
 
 /**
  * Drilldown por vendedor (solo admin, sin asesor filtrado). El usuario
@@ -15,15 +15,19 @@ const CCY = DEFAULT_CURRENCY;
 export function AdvisorBreakdown({
   rows,
   funnel,
+  currency,
   snapshotSince = null,
 }: {
   rows: AdvisorBreakdownRow[];
   funnel: Funnel;
+  /** Moneda de la organización (los agregados no la heredan de una fila). */
+  currency: string;
   /** Corte del snapshot (solo Venta): acota "Pipeline $ actual". */
   snapshotSince?: string | null;
 }) {
   if (rows.length === 0) return null;
   const isVenta = funnel === "venta";
+  const CCY = currency;
 
   return (
     <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-sm">

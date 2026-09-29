@@ -8,7 +8,7 @@ import {
   recordStageChange,
 } from "@/lib/db/opportunities";
 import { recordAuditEvent } from "@/lib/db/operational";
-import { DEFAULT_CURRENCY } from "@/lib/constants";
+import { readOrganizationCurrency } from "@/lib/services/organization-currency";
 import type { ContactRow, Json, OpportunityRow, UUID } from "@/lib/types/database";
 
 /**
@@ -76,6 +76,10 @@ export async function evaluateAndCreateC2Opportunity(
     return await skip("organization_not_found", input);
   }
 
+  // La opp nace sin monto, pero su moneda marca en qué se cotizará: la de
+  // la tienda, no el MXN del arranque.
+  const orgCurrency = readOrganizationCurrency(org.config ?? null);
+
   const backfill =
     (org as unknown as { backfill_in_progress?: boolean }).backfill_in_progress;
   if (backfill === true) {
@@ -136,7 +140,7 @@ export async function evaluateAndCreateC2Opportunity(
     display_reference: null,
     actual_amount: null,
     estimated_amount: null,
-    currency: DEFAULT_CURRENCY,
+    currency: orgCurrency,
     probability_override: null,
     weighted_amount: null,
     loss_reason_id: null,

@@ -29,7 +29,8 @@ import { recordWhaapySyncIntent } from "@/lib/inngest/functions/customers";
 import { setContactOutbound } from "@/lib/services/outbound-mark";
 import { structuredAddressToJson } from "@/lib/contacts/address";
 import type { StructuredAddress } from "@/lib/contacts/address";
-import { DEFAULT_CURRENCY } from "@/lib/constants";
+import { getOrganizationById } from "@/lib/db/organizations";
+import { readOrganizationCurrency } from "@/lib/services/organization-currency";
 import type { ContactRow, Funnel, Json, UUID } from "@/lib/types/database";
 
 /**
@@ -120,6 +121,11 @@ export interface CreateLeadResult {
 
 export async function createLead(input: CreateLeadInput): Promise<CreateLeadResult> {
   const organizationId = getCurrentOrganizationId();
+  // La moneda de la tienda, no el MXN del arranque: un lead de Colombia
+  // cotiza en COP.
+  const orgCurrency = readOrganizationCurrency(
+    (await getOrganizationById(organizationId))?.config ?? null,
+  );
   // Funnel donde nace el lead (Fase 2). "outbound" cambia la etapa inicial,
   // el guard de opp activa, el funnel de la opp y marca el contacto outbound.
   const leadFunnel: Funnel = input.channel === "outbound" ? "outbound" : "venta";
@@ -278,7 +284,7 @@ export async function createLead(input: CreateLeadInput): Promise<CreateLeadResu
         display_reference: null,
         actual_amount: null,
         estimated_amount: null,
-        currency: DEFAULT_CURRENCY,
+        currency: orgCurrency,
         probability_override: null,
         weighted_amount: null,
         loss_reason_id: null,

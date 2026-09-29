@@ -178,4 +178,11 @@ export interface DashboardData {
    * Ver `dashboard-snapshot-window.ts`.
    */
   pipelineSnapshotSince: string | null;
+  /**
+   * Moneda de la organización (ISO 4217) para los AGREGADOS — sumas del
+   * dashboard, desglose y exportación, que no cuelgan de ninguna fila con
+   * su propia `currency`. Sin esto, una tienda que vende en COP mostraba
+   * sus importes etiquetados como MXN. Ver `organization-currency.ts`.
+   */
+  currency: string;
 }

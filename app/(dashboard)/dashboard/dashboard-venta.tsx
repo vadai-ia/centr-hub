@@ -11,10 +11,10 @@ import {
 } from "./dashboard-charts";
 import { formatAmount } from "@/lib/format/money";
 import { DASH, formatCivilDate, formatCount, formatDays, formatPercent } from "@/lib/format/dashboard";
-import { DEFAULT_CURRENCY } from "@/lib/constants";
+
 import type { AdvisorBreakdownRow, VentaMetrics } from "@/lib/types/dashboard";
 
-const CCY = DEFAULT_CURRENCY;
+
 
 /**
  * Textos de tooltip — ESTÁTICOS y fieles al cálculo real (verificado
@@ -115,12 +115,16 @@ function EstadoActualGroup({
 export function DashboardVenta({
   m,
   breakdown,
+  currency,
   snapshotSince,
 }: {
   m: VentaMetrics;
   breakdown: AdvisorBreakdownRow[] | null;
+  /** Moneda de la organización (los agregados no la heredan de una fila). */
+  currency: string;
   snapshotSince: string | null;
 }) {
+  const CCY = currency;
   return (
     <DashboardSection tone="venta" title="Venta" subtitle="Pipeline comercial y cierre">
       <EstadoActualGroup snapshotSince={snapshotSince}>
@@ -214,7 +218,12 @@ export function DashboardVenta({
 
       {/* Desglose por vendedor — posición prominente (#4) */}
       {breakdown ? (
-        <AdvisorBreakdown rows={breakdown} funnel="venta" snapshotSince={snapshotSince} />
+        <AdvisorBreakdown
+          rows={breakdown}
+          funnel="venta"
+          currency={currency}
+          snapshotSince={snapshotSince}
+        />
       ) : null}
 
       {/* Gráficas */}

@@ -21,6 +21,7 @@ import {
 import { listLossReasons } from "@/lib/db/pipeline";
 import { listRealVendorsForMapping } from "@/lib/db/users";
 import { getOrganizationById } from "@/lib/db/organizations";
+import { readOrganizationCurrency } from "@/lib/services/organization-currency";
 import { resolvePipelineSnapshotWindow } from "@/lib/services/dashboard-snapshot-window";
 import {
   resolvePostventaStages,
@@ -703,6 +704,8 @@ export async function computeDashboardData(input: ComputeDashboardInput): Promis
     ventaBreakdown,
     postventaBreakdown,
     pipelineSnapshotSince: snapshotWindow.sinceDate,
+    // Los agregados no heredan moneda de ninguna fila: viaja la de la org.
+    currency: readOrganizationCurrency(org?.config ?? null),
   };
 }
 
