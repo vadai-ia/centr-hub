@@ -178,6 +178,23 @@ export function OpportunityDialogContent({
                 </span>
               )}
             </div>
+
+            {/* Mensajes automáticos al cliente (0049). Solo en Post-venta:
+                en los otros funnels estos sellos nunca se pueblan y una fila
+                de "sin enviar" permanente sería ruido. Dice ENVIADO, no
+                leído — el CRM no recibe el acuse de WhatsApp. */}
+            {isPostventa && (
+              <div className="mt-2 flex items-center gap-4 text-xs flex-wrap">
+                <MessageStamp
+                  label="Confirmación de entrega"
+                  at={opportunity.delivery_message_sent_at}
+                />
+                <MessageStamp
+                  label="Encuesta (7 días)"
+                  at={opportunity.followup_message_sent_at}
+                />
+              </div>
+            )}
           </div>
 
           <div className="flex flex-col items-end gap-1 flex-shrink-0">
@@ -330,6 +347,32 @@ export function OpportunityDialogContent({
         </button>
       </footer>
     </div>
+  );
+}
+
+/**
+ * Un mensaje automático de Post-venta: cuándo salió, o que no ha salido.
+ *
+ * El caso "sin enviar" SÍ se pinta aquí (a diferencia del badge de la card):
+ * quien abre el detalle está viendo UN caso y necesita saber si al cliente
+ * ya se le escribió, y la ausencia de una línea se lee como "no me lo
+ * mostraron", no como "no se envió".
+ */
+function MessageStamp({ label, at }: { label: string; at: string | null }) {
+  return (
+    <span className="flex items-center gap-1.5">
+      <span className="text-gray-400 dark:text-gray-500">{label}:</span>
+      {at ? (
+        <span
+          className="text-gray-700 dark:text-gray-200"
+          title="El CRM registra el envío, no si el cliente lo leyó."
+        >
+          enviada {formatRelative(at)}
+        </span>
+      ) : (
+        <span className="italic text-gray-400 dark:text-gray-500">sin enviar</span>
+      )}
+    </span>
   );
 }
 

@@ -159,6 +159,10 @@ const loadPageSchema = z.object({
    *  la primera página respetaría el filtro y las siguientes traerían opps
    *  de otros CS al hacer scroll. */
   customerSuccessId: z.string().uuid().optional(),
+  /** "Sin encuesta enviada" (0049). Mismo motivo que el filtro de CS: si no
+   *  viaja aquí, la primera página respeta el filtro y el scroll empieza a
+   *  traer opps que ya la recibieron. */
+  pendingFollowupOnly: z.boolean().optional(),
 });
 
 /**
@@ -264,6 +268,8 @@ export async function loadKanbanPageAction(
         input.funnel === "post_venta"
           ? (input.customerSuccessId as UUID | undefined)
           : undefined,
+      pendingFollowupOnly:
+        input.funnel === "post_venta" ? input.pendingFollowupOnly : undefined,
     });
     const hasMore = items.length > PIPELINE_PAGE_SIZE;
     return {
@@ -470,6 +476,11 @@ export interface PipelineFilters {
    *  INDEPENDIENTE de `advisorId`: si se pasan ambos, se AND-ean. Solo
    *  aplica en Post-venta. */
   customerSuccessId?: UUID;
+  /** "Sin encuesta enviada" (Post-venta): deja solo las opps a las que aún
+   *  no les salió el mensaje de los 7 días. Responde la pregunta operativa
+   *  ("¿a quién le falta?"); quién YA la recibió se ve en el badge de la
+   *  card. */
+  pendingFollowupOnly?: boolean;
   /** Vista "Casos resueltos" (Post-venta): "resolved" muestra solo el
    *  archivo de casos cerrados; default excluye los resueltos. */
   resolvedScope?: "active" | "resolved";
@@ -546,6 +557,11 @@ export async function loadInitialPipelineState(opts: {
     const filterCustomerSuccessId = isPostventa
       ? opts.filters?.customerSuccessId
       : undefined;
+    // Los sellos de mensajería solo se pueblan en Post-venta: filtrar por
+    // ellos en Venta dejaría el tablero entero marcado como "pendiente".
+    const filterPendingFollowup = isPostventa
+      ? opts.filters?.pendingFollowupOnly
+      : undefined;
 
     const [allStages, vendors, lossReasons, org, customerSuccess] =
       await Promise.all([
@@ -588,6 +604,7 @@ export async function loadInitialPipelineState(opts: {
         minEffectiveIso,
         channel: filterChannel,
         customerSuccessId: filterCustomerSuccessId,
+        pendingFollowupOnly: filterPendingFollowup,
       }),
       Promise.all(
         activeStages.map(async (stage) => {
@@ -607,6 +624,7 @@ export async function loadInitialPipelineState(opts: {
             minEffectiveIso,
             channel: filterChannel,
             customerSuccessId: filterCustomerSuccessId,
+            pendingFollowupOnly: filterPendingFollowup,
           });
           return { stageId: stage.id, items };
         }),

@@ -131,6 +131,10 @@ export function KanbanCard({
           {opp.resolved_at && <ResolvedBadge />}
           {!opp.resolved_at && opp.reopened_at && <ReopenedBadge />}
           {opp.order_source === ONLINE_ORDER_SOURCE && <OnlinePurchaseBadge />}
+          <MessagesBadge
+            deliveryAt={opp.delivery_message_sent_at}
+            followupAt={opp.followup_message_sent_at}
+          />
           {pendingTasksCount !== undefined && pendingTasksCount > 0 && (
             <TasksBadge count={pendingTasksCount} />
           )}
@@ -271,6 +275,55 @@ function OnlinePurchaseBadge() {
       Online
     </span>
   );
+}
+
+/**
+ * Qué mensajes automáticos ya recibió el cliente: la confirmación de entrega
+ * y, siete días después, la encuesta. Post-venta lo pidió para no tener que
+ * abrir WhatsApp cliente por cliente.
+ *
+ * Solo aparece cuando algo se envió — una card sin badge es "nada enviado", y
+ * marcar explícitamente ese caso llenaría el tablero de ruido (la mayoría de
+ * las cards viven antes de la entrega). Para trabajar los pendientes está el
+ * filtro "Sin encuesta enviada" de la barra.
+ *
+ * Dice ENVIADO, no recibido ni leído: la plataforma sabe qué mandó y cuándo;
+ * la entrega real y la lectura viven en WhatsApp y no llegan al CRM.
+ */
+function MessagesBadge({
+  deliveryAt,
+  followupAt,
+}: {
+  deliveryAt: string | null;
+  followupAt: string | null;
+}) {
+  if (!deliveryAt && !followupAt) return null;
+  const done = followupAt ?? deliveryAt;
+  const label = followupAt ? "Encuesta" : "Aviso";
+  const detalle = followupAt
+    ? `Encuesta de 7 días enviada el ${formatDay(followupAt)}`
+    : `Confirmación de entrega enviada el ${formatDay(deliveryAt)}`;
+  return (
+    <span
+      className={`text-[9px] uppercase tracking-wide px-1 py-px rounded font-medium flex-shrink-0 ${
+        followupAt
+          ? "bg-violet-100 text-violet-700 dark:bg-violet-500/15 dark:text-violet-300"
+          : "bg-teal-100 text-teal-700 dark:bg-teal-500/15 dark:text-teal-300"
+      }`}
+      title={`${detalle}. El CRM registra el envío, no si el cliente lo leyó.`}
+      data-sent-at={done ?? undefined}
+    >
+      {label}
+    </span>
+  );
+}
+
+function formatDay(iso: string | null): string {
+  if (!iso) return "—";
+  return new Date(iso).toLocaleDateString("es-MX", {
+    day: "numeric",
+    month: "short",
+  });
 }
 
 function ResolvedBadge() {

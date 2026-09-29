@@ -151,6 +151,7 @@ export function PipelineBoard({
     dateTo: null,
     advisorId: null,
     customerSuccessId: null,
+    pendingFollowupOnly: false,
     query: "",
     channel: "all",
   });
@@ -337,8 +338,12 @@ export function PipelineBoard({
     // El filtro por Customer Success también es exclusivo de Post-venta: al
     // salir se limpia, o quedaría un filtro activo invisible (su select no
     // se pinta en Venta/Outbound) devolviendo cero resultados sin explicación.
+    // Lo mismo vale para "Sin encuesta enviada": sus sellos solo existen en
+    // Post-venta, así que fuera de ahí vaciaría el tablero sin explicación.
     const nextFilters: ActiveFilters =
-      next === "post_venta" ? filters : { ...filters, customerSuccessId: null };
+      next === "post_venta"
+        ? filters
+        : { ...filters, customerSuccessId: null, pendingFollowupOnly: false };
     if (nextFilters !== filters) setFilters(nextFilters);
     const res = await loadInitialPipelineState({
       funnel: next,
@@ -764,6 +769,7 @@ function filtersToPayload(
   dateTo?: string;
   advisorId?: UUID;
   customerSuccessId?: UUID;
+  pendingFollowupOnly?: boolean;
   query?: string;
   resolvedScope?: "active" | "resolved";
   channel?: Channel;
@@ -773,6 +779,9 @@ function filtersToPayload(
     dateTo: filters.dateTo ? `${filters.dateTo}T23:59:59.999Z` : undefined,
     advisorId: filters.advisorId ?? undefined,
     customerSuccessId: filters.customerSuccessId ?? undefined,
+    // Solo viaja encendido: apagado es el default del server, y omitirlo
+    // deja el payload (y la vista por defecto) idénticos a hoy.
+    pendingFollowupOnly: filters.pendingFollowupOnly || undefined,
     query: filters.query.trim().length > 0 ? filters.query.trim() : undefined,
     resolvedScope: resolvedView ? "resolved" : undefined,
     // "all" es el default del server (sin corte) → se omite para no ensuciar

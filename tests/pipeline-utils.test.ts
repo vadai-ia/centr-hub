@@ -43,6 +43,8 @@ function makeOpp(overrides: Partial<KanbanOpportunity> = {}): KanbanOpportunity 
     is_outbound: false,
     overridden_tag_advisor_id: null,
     customer_success_membership_id: null,
+    delivery_message_sent_at: null,
+    followup_message_sent_at: null,
     contact: {
       id: "contact-1",
       full_name: "Ana Pérez",

@@ -424,6 +424,12 @@ export interface KanbanOpportunity {
   /** Customer Success asignado (0047). Segunda ranura, independiente del
    *  asesor. Solo se puebla en Post-venta. */
   customer_success_membership_id: UUID | null;
+  /** Cuándo salió la confirmación de entrega al cliente (0049). NULL = no se
+   *  le ha escrito. Post-venta necesita ver esto en la card: el dato existía
+   *  solo en BD y la pregunta diaria es "¿a quién le falta?". */
+  delivery_message_sent_at: string | null;
+  /** Cuándo salió la encuesta de los 7 días (0049). NULL = no enviada. */
+  followup_message_sent_at: string | null;
   contact: KanbanContactEmbed | null;
 }
 
@@ -451,6 +457,8 @@ const KANBAN_OPPORTUNITY_SELECT = `
   is_outbound,
   overridden_tag_advisor_id,
   customer_success_membership_id,
+  delivery_message_sent_at,
+  followup_message_sent_at,
   contact:contacts!inner (
     id,
     full_name,
@@ -533,6 +541,12 @@ export async function listKanbanOpportunities(opts: {
    *  si se pasan ambos, se AND-ean. Solo tiene sentido en Post-venta (en los
    *  otros funnels la columna siempre es NULL). */
   customerSuccessId?: UUID;
+  /** "A quién le falta la encuesta" (0049): true deja SOLO las opps sin
+   *  `followup_message_sent_at`. Es la pregunta operativa de Post-venta —
+   *  mirar quién YA la recibió se resuelve con el badge de la card. Como la
+   *  columna solo se puebla en Post-venta, en otros funnels no filtraría
+   *  nada útil: la server action lo restringe a ese funnel. */
+  pendingFollowupOnly?: boolean;
 }): Promise<KanbanOpportunity[]> {
   const { supabase, organizationId } = getTenantScopedClient();
 
@@ -582,6 +596,11 @@ export async function listKanbanOpportunities(opts: {
   }
   if (opts.customerSuccessId) {
     query = query.eq("customer_success_membership_id", opts.customerSuccessId);
+  }
+  // Mismo predicado en lista y conteo: un badge de etapa que cuente con otro
+  // criterio que las cards listadas es un número que nadie puede explicar.
+  if (opts.pendingFollowupOnly) {
+    query = query.is("followup_message_sent_at", null);
   }
   if (opts.dateFrom) query = query.gte("effective_created_at", opts.dateFrom);
   if (opts.dateTo) query = query.lte("effective_created_at", opts.dateTo);
@@ -686,6 +705,9 @@ export async function countKanbanOpportunitiesByStage(opts: {
   /** Filtro por Customer Success (0047) — mismo eje que en
    *  `listKanbanOpportunities`; mantiene el conteo alineado con la lista. */
   customerSuccessId?: UUID;
+  /** "Sin encuesta enviada" (0049) — mismo eje que en
+   *  `listKanbanOpportunities`; mantiene el conteo alineado con la lista. */
+  pendingFollowupOnly?: boolean;
 }): Promise<{ counts: Record<UUID, number>; hiddenCounts: Record<UUID, number> }> {
   const { supabase, organizationId } = getTenantScopedClient();
 
@@ -732,6 +754,11 @@ export async function countKanbanOpportunitiesByStage(opts: {
   }
   if (opts.customerSuccessId) {
     query = query.eq("customer_success_membership_id", opts.customerSuccessId);
+  }
+  // Mismo predicado en lista y conteo: un badge de etapa que cuente con otro
+  // criterio que las cards listadas es un número que nadie puede explicar.
+  if (opts.pendingFollowupOnly) {
+    query = query.is("followup_message_sent_at", null);
   }
   if (opts.dateFrom) query = query.gte("effective_created_at", opts.dateFrom);
   if (opts.dateTo) query = query.lte("effective_created_at", opts.dateTo);

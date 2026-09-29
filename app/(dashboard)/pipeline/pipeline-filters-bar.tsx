@@ -13,6 +13,9 @@ export interface ActiveFilters {
   /** Customer Success (0047): UUID de membership o null. Eje independiente
    *  del asesor — se pueden combinar. Solo aplica en Post-venta. */
   customerSuccessId: UUID | null;
+  /** "Sin encuesta enviada" (0049): true deja solo las opps a las que aún no
+   *  les salió el mensaje de los 7 días. Solo aplica en Post-venta. */
+  pendingFollowupOnly: boolean;
   query: string;
   /** Corte por canal (Todo/Outbound/Inbound) — misma definición que el
    *  dashboard. "all" (default) = sin corte, vista actual sin cambios. */
@@ -103,6 +106,7 @@ export function PipelineFiltersBar({
     filters.dateTo !== null ||
     filters.advisorId !== null ||
     filters.customerSuccessId !== null ||
+    filters.pendingFollowupOnly ||
     filters.channel !== "all" ||
     (filters.query.trim().length > 0);
 
@@ -113,6 +117,7 @@ export function PipelineFiltersBar({
       dateTo: null,
       advisorId: null,
       customerSuccessId: null,
+      pendingFollowupOnly: false,
       query: "",
       channel: "all",
     });
@@ -265,6 +270,23 @@ export function PipelineFiltersBar({
             </option>
           ))}
         </select>
+      )}
+
+      {/* Pendientes de encuesta: la pregunta diaria de Post-venta es "¿a
+          quién le falta?". Quién YA la recibió se ve en el badge de la card,
+          así que aquí solo se ofrece el pendiente. */}
+      {showCustomerSuccessFilter && (
+        <label className="flex items-center gap-1.5 text-sm text-gray-700 dark:text-gray-200 select-none">
+          <input
+            type="checkbox"
+            checked={filters.pendingFollowupOnly}
+            onChange={(e) =>
+              onChange({ ...filters, pendingFollowupOnly: e.target.checked })
+            }
+            className="rounded border-gray-300 dark:border-gray-600 text-amber-500 focus:ring-amber-400"
+          />
+          Sin encuesta enviada
+        </label>
       )}
 
       {hasAnyFilter && (
