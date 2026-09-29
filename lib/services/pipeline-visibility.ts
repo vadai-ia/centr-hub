@@ -8,6 +8,7 @@ import {
   HIDE_CLOSED_DAYS_MIN,
   TIMEZONE,
 } from "@/lib/constants";
+import { readOrganizationTimezone } from "@/lib/services/organization-timezone";
 import type { Json, PipelineStageRow, UUID } from "@/lib/types/database";
 
 /**
@@ -80,6 +81,9 @@ export function computeClosedCutoffIso(days: number): string {
  * del kanban — es visibility-only.
  */
 export function readPipelineMinDateIso(config: Json | null | undefined): string {
+  // El corte es un día CIVIL de la tienda: "desde el 1 de junio" empieza a
+  // medianoche en SU huso, no en el de México.
+  const zone = readOrganizationTimezone(config);
   let raw: unknown;
   if (config && typeof config === "object" && !Array.isArray(config)) {
     const pipeline = (config as Record<string, unknown>).pipeline;
@@ -91,10 +95,10 @@ export function readPipelineMinDateIso(config: Json | null | undefined): string 
     typeof raw === "string" && raw.trim().length > 0
       ? raw.trim()
       : DEFAULT_PIPELINE_MIN_DATE;
-  const dt = DateTime.fromISO(dateStr, { zone: TIMEZONE }).startOf("day");
+  const dt = DateTime.fromISO(dateStr, { zone }).startOf("day");
   const valid = dt.isValid
     ? dt
-    : DateTime.fromISO(DEFAULT_PIPELINE_MIN_DATE, { zone: TIMEZONE }).startOf("day");
+    : DateTime.fromISO(DEFAULT_PIPELINE_MIN_DATE, { zone }).startOf("day");
   return valid.toUTC().toISO() ?? new Date(DEFAULT_PIPELINE_MIN_DATE).toISOString();
 }
 

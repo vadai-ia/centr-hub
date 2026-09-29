@@ -22,6 +22,7 @@ import { listLossReasons } from "@/lib/db/pipeline";
 import { listRealVendorsForMapping } from "@/lib/db/users";
 import { getOrganizationById } from "@/lib/db/organizations";
 import { readOrganizationCurrency } from "@/lib/services/organization-currency";
+import { readOrganizationTimezone } from "@/lib/services/organization-timezone";
 import { resolvePipelineSnapshotWindow } from "@/lib/services/dashboard-snapshot-window";
 import {
   resolvePostventaStages,
@@ -195,6 +196,9 @@ export interface VentaRaw {
   boundaries: VentaStageBoundaries;
   lossReasonNames: Map<UUID, string>;
   period: ResolvedPeriod;
+  /** Zona de la organización para bucketizar por mes. Opcional: sin ella
+   *  se usa el default de México, igual que antes del multi-huso. */
+  timezone?: string;
 }
 
 export interface PostventaRaw {
@@ -203,11 +207,14 @@ export interface PostventaRaw {
   liveOpps: LivePostventaRow[];
   postventaStages: PostventaStageInfo;
   period: ResolvedPeriod;
+  /** Zona de la organización para bucketizar por mes. Opcional: sin ella
+   *  se usa el default de México, igual que antes del multi-huso. */
+  timezone?: string;
 }
 
-function emptyMonths(period: ResolvedPeriod): Map<string, number> {
+function emptyMonths(period: ResolvedPeriod, zone?: string): Map<string, number> {
   const map = new Map<string, number>();
-  for (const key of monthKeysInPeriod(period)) map.set(key, 0);
+  for (const key of monthKeysInPeriod(period, zone)) map.set(key, 0);
   return map;
 }
 
@@ -327,11 +334,11 @@ export function computeVentaMetrics(
   const quotesSent = tally.quotes;
 
   // Serie de revenue por mes (bucketización; el total ya vino del tally).
-  const monthRevenue = emptyMonths(raw.period);
+  const monthRevenue = emptyMonths(raw.period, raw.timezone);
   for (const o of raw.paidOrders) {
     if (!matchScope(o.assigned_advisor_id, scope) || !matchChannel(o.is_outbound, channel)) continue;
     if (o.paid_at) {
-      const key = monthKeyInTz(o.paid_at);
+      const key = monthKeyInTz(o.paid_at, raw.timezone);
       if (monthRevenue.has(key)) {
         monthRevenue.set(key, monthRevenue.get(key)! + Number(o.subtotal));
       }
@@ -599,7 +606,7 @@ export function computePostventaMetrics(
     ordersCount += 1;
     // Bucket por la fecha real de creación en Shopify (migración 0024),
     // no por `created_at` de BD.
-    const key = monthKeyInTz(o.shopify_created_at);
+    const key = monthKeyInTz(o.shopify_created_at, raw.timezone);
     if (monthOrders.has(key)) monthOrders.set(key, monthOrders.get(key)! + 1);
   }
 
@@ -660,11 +667,17 @@ export async function computeDashboardData(input: ComputeDashboardInput): Promis
   // un número recortado que no se declara se lee como si fuera el total.
   const org = await getOrganizationById(input.organizationId);
   const snapshotWindow = resolvePipelineSnapshotWindow(org?.config ?? null);
+  // Zona de la tienda: decide en qué mes cae cada venta de la primera hora
+  // del día 1. Con la de México, una venta de Bogotá a las 00:30 se iría al
+  // mes anterior.
+  const timezone = readOrganizationTimezone(org?.config ?? null);
 
-  const [ventaRaw, postventaRaw] = await Promise.all([
+  const [ventaRawBase, postventaRawBase] = await Promise.all([
     fetchVentaRaw(input.period, snapshotWindow.sinceUtc),
     fetchPostventaRaw(input.period),
   ]);
+  const ventaRaw = { ...ventaRawBase, timezone };
+  const postventaRaw = { ...postventaRawBase, timezone };
 
   const venta = computeVentaMetrics(ventaRaw, scope, channel);
   const postventa = computePostventaMetrics(postventaRaw, scope, channel);

@@ -1,5 +1,5 @@
 import { DateTime } from "luxon";
-import { TIMEZONE } from "@/lib/constants";
+import { readOrganizationTimezone } from "@/lib/services/organization-timezone";
 
 /**
  * Ventana del SNAPSHOT de pipeline del dashboard — corte por antigüedad.
@@ -67,7 +67,10 @@ export function resolvePipelineSnapshotWindow(
   const sinceDate = raw.trim();
   if (sinceDate.length === 0) return NO_SNAPSHOT_WINDOW;
 
-  const dt = DateTime.fromISO(sinceDate, { zone: TIMEZONE }).startOf("day");
+  // Día civil de la tienda, no de México (ver organization-timezone).
+  const dt = DateTime.fromISO(sinceDate, {
+    zone: readOrganizationTimezone(config as never),
+  }).startOf("day");
   if (!dt.isValid) return NO_SNAPSHOT_WINDOW;
 
   return { sinceDate: dt.toFormat("yyyy-MM-dd"), sinceUtc: dt.toUTC().toISO()! };

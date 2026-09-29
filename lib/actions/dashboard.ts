@@ -1,6 +1,8 @@
 "use server";
 import { z } from "zod";
 import { getSession } from "@/lib/auth/session";
+import { getOrganizationById } from "@/lib/db/organizations";
+import { readOrganizationTimezone } from "@/lib/services/organization-timezone";
 import { canSeeAllData } from "@/lib/auth/capabilities";
 import { withTenantContext } from "@/lib/tenant/context";
 import { getMembership, listRealVendorsForMapping } from "@/lib/db/users";
@@ -70,20 +72,21 @@ export type DashboardFiltersInput = z.infer<typeof filtersSchema>;
 
 function resolvePeriod(
   input: DashboardFiltersInput,
+  zone?: string,
 ): { ok: true; period: ResolvedPeriod } | { ok: false } {
   if (input.preset === "custom" || input.preset === "week") {
     if (!input.customFrom || !input.customTo) return { ok: false };
-    const res = resolveCustomPeriod(input.customFrom, input.customTo);
+    const res = resolveCustomPeriod(input.customFrom, input.customTo, zone);
     if (!res.ok) return { ok: false };
     return { ok: true, period: res.period };
   }
   if (input.preset === "month") {
     if (!input.month) return { ok: false };
-    const period = resolveMonthPeriod(input.month);
+    const period = resolveMonthPeriod(input.month, zone);
     if (!period) return { ok: false };
     return { ok: true, period };
   }
-  return { ok: true, period: resolvePresetPeriod(input.preset as never) };
+  return { ok: true, period: resolvePresetPeriod(input.preset as never, zone) };
 }
 
 export async function loadDashboardAction(raw: unknown): Promise<DashboardLoadResult> {
@@ -98,21 +101,28 @@ export async function loadDashboardAction(raw: unknown): Promise<DashboardLoadRe
     return { ok: false, reason: "no_session", message: "Sesión expirada. Vuelve a iniciar sesión." };
   }
 
-  const period = resolvePeriod(input);
-  if (!period.ok) {
-    return {
-      ok: false,
-      reason: "invalid_period",
-      message: "Rango de fechas inválido: la fecha 'desde' debe ser anterior o igual a 'hasta'.",
-    };
-  }
-
   const orgId = session.data.activeOrg.id;
   const userId = session.data.userId;
   // "Sees all data" (admin/superadmin/SDR) vs "own only" (vendedor) — 0039.
   const isAdmin = canSeeAllData(session.data.activeRole);
 
   return withTenantContext(orgId, async () => {
+    // "Hoy" y los cortes de mes se evalúan en la zona de la TIENDA, no en la
+    // de México: por eso el periodo se resuelve aquí dentro y no antes de
+    // tener la organización a la mano.
+    const timezone = readOrganizationTimezone(
+      (await getOrganizationById(orgId))?.config ?? null,
+    );
+    const period = resolvePeriod(input, timezone);
+    if (!period.ok) {
+      return {
+        ok: false as const,
+        reason: "invalid_period" as const,
+        message:
+          "Rango de fechas inválido: la fecha 'desde' debe ser anterior o igual a 'hasta'.",
+      };
+    }
+
     // Vendedor: scope forzado a su propia membership; ignora filtro de
     // asesor. Admin: traduce el filtro de asesor a scope.
     let scope: UUID | "unassigned" | undefined;

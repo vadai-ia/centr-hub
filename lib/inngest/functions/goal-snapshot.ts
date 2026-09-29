@@ -1,7 +1,8 @@
 import "server-only";
 import { getInngestClient } from "@/lib/inngest/client";
 import { withTenantContext } from "@/lib/tenant/context";
-import { listAllOrganizationIds } from "@/lib/db/organizations";
+import { getOrganizationById, listAllOrganizationIds } from "@/lib/db/organizations";
+import { readOrganizationTimezone } from "@/lib/services/organization-timezone";
 import { recordAuditEvent } from "@/lib/db/operational";
 import { snapshotMonthlyGoals } from "@/lib/services/goal-snapshot";
 import { previousMonthDateKey, resolvePreviousMonthPeriod } from "@/lib/time/period";
@@ -28,13 +29,27 @@ export const goalSnapshotCron = inngest.createFunction(
     triggers: [{ cron: "TZ=America/Mexico_City 0 1 1 * *" }],
   },
   async () => {
-    const period = resolvePreviousMonthPeriod();
-    const periodMonth = previousMonthDateKey();
     const orgIds = await listAllOrganizationIds();
     let writtenTotal = 0;
+    // Solo para el valor de retorno: el mes REAL congelado se calcula por
+    // organización, porque el borde del mes depende de su zona.
+    let lastPeriodMonth = previousMonthDateKey();
 
     for (const orgId of orgIds) {
       try {
+        // El mes que cierra se corta en la zona de CADA tienda. El cron
+        // dispara a la 01:00 de México; para una tienda en Bogotá (una hora
+        // adelante) las ventas de la primera hora del día 1 pertenecen al mes
+        // NUEVO, y cortarlas con la zona de México las congelaría en el mes
+        // que acaba de cerrar — revenue de octubre dentro del snapshot de
+        // septiembre, ya inmutable.
+        const timezone = readOrganizationTimezone(
+          (await getOrganizationById(orgId))?.config ?? null,
+        );
+        const period = resolvePreviousMonthPeriod(timezone);
+        const periodMonth = previousMonthDateKey(timezone);
+        lastPeriodMonth = periodMonth;
+
         const res = await withTenantContext(
           orgId,
           () => snapshotMonthlyGoals({ period, periodMonth }),
@@ -66,7 +81,7 @@ export const goalSnapshotCron = inngest.createFunction(
       }
     }
 
-    return { organizations: orgIds.length, periodMonth, writtenTotal };
+    return { organizations: orgIds.length, periodMonth: lastPeriodMonth, writtenTotal };
   },
 );
 

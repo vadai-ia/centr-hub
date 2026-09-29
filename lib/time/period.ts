@@ -13,6 +13,23 @@ import { TIMEZONE } from "@/lib/constants";
  *
  * Semántica de los presets: "últimos N días" inclusivos del día de
  * hoy en MX. `today` = solo hoy. `7d` = hoy + los 6 días previos, etc.
+ *
+ * ## Zona por ORGANIZACIÓN (multi-tienda)
+ *
+ * Cada función acepta `zone` como ÚLTIMO parámetro, con default
+ * `TIMEZONE` (America/Mexico_City). El default no es pereza: es la garantía
+ * de que agregar una tienda en otro huso NO mueve ni un minuto los cortes de
+ * las que ya operan — quien no pasa zona obtiene el comportamiento anterior,
+ * bit a bit.
+ *
+ * Quién SÍ debe pasarla: todo lo que corra en el contexto de una organización
+ * concreta (acciones del dashboard, Mi Día, metas, y el cron de snapshot
+ * mensual DENTRO de su bucle por org). La zona sale de
+ * `readOrganizationTimezone(org.config)`.
+ *
+ * Por qué importa: entre Bogotá (UTC-5) y CDMX (UTC-6) hay una hora. Una venta
+ * de las 00:30 del día 1 en Colombia cae en el mes ANTERIOR si se corta con la
+ * zona de México — una hora de ventas mal atribuida en cada cierre de mes.
  */
 
 export const PERIOD_PRESETS = ["today", "7d", "30d", "90d"] as const;
@@ -37,8 +54,8 @@ export interface ResolvedPeriod {
   endLabel: string;
 }
 
-function nowInTz(): DateTime {
-  return DateTime.now().setZone(TIMEZONE);
+function nowInTz(zone: string = TIMEZONE): DateTime {
+  return DateTime.now().setZone(zone);
 }
 
 function toResolved(start: DateTime, end: DateTime): ResolvedPeriod {
@@ -55,10 +72,13 @@ function toResolved(start: DateTime, end: DateTime): ResolvedPeriod {
  * un usuario que abre el dashboard a las 23:00 MX ve el día correcto
  * aunque el servidor esté en UTC (donde ya sería el día siguiente).
  */
-export function resolvePresetPeriod(preset: PeriodPreset): ResolvedPeriod {
+export function resolvePresetPeriod(
+  preset: PeriodPreset,
+  zone: string = TIMEZONE,
+): ResolvedPeriod {
   const days = PRESET_DAYS[preset];
-  const todayEnd = nowInTz().endOf("day");
-  const start = nowInTz()
+  const todayEnd = nowInTz(zone).endOf("day");
+  const start = nowInTz(zone)
     .startOf("day")
     .minus({ days: days - 1 });
   return toResolved(start, todayEnd);
@@ -71,19 +91,21 @@ export function resolvePresetPeriod(preset: PeriodPreset): ResolvedPeriod {
  * miden el mes corriente. Inclusivo en ambos extremos (mismos límites que
  * los presets, vía toResolved).
  */
-export function resolveCurrentMonthPeriod(): ResolvedPeriod {
-  const now = nowInTz();
+export function resolveCurrentMonthPeriod(
+  zone: string = TIMEZONE,
+): ResolvedPeriod {
+  const now = nowInTz(zone);
   return toResolved(now.startOf("month"), now.endOf("month"));
 }
 
 /** Clave del mes en curso (`yyyy-MM`) en MX. Para labels y period_month. */
-export function currentMonthKey(): string {
-  return nowInTz().toFormat("yyyy-MM");
+export function currentMonthKey(zone: string = TIMEZONE): string {
+  return nowInTz(zone).toFormat("yyyy-MM");
 }
 
 /** Los últimos `n` meses (`yyyy-MM`, MX), del en curso hacia atrás. */
-export function recentMonthKeys(n: number): string[] {
-  const now = nowInTz().startOf("month");
+export function recentMonthKeys(n: number, zone: string = TIMEZONE): string[] {
+  const now = nowInTz(zone).startOf("month");
   return Array.from({ length: Math.max(0, n) }, (_, i) =>
     now.minus({ months: i }).toFormat("yyyy-MM"),
   );
@@ -109,11 +131,14 @@ export interface WeekSegment {
  * semana futura daría un tablero en ceros indistinguible de un bug. "Hoy" se
  * resuelve en America/Mexico_City, no en el reloj del servidor.
  */
-export function weeksOfMonth(monthKey: string): WeekSegment[] {
-  const month = DateTime.fromFormat(monthKey, "yyyy-MM", { zone: TIMEZONE });
+export function weeksOfMonth(
+  monthKey: string,
+  zone: string = TIMEZONE,
+): WeekSegment[] {
+  const month = DateTime.fromFormat(monthKey, "yyyy-MM", { zone });
   if (!month.isValid) return [];
   const monthEnd = month.endOf("month").startOf("day");
-  const today = nowInTz().startOf("day");
+  const today = nowInTz(zone).startOf("day");
   const out: WeekSegment[] = [];
   let cursor = month.startOf("month");
   while (cursor <= monthEnd && cursor <= today) {
@@ -142,12 +167,15 @@ export function weeksOfMonth(monthKey: string): WeekSegment[] {
  * America/Mexico_City como todo lo demás — con `new Date()` en el navegador,
  * alguien en otra zona vería un mes de más o de menos (CLAUDE.md "Timezone").
  */
-export function monthSelectorOptions(years = 5): {
+export function monthSelectorOptions(
+  years = 5,
+  zone: string = TIMEZONE,
+): {
   years: number[];
   currentYear: number;
   currentMonth: number;
 } {
-  const now = nowInTz();
+  const now = nowInTz(zone);
   const currentYear = now.year;
   return {
     years: Array.from({ length: years }, (_, i) => currentYear - i),
@@ -161,14 +189,19 @@ export function monthSelectorOptions(years = 5): {
  * snapshot mensual (corre el día 1): al dispararse, "el mes pasado" es el
  * periodo a congelar. Maneja el cruce de año (1-ene → diciembre previo).
  */
-export function resolvePreviousMonthPeriod(): ResolvedPeriod {
-  const prev = nowInTz().minus({ months: 1 });
+export function resolvePreviousMonthPeriod(
+  zone: string = TIMEZONE,
+): ResolvedPeriod {
+  const prev = nowInTz(zone).minus({ months: 1 });
   return toResolved(prev.startOf("month"), prev.endOf("month"));
 }
 
 /** Primer día (`yyyy-MM-dd`, MX) del mes anterior — valor de `period_month`. */
-export function previousMonthDateKey(): string {
-  return nowInTz().minus({ months: 1 }).startOf("month").toFormat("yyyy-MM-dd");
+export function previousMonthDateKey(zone: string = TIMEZONE): string {
+  return nowInTz(zone)
+    .minus({ months: 1 })
+    .startOf("month")
+    .toFormat("yyyy-MM-dd");
 }
 
 /**
@@ -176,8 +209,11 @@ export function previousMonthDateKey(): string {
  * Para snapshots manuales/correctivos de un mes específico. `null` si la
  * clave no es válida.
  */
-export function resolveMonthPeriod(monthKey: string): ResolvedPeriod | null {
-  const dt = DateTime.fromFormat(monthKey, "yyyy-MM", { zone: TIMEZONE });
+export function resolveMonthPeriod(
+  monthKey: string,
+  zone: string = TIMEZONE,
+): ResolvedPeriod | null {
+  const dt = DateTime.fromFormat(monthKey, "yyyy-MM", { zone });
   if (!dt.isValid) return null;
   return toResolved(dt.startOf("month"), dt.endOf("month"));
 }
@@ -202,9 +238,10 @@ export type CustomPeriodResult = CustomPeriodValid | CustomPeriodInvalid;
 export function resolveCustomPeriod(
   fromDate: string,
   toDate: string,
+  zone: string = TIMEZONE,
 ): CustomPeriodResult {
-  const start = DateTime.fromISO(fromDate, { zone: TIMEZONE }).startOf("day");
-  const end = DateTime.fromISO(toDate, { zone: TIMEZONE }).endOf("day");
+  const start = DateTime.fromISO(fromDate, { zone }).startOf("day");
+  const end = DateTime.fromISO(toDate, { zone }).endOf("day");
   if (!start.isValid || !end.isValid) {
     return { ok: false, reason: "invalid_format" };
   }
@@ -220,9 +257,9 @@ export function resolveCustomPeriod(
  * 23:30 MX del 31-may cae en mayo, no en junio (que sería el bucket
  * si se usara UTC crudo).
  */
-export function monthKeyInTz(utcIso: string): string {
+export function monthKeyInTz(utcIso: string, zone: string = TIMEZONE): string {
   return DateTime.fromISO(utcIso, { zone: "utc" })
-    .setZone(TIMEZONE)
+    .setZone(zone)
     .toFormat("yyyy-MM");
 }
 
@@ -232,12 +269,15 @@ export function monthKeyInTz(utcIso: string): string {
  * saltárselos. Tope defensivo de 36 meses para periodos custom muy
  * amplios — más allá la gráfica por mes deja de ser legible.
  */
-export function monthKeysInPeriod(period: ResolvedPeriod): string[] {
+export function monthKeysInPeriod(
+  period: ResolvedPeriod,
+  zone: string = TIMEZONE,
+): string[] {
   let cursor = DateTime.fromISO(period.startUtc, { zone: "utc" })
-    .setZone(TIMEZONE)
+    .setZone(zone)
     .startOf("month");
   const last = DateTime.fromISO(period.endUtc, { zone: "utc" })
-    .setZone(TIMEZONE)
+    .setZone(zone)
     .startOf("month");
   const keys: string[] = [];
   let guard = 0;
@@ -253,8 +293,8 @@ export function monthKeysInPeriod(period: ResolvedPeriod): string[] {
  * Etiqueta legible del mes (`may 2026`) para el eje de las gráficas,
  * a partir de la clave `yyyy-MM`. En español, zona MX.
  */
-export function monthLabel(monthKey: string): string {
-  return DateTime.fromFormat(monthKey, "yyyy-MM", { zone: TIMEZONE })
+export function monthLabel(monthKey: string, zone: string = TIMEZONE): string {
+  return DateTime.fromFormat(monthKey, "yyyy-MM", { zone })
     .setLocale("es")
     .toFormat("LLL yyyy");
 }
@@ -275,8 +315,11 @@ export function daysBetween(startUtc: string, endUtc: string): number {
  * tareas/avisos en Atrasadas/Hoy según estos límites — NUNCA con
  * `new Date()` crudo del servidor (CLAUDE.md "Timezone").
  */
-export function todayBoundsUtc(): { startUtc: string; endUtc: string } {
-  const now = DateTime.now().setZone(TIMEZONE);
+export function todayBoundsUtc(zone: string = TIMEZONE): {
+  startUtc: string;
+  endUtc: string;
+} {
+  const now = DateTime.now().setZone(zone);
   return {
     startUtc: now.startOf("day").toUTC().toISO()!,
     endUtc: now.endOf("day").toUTC().toISO()!,
@@ -284,9 +327,9 @@ export function todayBoundsUtc(): { startUtc: string; endUtc: string } {
 }
 
 /** Fin del día de HOY + 6 días (fin de "esta semana") en UTC ISO, zona MX. */
-export function endOfWeekWindowUtc(): string {
+export function endOfWeekWindowUtc(zone: string = TIMEZONE): string {
   return DateTime.now()
-    .setZone(TIMEZONE)
+    .setZone(zone)
     .endOf("day")
     .plus({ days: 6 })
     .toUTC()
@@ -300,8 +343,11 @@ export function endOfWeekWindowUtc(): string {
  * 9:00 y 9:59 — aceptable y comunicado, CLAUDE.md). Cuida el borde
  * 23:55 → "mañana" es el día calendario siguiente en MX, no en UTC.
  */
-export function snoozeUntilUtc(option: "1h" | "3h" | "tomorrow"): string {
-  const now = DateTime.now().setZone(TIMEZONE);
+export function snoozeUntilUtc(
+  option: "1h" | "3h" | "tomorrow",
+  zone: string = TIMEZONE,
+): string {
+  const now = DateTime.now().setZone(zone);
   if (option === "1h") return now.plus({ hours: 1 }).toUTC().toISO()!;
   if (option === "3h") return now.plus({ hours: 3 }).toUTC().toISO()!;
   return now
@@ -312,20 +358,20 @@ export function snoozeUntilUtc(option: "1h" | "3h" | "tomorrow"): string {
 }
 
 /** Clave de día (`yyyy-MM-dd`) de un timestamp UTC, evaluada en MX. */
-export function dayKeyInTz(utcIso: string): string {
+export function dayKeyInTz(utcIso: string, zone: string = TIMEZONE): string {
   return DateTime.fromISO(utcIso, { zone: "utc" })
-    .setZone(TIMEZONE)
+    .setZone(zone)
     .toFormat("yyyy-MM-dd");
 }
 
 /** Clave de día (`yyyy-MM-dd`) de HOY en MX. */
-export function todayKeyInTz(): string {
-  return DateTime.now().setZone(TIMEZONE).toFormat("yyyy-MM-dd");
+export function todayKeyInTz(zone: string = TIMEZONE): string {
+  return DateTime.now().setZone(zone).toFormat("yyyy-MM-dd");
 }
 
 /** Las últimas N claves de día (`yyyy-MM-dd`) en MX, de la más vieja a hoy. */
-export function lastNDayKeys(n: number): string[] {
-  const today = DateTime.now().setZone(TIMEZONE).startOf("day");
+export function lastNDayKeys(n: number, zone: string = TIMEZONE): string[] {
+  const today = DateTime.now().setZone(zone).startOf("day");
   const keys: string[] = [];
   for (let i = n - 1; i >= 0; i--) {
     keys.push(today.minus({ days: i }).toFormat("yyyy-MM-dd"));

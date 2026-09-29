@@ -1,5 +1,8 @@
 import "server-only";
 import { getTenantScopedClient } from "@/lib/db/client";
+import { getCurrentOrganizationId } from "@/lib/tenant/context";
+import { getOrganizationById } from "@/lib/db/organizations";
+import { readOrganizationTimezone } from "@/lib/services/organization-timezone";
 import {
   listTasksForUser,
   listOutboundTasks,
@@ -130,9 +133,14 @@ export async function loadMiDiaForUser(input: {
    */
   outboundView?: boolean;
 }): Promise<MiDiaData> {
-  const { startUtc, endUtc } = todayBoundsUtc();
-  const weekEndUtc = endOfWeekWindowUtc();
-  const todayKey = todayKeyInTz();
+  // "Hoy" en la zona de la TIENDA: para un vendedor en Bogotá, lo vencido
+  // a las 23:30 de su día no puede contarse ya como el día siguiente.
+  const timezone = readOrganizationTimezone(
+    (await getOrganizationById(getCurrentOrganizationId()))?.config ?? null,
+  );
+  const { startUtc, endUtc } = todayBoundsUtc(timezone);
+  const weekEndUtc = endOfWeekWindowUtc(timezone);
+  const todayKey = todayKeyInTz(timezone);
 
   const [tasks, notifications, stages] = await Promise.all([
     input.outboundView ? listOutboundTasks() : listTasksForUser(input.userId),
@@ -244,7 +252,7 @@ export async function loadMiDiaForUser(input: {
     input.advisorMembershipId
       ? loadSilentClients(input.advisorMembershipId)
       : Promise.resolve([]),
-    Promise.resolve(buildWeekHistogram(tasks)),
+    Promise.resolve(buildWeekHistogram(tasks, timezone)),
   ]);
   const streak = computeStreak(tasks, todayKey);
 
@@ -275,15 +283,15 @@ function countCompletedToday(tasks: TaskRow[], startUtc: string): number {
   return n;
 }
 
-function buildWeekHistogram(tasks: TaskRow[]): MiDiaWeekDay[] {
-  const keys = lastNDayKeys(7);
+function buildWeekHistogram(tasks: TaskRow[], zone?: string): MiDiaWeekDay[] {
+  const keys = lastNDayKeys(7, zone);
   const created = new Map<string, number>();
   const completed = new Map<string, number>();
   for (const t of tasks) {
-    const ck = dayKeyInTz(t.created_at);
+    const ck = dayKeyInTz(t.created_at, zone);
     if (created.has(ck) || keys.includes(ck)) created.set(ck, (created.get(ck) ?? 0) + 1);
     if (t.completed_at) {
-      const dk = dayKeyInTz(t.completed_at);
+      const dk = dayKeyInTz(t.completed_at, zone);
       if (keys.includes(dk)) completed.set(dk, (completed.get(dk) ?? 0) + 1);
     }
   }

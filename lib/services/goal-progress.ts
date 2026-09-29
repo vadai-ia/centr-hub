@@ -6,6 +6,7 @@ import {
 } from "@/lib/services/dashboard-metrics";
 import { achievedForMetric, closeRateOf, type CloseRate } from "@/lib/metas/achievement";
 import { readGoalThresholds } from "@/lib/services/metas-config";
+import { readOrganizationTimezone } from "@/lib/services/organization-timezone";
 import { listGoals } from "@/lib/db/metas";
 import { getOrganizationById } from "@/lib/db/organizations";
 import { listRealVendorsForMapping } from "@/lib/db/users";
@@ -146,7 +147,10 @@ export async function loadAdminGoalProgress(
     listRealVendorsForMapping(organizationId),
   ]);
   const thresholds = readGoalThresholds(org?.config ?? null);
-  const period = resolveCurrentMonthPeriod();
+  // El mes en curso se corta en la zona de la tienda: el avance se reinicia
+  // a medianoche de SU día 1, no del de México.
+  const timezone = readOrganizationTimezone(org?.config ?? null);
+  const period = resolveCurrentMonthPeriod(timezone);
 
   const nameById = new Map(vendors.map((v) => [v.id, v.profile.full_name]));
   const colorById = new Map(vendors.map((v) => [v.id, v.profile.color]));
@@ -200,7 +204,7 @@ export async function loadAdminGoalProgress(
 
   return {
     thresholds,
-    monthKey: currentMonthKey(),
+    monthKey: currentMonthKey(timezone),
     team,
     organic,
     byVendor,
@@ -257,6 +261,7 @@ export async function loadVendorGoalProgress(
     listMeasuredGoals(),
   ]);
   const thresholds = readGoalThresholds(org?.config ?? null);
+  const timezone = readOrganizationTimezone(org?.config ?? null);
   // Un vendedor ve SOLO sus metas: ni la de equipo ni la orgánica (que no es
   // de nadie en particular). El scoping vive aquí, no en la UI.
   const mine = goals.filter(
@@ -264,17 +269,22 @@ export async function loadVendorGoalProgress(
   );
   // Sin membership (usuario sin cartera en la org) no hay nada que medir.
   if (!membershipId) {
-    return { thresholds, monthKey: currentMonthKey(), goals: [], closeRate: closeRateOf(ZERO) };
+    return {
+      thresholds,
+      monthKey: currentMonthKey(timezone),
+      goals: [],
+      closeRate: closeRateOf(ZERO),
+    };
   }
   // Se computa aunque no tenga metas: su % de cierre es automático.
-  const period = resolveCurrentMonthPeriod();
+  const period = resolveCurrentMonthPeriod(timezone);
   const [ach] = await computeGoalAchievement(period, [
     { kind: "advisor", membershipId },
   ]);
   const progress = mine.map((g) => toProgress(g, achievedFor(g.metric, ach), thresholds, null));
   return {
     thresholds,
-    monthKey: currentMonthKey(),
+    monthKey: currentMonthKey(timezone),
     goals: progress,
     closeRate: closeRateOf(ach),
   };
