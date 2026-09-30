@@ -3,8 +3,13 @@ import { DateTime } from "luxon";
 import { getOpportunityById, updateOpportunity } from "@/lib/db/opportunities";
 import { getTenantScopedClient } from "@/lib/db/client";
 import { recordAuditEvent } from "@/lib/db/operational";
-import { pushPostventaStage } from "@/lib/whaapy-postventa/push-service";
-import { POSTVENTA_FOLLOWUP_DELAY_DAYS } from "@/lib/whaapy-postventa/config";
+import { getContactById } from "@/lib/db/contacts";
+import { normalizePhone } from "@/lib/services/identity-matching";
+import { sendPostventaTemplate } from "@/lib/whaapy-postventa/send-template";
+import {
+  POSTVENTA_FOLLOWUP_DELAY_DAYS,
+  POSTVENTA_SURVEY_TEMPLATE,
+} from "@/lib/whaapy-postventa/config";
 import { resolvePostventaStages } from "@/lib/services/dashboard-stages";
 import { moveOpportunityStage } from "@/lib/services/pipeline-move";
 import type { Json, UUID } from "@/lib/types/database";
@@ -33,6 +38,29 @@ import type { Json, UUID } from "@/lib/types/database";
  * número, no solo dinero. La idempotencia vive en
  * `followup_message_sent_at` (0049) y se sella ANTES de considerar el envío
  * exitoso.
+ *
+ * ## Dos disparadores
+ *
+ * - `cron`: los 7 días cumplidos desde el mensaje 1. Es el flujo normal.
+ * - `manual_move`: alguien arrastró la tarjeta a "Seguimiento post-entrega".
+ *   Post-venta lo pidió porque es lo que ya hacían esperando que mandara la
+ *   encuesta. Salta las guardas de TIEMPO (no exige mensaje 1 previo ni los
+ *   7 días) — mover la tarjeta ES la decisión de mandarla — pero NO las de
+ *   elegibilidad: a un caso cancelado, resuelto o problemático no se le
+ *   escribe aunque lo arrastren.
+ *
+ * ## Por qué el envío es DIRECTO y no vía Automation
+ *
+ * La vía anterior movía el contacto a la etapa de Whaapy para que su
+ * Automation mandara el template. Eso falla en silencio con quien YA está
+ * en esa etapa (un cliente recurrente, o el que alguien movió a mano): el
+ * trigger es ENTRAR, no estar. El sello quedaba puesto y el mensaje nunca
+ * salía. Con el scope de mensajes ya activo, la plataforma manda el template
+ * ella misma y el fallo llega como excepción.
+ *
+ * **Requiere que la Automation "Seguimiento 7 días" esté DESACTIVADA** en
+ * Whaapy: si ambas vías estuvieran vivas, el cliente recibiría la encuesta
+ * dos veces.
  */
 
 export type FollowupResult =
@@ -81,25 +109,32 @@ export async function sendPostventaFollowup(input: {
   organizationId: UUID;
   opportunityId: UUID;
   nowIso?: string;
+  /** Qué disparó el envío. "manual_move" salta las guardas de tiempo. */
+  trigger?: "cron" | "manual_move";
 }): Promise<FollowupResult> {
   const { organizationId, opportunityId } = input;
   const nowIso = input.nowIso ?? new Date().toISOString();
+  const manual = input.trigger === "manual_move";
 
   const opp = await getOpportunityById(opportunityId);
   if (!opp) return skip(opportunityId, "opportunity_not_found");
 
   // Idempotencia primero: barata y es la que protege al cliente.
   if (opp.followup_message_sent_at) return skip(opportunityId, "already_sent");
-  if (!opp.delivery_message_sent_at) {
+  // Las guardas de TIEMPO solo aplican al cron: en el move manual la
+  // decisión ya la tomó una persona.
+  if (!manual && !opp.delivery_message_sent_at) {
     return skip(opportunityId, "delivery_message_not_sent");
   }
   if (opp.cancelled_at) return skip(opportunityId, "cancelled");
   if (opp.resolved_at) return skip(opportunityId, "resolved");
 
-  const due = DateTime.fromISO(opp.delivery_message_sent_at).plus({
-    days: POSTVENTA_FOLLOWUP_DELAY_DAYS,
-  });
-  if (DateTime.fromISO(nowIso) < due) return skip(opportunityId, "not_due_yet");
+  if (!manual) {
+    const due = DateTime.fromISO(opp.delivery_message_sent_at!).plus({
+      days: POSTVENTA_FOLLOWUP_DELAY_DAYS,
+    });
+    if (DateTime.fromISO(nowIso) < due) return skip(opportunityId, "not_due_yet");
+  }
 
   const stages = await resolvePostventaStages();
   // "¿Todo funciona correctamente?" a alguien con un caso abierto es el peor
@@ -109,15 +144,26 @@ export async function sendPostventaFollowup(input: {
     return skip(opportunityId, "problem_case");
   }
 
-  // El push a Whaapy dispara la Automation de esa instancia → el mensaje.
-  const push = await pushPostventaStage({
-    organizationId,
-    opportunityId,
-    target: "seguimiento",
-  });
-  if (!push.ok) {
+  // La plataforma manda el template ella misma (ver cabezal): mover la
+  // etapa de Whaapy no dispara nada en quien ya está en ella.
+  const contact = opp.contact_id ? await getContactById(opp.contact_id) : null;
+  const phone = normalizePhone(contact?.phone ?? null);
+  if (!contact || !phone) {
     await audit(opportunityId, "postventa_followup_push_skipped", {
-      reason: push.skipped,
+      reason: "missing_phone",
+    });
+    return { ok: false, reason: "push_failed" };
+  }
+  try {
+    await sendPostventaTemplate(organizationId, {
+      to: phone,
+      templateName: POSTVENTA_SURVEY_TEMPLATE,
+      parameters: [firstName(contact.full_name)],
+    });
+  } catch (error) {
+    await audit(opportunityId, "postventa_followup_push_skipped", {
+      reason: "send_failed",
+      detail: (error as Error).message,
     });
     return { ok: false, reason: "push_failed" };
   }
@@ -138,11 +184,17 @@ export async function sendPostventaFollowup(input: {
   }
 
   await audit(opportunityId, "postventa_followup_message_sent", {
-    whaapy_contact_id: push.whaapyContactId,
+    trigger: input.trigger ?? "cron",
     moved_stage: Boolean(seguimiento && opp.stage_id !== seguimiento.id),
     delivery_message_sent_at: opp.delivery_message_sent_at,
   });
   return { ok: true, sent: true };
+}
+
+/** {{1}} del template. Vacío → saludo genérico antes que "Hola, .". */
+function firstName(fullName: string | null): string {
+  const first = (fullName ?? "").trim().split(/\s+/)[0];
+  return first || "Hola";
 }
 
 async function skip(

@@ -179,6 +179,22 @@ export interface VentaDeliveryMessageEnvelope {
 export const VENTA_DELIVERY_MESSAGE_EVENT =
   "whaapy/venta.delivery_message_requested" as const;
 
+/**
+ * Encuesta disparada por MOVER la tarjeta a "Seguimiento post-entrega"
+ * (Post-venta lo pidió: ya arrastraban tarjetas esperando que enviara).
+ * Va por evento y no inline para heredar los reintentos de Inngest sin
+ * romper el cambio de etapa si Whaapy falla.
+ */
+export interface PostventaFollowupMoveEnvelope {
+  organizationId: UUID;
+  opportunityId: UUID;
+  /** Origen del disparo (traza + diagnóstico). */
+  reason: string;
+}
+
+export const POSTVENTA_FOLLOWUP_MOVE_EVENT =
+  "whaapy/postventa.followup_requested" as const;
+
 export const WHAAPY_POSTVENTA_STAGE_PUSH_EVENT =
   "whaapy/postventa.stage_push_requested" as const;
 

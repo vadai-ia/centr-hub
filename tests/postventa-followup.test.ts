@@ -13,13 +13,21 @@ import { FakeSupabase } from "./helpers/fake-supabase";
  *      funciona correctamente?" — a alguien con el pedido cancelado,
  *      reembolsado o en caso problemático es el peor mensaje posible.
  *   3. **Contar desde el ENVÍO del mensaje 1**, no desde la entrega.
+ *   4. **La vía manual salta el tiempo, no la elegibilidad.** Mover la
+ *      tarjeta a "Seguimiento post-entrega" ES la decisión de mandarla, así
+ *      que no exige mensaje 1 previo ni los 7 días — pero a un caso
+ *      cancelado, resuelto o problemático sigue sin escribírsele.
+ *
+ * El envío es DIRECTO (`sendPostventaTemplate`), no vía Automation de
+ * Whaapy: su trigger es ENTRAR a la etapa, así que con quien ya está en
+ * ella no dispara y el mensaje se perdía en silencio con el sello puesto.
  */
 
 const fake = new FakeSupabase();
 vi.mock("@/lib/supabase/admin", () => ({ getSupabaseAdminClient: () => fake }));
 
-vi.mock("@/lib/whaapy-postventa/push-service", () => ({
-  pushPostventaStage: vi.fn(),
+vi.mock("@/lib/whaapy-postventa/send-template", () => ({
+  sendPostventaTemplate: vi.fn(),
 }));
 vi.mock("@/lib/services/dashboard-stages", () => ({
   resolvePostventaStages: vi.fn(),
@@ -30,7 +38,7 @@ vi.mock("@/lib/services/pipeline-move", () => ({
 
 import { withTenantContext } from "@/lib/tenant/context";
 import { sendPostventaFollowup } from "@/lib/services/postventa-followup";
-import { pushPostventaStage } from "@/lib/whaapy-postventa/push-service";
+import { sendPostventaTemplate } from "@/lib/whaapy-postventa/send-template";
 import { resolvePostventaStages } from "@/lib/services/dashboard-stages";
 import { moveOpportunityStage } from "@/lib/services/pipeline-move";
 
@@ -46,7 +54,20 @@ const STAGE_SEGUIMIENTO = "pv-seguimiento";
 const STAGE_ENTREGADO = "pv-entregado";
 const STAGE_PROBLEMA = "pv-problema";
 
+function seedContact(overrides: Record<string, unknown> = {}) {
+  fake.setTable("contacts", [
+    {
+      id: "contact-1",
+      organization_id: ORG,
+      full_name: "Patricia Guerrero",
+      phone: "+525548995599",
+      ...overrides,
+    },
+  ]);
+}
+
 function seedOpp(overrides: Record<string, unknown> = {}) {
+  seedContact();
   fake.setTable("opportunities", [
     {
       id: "opp-1",
@@ -83,12 +104,7 @@ const auditTypes = (): string[] =>
 beforeEach(() => {
   fake.reset();
   vi.clearAllMocks();
-  mock(pushPostventaStage).mockResolvedValue({
-    ok: true,
-    moved: true,
-    created: false,
-    whaapyContactId: "wc-1",
-  });
+  mock(sendPostventaTemplate).mockResolvedValue(undefined);
   mock(resolvePostventaStages).mockResolvedValue({
     problematicStage: { id: STAGE_PROBLEMA },
     followupStage: { id: STAGE_SEGUIMIENTO },
@@ -103,10 +119,10 @@ describe("sendPostventaFollowup — camino feliz", () => {
     const r = await run();
 
     expect(r).toEqual({ ok: true, sent: true });
-    expect(pushPostventaStage).toHaveBeenCalledWith({
-      organizationId: ORG,
-      opportunityId: "opp-1",
-      target: "seguimiento",
+    expect(sendPostventaTemplate).toHaveBeenCalledWith(ORG, {
+      to: "+525548995599",
+      templateName: "7_dias",
+      parameters: ["Patricia"],
     });
     expect(saved().followup_message_sent_at).toBe(NOW);
     expect(moveOpportunityStage).toHaveBeenCalledWith(
@@ -132,7 +148,7 @@ describe("sendPostventaFollowup — no duplicar", () => {
     const r = await run();
 
     expect(r).toEqual({ ok: true, sent: false, reason: "already_sent" });
-    expect(pushPostventaStage).not.toHaveBeenCalled();
+    expect(sendPostventaTemplate).not.toHaveBeenCalled();
   });
 
   it("el sello se escribe ANTES de mover la etapa", async () => {
@@ -151,7 +167,7 @@ describe("sendPostventaFollowup — no duplicar", () => {
 
   it("si el push a Whaapy falla, NO sella (el cliente no recibió nada)", async () => {
     seedOpp();
-    mock(pushPostventaStage).mockResolvedValue({ ok: false, skipped: "missing_phone" });
+    seedContact({ phone: null });
 
     const r = await run();
 
@@ -166,14 +182,14 @@ describe("sendPostventaFollowup — a quién NO mandárselo", () => {
     seedOpp({ cancelled_at: "2026-08-16T00:00:00.000Z" });
     const r = await run();
     expect(r).toEqual({ ok: true, sent: false, reason: "cancelled" });
-    expect(pushPostventaStage).not.toHaveBeenCalled();
+    expect(sendPostventaTemplate).not.toHaveBeenCalled();
   });
 
   it("caso ya resuelto", async () => {
     seedOpp({ resolved_at: "2026-08-16T00:00:00.000Z" });
     const r = await run();
     expect(r).toEqual({ ok: true, sent: false, reason: "resolved" });
-    expect(pushPostventaStage).not.toHaveBeenCalled();
+    expect(sendPostventaTemplate).not.toHaveBeenCalled();
   });
 
   it("está en Caso problemático HOY, aunque su entrega fuera normal", async () => {
@@ -182,7 +198,7 @@ describe("sendPostventaFollowup — a quién NO mandárselo", () => {
     const r = await run();
 
     expect(r).toEqual({ ok: true, sent: false, reason: "problem_case" });
-    expect(pushPostventaStage).not.toHaveBeenCalled();
+    expect(sendPostventaTemplate).not.toHaveBeenCalled();
     expect(auditTypes()).toContain("postventa_followup_skipped");
   });
 });
@@ -192,19 +208,79 @@ describe("sendPostventaFollowup — el reloj", () => {
     seedOpp({ delivery_message_sent_at: HACE_3_DIAS });
     const r = await run();
     expect(r).toEqual({ ok: true, sent: false, reason: "not_due_yet" });
-    expect(pushPostventaStage).not.toHaveBeenCalled();
+    expect(sendPostventaTemplate).not.toHaveBeenCalled();
   });
 
   it("cuenta desde el ENVÍO del mensaje 1: sin ese sello no aplica", async () => {
     seedOpp({ delivery_message_sent_at: null });
     const r = await run();
     expect(r).toEqual({ ok: true, sent: false, reason: "delivery_message_not_sent" });
-    expect(pushPostventaStage).not.toHaveBeenCalled();
+    expect(sendPostventaTemplate).not.toHaveBeenCalled();
   });
 
   it("exactamente a los 7 días ya cuenta como cumplido", async () => {
     seedOpp({ delivery_message_sent_at: HACE_7_DIAS });
     const r = await run();
     expect(r).toEqual({ ok: true, sent: true });
+  });
+});
+
+describe("vía manual — mover la tarjeta a Seguimiento post-entrega", () => {
+  const manual = () =>
+    withTenantContext(
+      ORG,
+      () =>
+        sendPostventaFollowup({
+          organizationId: ORG,
+          opportunityId: "opp-1",
+          nowIso: NOW,
+          trigger: "manual_move",
+        }),
+      { source: "worker" },
+    );
+
+  it("manda aunque NUNCA haya salido el mensaje de entrega", async () => {
+    // Es el caso real: pedidos entregados antes de que existieran los
+    // mensajes. Por la vía automática no la recibirían jamás.
+    seedOpp({ delivery_message_sent_at: null, stage_id: STAGE_SEGUIMIENTO });
+
+    const r = await manual();
+
+    expect(r).toEqual({ ok: true, sent: true });
+    expect(sendPostventaTemplate).toHaveBeenCalledTimes(1);
+    expect(saved().followup_message_sent_at).toBe(NOW);
+  });
+
+  it("manda aunque no hayan pasado los 7 días", async () => {
+    seedOpp({ delivery_message_sent_at: HACE_3_DIAS, stage_id: STAGE_SEGUIMIENTO });
+
+    expect(await manual()).toEqual({ ok: true, sent: true });
+  });
+
+  it("NO manda dos veces: el sello manda sobre el disparador", async () => {
+    seedOpp({ followup_message_sent_at: "2026-08-20T10:00:00.000Z" });
+
+    const r = await manual();
+
+    expect(r).toEqual({ ok: true, sent: false, reason: "already_sent" });
+    expect(sendPostventaTemplate).not.toHaveBeenCalled();
+  });
+
+  it("sigue sin escribirle a un caso problemático, aunque lo arrastren", async () => {
+    seedOpp({ stage_id: STAGE_PROBLEMA, delivery_message_sent_at: null });
+
+    const r = await manual();
+
+    expect(r).toEqual({ ok: true, sent: false, reason: "problem_case" });
+    expect(sendPostventaTemplate).not.toHaveBeenCalled();
+  });
+
+  it("sigue sin escribirle a una cancelada", async () => {
+    seedOpp({ cancelled_at: "2026-08-19T10:00:00.000Z", delivery_message_sent_at: null });
+
+    const r = await manual();
+
+    expect(r).toEqual({ ok: true, sent: false, reason: "cancelled" });
+    expect(sendPostventaTemplate).not.toHaveBeenCalled();
   });
 });

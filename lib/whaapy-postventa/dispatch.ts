@@ -1,13 +1,19 @@
 import "server-only";
 import {
   getInngestClient,
+  POSTVENTA_FOLLOWUP_MOVE_EVENT,
   VENTA_DELIVERY_MESSAGE_EVENT,
   WHAAPY_POSTVENTA_STAGE_PUSH_EVENT,
+  type PostventaFollowupMoveEnvelope,
   type VentaDeliveryMessageEnvelope,
   type WhaapyPostventaStagePushEnvelope,
 } from "@/lib/inngest/client";
 import { isPostventaWhaapySyncEnabled } from "@/lib/whaapy-postventa/config";
 import { isVentaDeliveryMessageEnabled } from "@/lib/whaapy/config";
+import {
+  isPostventaFollowupMessageEnabled,
+  WHAAPY_POSTVENTA_STAGE_NAMES,
+} from "@/lib/whaapy-postventa/config";
 import type { PipelineStageRow, UUID } from "@/lib/types/database";
 
 /**
@@ -41,6 +47,31 @@ async function enqueueVentaDelivery(
   } catch (err) {
     console.error(
       `[venta-delivery] enqueue falló (opp ${envelope.opportunityId}):`,
+      (err as Error).message,
+    );
+  }
+}
+
+/**
+ * Encuesta por MOVER la tarjeta a "Seguimiento post-entrega".
+ *
+ * Gate propio (`POSTVENTA_FOLLOWUP_MESSAGE_ENABLED`) — es el mismo switch
+ * del cron de los 7 días: son el mismo mensaje por dos caminos, y tenerlos
+ * en interruptores distintos haría que "apagar la encuesta" dejara una vía
+ * viva.
+ */
+async function enqueueFollowup(
+  envelope: PostventaFollowupMoveEnvelope,
+): Promise<void> {
+  if (!isPostventaFollowupMessageEnabled()) return;
+  try {
+    await getInngestClient().send({
+      name: POSTVENTA_FOLLOWUP_MOVE_EVENT,
+      data: envelope as unknown as Record<string, unknown>,
+    });
+  } catch (err) {
+    console.error(
+      `[postventa-followup] enqueue falló (opp ${envelope.opportunityId}):`,
       (err as Error).message,
     );
   }
@@ -81,7 +112,13 @@ export async function dispatchPostventaPushForMove(args: {
   // mensaje de entrega sale de Venta; los casos, de Post-venta). Salir por
   // uno solo apagaría el otro en silencio, así que solo se corta cuando los
   // dos están OFF; cada `enqueue*` vuelve a checar el suyo.
-  if (!isPostventaWhaapySyncEnabled() && !isVentaDeliveryMessageEnabled()) return;
+  if (
+    !isPostventaWhaapySyncEnabled() &&
+    !isVentaDeliveryMessageEnabled() &&
+    !isPostventaFollowupMessageEnabled()
+  ) {
+    return;
+  }
   if (args.targetStage.funnel !== "post_venta") return;
   try {
     const { resolvePostventaEngineStages } = await import(
@@ -106,6 +143,15 @@ export async function dispatchPostventaPushForMove(args: {
       });
     } else if (args.targetStage.id === stages.problematicStage.id) {
       target = "casoProblematico";
+    } else if (args.targetStage.name === WHAAPY_POSTVENTA_STAGE_NAMES.seguimiento) {
+      // MENSAJE 2 por la vía manual: Post-venta arrastra la tarjeta aquí
+      // esperando que salga la encuesta. El cron sella ANTES de mover, así
+      // que su propio move cae aquí con el sello puesto y no duplica.
+      await enqueueFollowup({
+        organizationId: args.organizationId,
+        opportunityId: args.opportunityId,
+        reason: "move:seguimiento",
+      });
     }
     if (!target) return;
 
