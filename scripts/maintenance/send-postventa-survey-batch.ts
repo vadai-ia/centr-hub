@@ -24,8 +24,16 @@
  *   degrada TODOS los envíos futuros, incluidas las confirmaciones de
  *   entrega. Mejor 20-30 al día que 100 de golpe.
  *
+ * `--incluir-entregado` amplía el criterio a las tarjetas que siguen en
+ * "Entregado": Post-venta pidió alcanzar a TODA compra del periodo cuyo
+ * paquete ya llegó, no solo a las que alguien movió de columna. Quedan fuera
+ * igual los casos problemáticos y las que YA están en el ciclo automático
+ * (con mensaje de entrega enviado): a esas la encuesta les toca a sus 7 días,
+ * y adelantarla les mandaría dos mensajes en dos días.
+ *
  * Uso:
  *   npm run maintenance:send-postventa-survey -- --org-slug centr --desde 2026-09-01
+ *   npm run maintenance:send-postventa-survey -- --org-slug centr --desde 2026-09-01 --incluir-entregado
  *   npm run maintenance:send-postventa-survey -- --org-slug centr --desde 2026-09-01 --limit 5 --apply
  */
 import { config as loadDotenv } from "dotenv";
@@ -47,6 +55,7 @@ function arg(flag: string): string | undefined {
   return i >= 0 ? process.argv[i + 1] : undefined;
 }
 const APPLY = process.argv.includes("--apply");
+const INCLUIR_ENTREGADO = process.argv.includes("--incluir-entregado");
 
 interface Candidato {
   contactId: UUID;
@@ -76,21 +85,26 @@ async function main() {
     async () => {
       const admin = getSupabaseAdminClient();
 
-      const { data: stage, error: stageErr } = await admin
+      const nombresEtapa = INCLUIR_ENTREGADO
+        ? ["Seguimiento post-entrega", "Entregado"]
+        : ["Seguimiento post-entrega"];
+      const { data: stages, error: stageErr } = await admin
         .from("pipeline_stages")
-        .select("id")
+        .select("id, name")
         .eq("organization_id", org.id)
         .eq("funnel", "post_venta")
-        .eq("name", "Seguimiento post-entrega")
-        .maybeSingle();
+        .in("name", nombresEtapa);
       if (stageErr) throw new Error(`etapa: ${stageErr.message}`);
-      if (!stage) throw new Error('no existe la etapa "Seguimiento post-entrega"');
+      if (!stages || stages.length !== nombresEtapa.length) {
+        throw new Error(`faltan etapas de Post-venta: ${nombresEtapa.join(", ")}`);
+      }
+      const stageIds = stages.map((x) => x.id);
 
       const { data: opps, error: oppErr } = await admin
         .from("opportunities")
-        .select("id, contact_id, shopify_order_id")
+        .select("id, contact_id, shopify_order_id, delivery_message_sent_at")
         .eq("organization_id", org.id)
-        .eq("stage_id", stage.id)
+        .in("stage_id", stageIds)
         .is("cancelled_at", null)
         .is("resolved_at", null)
         .is("followup_message_sent_at", null);
@@ -115,8 +129,19 @@ async function main() {
 
       // Agrupar por persona, quedándose solo con entregas confirmadas.
       const porPersona = new Map<UUID, Candidato>();
-      const descartes = { sin_telefono: 0, sin_entrega_confirmada: 0, antes_del_corte: 0 };
+      const descartes = {
+        sin_telefono: 0,
+        sin_entrega_confirmada: 0,
+        antes_del_corte: 0,
+        ya_en_ciclo_automatico: 0,
+      };
       for (const opp of opps ?? []) {
+        // Ya recibió el aviso de entrega: su encuesta sale sola a los 7 días.
+        // Adelantarla aquí le mandaría dos mensajes con un día de diferencia.
+        if (opp.delivery_message_sent_at) {
+          descartes.ya_en_ciclo_automatico += 1;
+          continue;
+        }
         const ord = opp.shopify_order_id ? byOid.get(opp.shopify_order_id) : null;
         if (!ord || String(ord.paid_at ?? "") < desde) {
           descartes.antes_del_corte += 1;
@@ -151,9 +176,13 @@ async function main() {
       console.log(`\n=== Encuesta de Post-venta · ${slug} · pedidos desde ${desde} ===\n`);
       console.log(`  personas a las que se enviaría: ${candidatos.length} (de ${porPersona.size} elegibles)`);
       console.log(
+        `  etapas consideradas: ${nombresEtapa.join(" + ")}`,
+      );
+      console.log(
         `  descartadas: ${descartes.antes_del_corte} antes del corte · ` +
           `${descartes.sin_entrega_confirmada} sin entrega confirmada · ` +
-          `${descartes.sin_telefono} sin teléfono\n`,
+          `${descartes.sin_telefono} sin teléfono · ` +
+          `${descartes.ya_en_ciclo_automatico} ya en el ciclo automático\n`,
       );
       for (const c of candidatos) {
         console.log(`   ${c.nombre.padEnd(34)} ${c.telefono.padEnd(16)} ${c.pedidos.join(", ")}`);
