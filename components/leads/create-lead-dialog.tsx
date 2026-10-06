@@ -77,6 +77,13 @@ export function CreateLeadButton({
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (submitting) return;
+    // Teléfono O correo: el teléfono dejó de ser obligatorio (hay bases que
+    // solo traen correo), pero un lead sin ninguna forma de contacto no es
+    // contactable por nadie. Se avisa aquí para no pagar el viaje al server.
+    if (!phone.trim() && !email.trim()) {
+      setError("Captura al menos teléfono o correo para poder contactarlo.");
+      return;
+    }
     setSubmitting(true);
     setError(null);
     setSuccess(null);
@@ -93,13 +100,13 @@ export function CreateLeadButton({
     const res = outbound
       ? await createOutboundLeadAction({
           name: name.trim(),
-          phone: phone.trim(),
+          phone: phone.trim() || null,
           email: email.trim() || null,
           address,
         })
       : await createManualLeadAction({
           name: name.trim(),
-          phone: phone.trim(),
+          phone: phone.trim() || null,
           email: email.trim() || null,
           advisorId: advisorId || null,
           address,
@@ -179,13 +186,14 @@ export function CreateLeadButton({
                 </label>
 
                 <label className="block">
-                  <span className="block text-xs font-medium text-gray-600 dark:text-gray-300 mb-1">Teléfono *</span>
+                  <span className="block text-xs font-medium text-gray-600 dark:text-gray-300 mb-1">
+                    Teléfono
+                  </span>
                   <input
                     type="tel"
                     value={phone}
                     onChange={(e) => setPhone(e.target.value)}
                     maxLength={40}
-                    required
                     placeholder="Ej. 55 1234 5678"
                     disabled={submitting}
                     className="w-full rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-700 text-sm px-2 py-1.5 text-gray-900 dark:text-gray-100"
@@ -193,7 +201,9 @@ export function CreateLeadButton({
                 </label>
 
                 <label className="block">
-                  <span className="block text-xs font-medium text-gray-600 dark:text-gray-300 mb-1">Email (opcional)</span>
+                  <span className="block text-xs font-medium text-gray-600 dark:text-gray-300 mb-1">
+                    Email
+                  </span>
                   <input
                     type="email"
                     value={email}

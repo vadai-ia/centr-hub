@@ -629,3 +629,83 @@ describe("createLead — lead conocido que vuelve por el formulario", () => {
     expect(fake.getTable("contacts")[0].address).toEqual({ address1: "Av. Reforma 123" });
   });
 });
+
+/**
+ * Teléfono O correo (oct-2026).
+ *
+ * El teléfono dejó de ser obligatorio para poder cargar bases que solo traen
+ * correo — Centr Colombia arrancó así. Lo que NO puede faltar es alguna forma
+ * de contactar: un lead sin teléfono ni correo no es contactable por nadie y
+ * solo ensucia la base.
+ *
+ * Consecuencia que estos tests fijan: sin teléfono el contacto nace con
+ * `missing_phone = true`, la misma marca que ya usan los customers de Shopify
+ * sin número, que es la que bloquea el espejo en Whaapy.
+ */
+describe("createLead — teléfono opcional", () => {
+  it("crea el lead con SOLO correo y lo marca missing_phone", async () => {
+    vi.mocked(matchLeadIdentity).mockResolvedValue({
+      recommendation: "create_new",
+      match: null,
+      normalizedPhone: null,
+      normalizedEmail: "solo@correo.com",
+    });
+
+    const res = await withTenantContext(ORG, () =>
+      createLead({
+        fullName: "Lead Sin Teléfono",
+        email: "solo@correo.com",
+        assignment: { mode: "explicit", advisorId: ADV },
+        source: "manual",
+      }),
+    );
+
+    expect(res.contactCreated).toBe(true);
+    const contact = fake.getTable("contacts")[0] as Record<string, unknown>;
+    expect(contact.phone).toBeNull();
+    expect(contact.email).toBe("solo@correo.com");
+    expect(contact.missing_phone).toBe(true);
+  });
+
+  it("sin teléfono NI correo rechaza con 'missing_contact_method'", async () => {
+    vi.mocked(matchLeadIdentity).mockResolvedValue({
+      recommendation: "create_new",
+      match: null,
+      normalizedPhone: null,
+      normalizedEmail: null,
+    });
+
+    await expect(
+      withTenantContext(ORG, () =>
+        createLead({
+          fullName: "Fantasma",
+          assignment: { mode: "explicit", advisorId: ADV },
+          source: "manual",
+        }),
+      ),
+    ).rejects.toMatchObject({ code: "missing_contact_method" });
+  });
+
+  it("un teléfono MAL ESCRITO sigue siendo error, no una ausencia", async () => {
+    // Distinguir "no lo tengo" de "lo tecleé mal" importa: lo segundo es un
+    // dato que alguien creyó haber capturado.
+    vi.mocked(matchLeadIdentity).mockResolvedValue({
+      recommendation: "create_new",
+      match: null,
+      normalizedPhone: null,
+      normalizedEmail: null,
+    });
+
+    await expect(
+      withTenantContext(ORG, () =>
+        createLead({
+          fullName: "Typo",
+          phone: "bad",
+          email: "typo@correo.com",
+          assignment: { mode: "explicit", advisorId: ADV },
+          source: "manual",
+        }),
+      ),
+    ).rejects.toMatchObject({ code: "invalid_phone" });
+  });
+});

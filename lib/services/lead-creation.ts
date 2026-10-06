@@ -66,6 +66,7 @@ export class LeadValidationError extends Error {
     public readonly code:
       | "missing_name"
       | "missing_phone"
+  | "missing_contact_method"
       | "invalid_phone"
       | "advisor_not_eligible",
     message?: string,
@@ -83,7 +84,9 @@ export type LeadAssignment =
 
 export interface CreateLeadInput {
   fullName: string;
-  phone: string;
+  /** Opcional desde el cambio "teléfono O correo": hay bases que solo traen
+   *  correo. Sin él, el contacto nace con `missing_phone = true`. */
+  phone?: string | null;
   email?: string | null;
   address?: Partial<StructuredAddress> | null;
   assignment: LeadAssignment;
@@ -130,17 +133,27 @@ export async function createLead(input: CreateLeadInput): Promise<CreateLeadResu
   // el guard de opp activa, el funnel de la opp y marca el contacto outbound.
   const leadFunnel: Funnel = input.channel === "outbound" ? "outbound" : "venta";
 
-  // 1. Validación de invariantes (nombre + teléfono obligatorios; el
-  //    teléfono debe normalizar a E.164 — Whaapy lo exige). Los callers
-  //    externos ya validan con Zod; este check es la última barrera del
-  //    camino canónico.
+  // 1. Validación de invariantes: nombre + AL MENOS UNA forma de contacto
+  //    (teléfono o correo). El teléfono dejó de ser obligatorio para poder
+  //    cargar bases que solo traen correo — Centr Colombia arrancó así. Sin
+  //    ninguna de las dos, el lead no sirve para nada: nadie puede
+  //    contactarlo y ensucia la base, así que eso sí se rechaza.
+  //
+  //    Consecuencia a conocer: sin teléfono NO se puede espejar en Whaapy
+  //    (lo exige) ni dedupe por teléfono, que es el match exacto. El
+  //    contacto nace con `missing_phone = true`, la misma marca que ya
+  //    usan los customers de Shopify sin número, y la UI la muestra.
   const fullName = input.fullName?.trim() ?? "";
   if (!fullName) throw new LeadValidationError("missing_name");
   const rawPhone = input.phone?.trim() ?? "";
-  if (!rawPhone) throw new LeadValidationError("missing_phone");
-  const normalizedPhone = normalizePhone(rawPhone, "MX");
-  if (!normalizedPhone) throw new LeadValidationError("invalid_phone");
+  const normalizedPhone = rawPhone ? normalizePhone(rawPhone, "MX") : null;
+  // Un teléfono ESCRITO que no normaliza sigue siendo un error: es un typo,
+  // no una ausencia deliberada.
+  if (rawPhone && !normalizedPhone) throw new LeadValidationError("invalid_phone");
   const normalizedEmail = normalizeEmail(input.email ?? null);
+  if (!normalizedPhone && !normalizedEmail) {
+    throw new LeadValidationError("missing_contact_method");
+  }
   const addressJson: Json | null = input.address
     ? structuredAddressToJson(input.address)
     : null;
@@ -188,7 +201,9 @@ export async function createLead(input: CreateLeadInput): Promise<CreateLeadResu
       assigned_advisor_id: resolvedAdvisorId,
       shopify_customer_id: null,
       whaapy_contact_id: null,
-      missing_phone: false,
+      // Sin teléfono: misma marca que los customers de Shopify sin número.
+      // Bloquea el espejo en Whaapy hasta que alguien lo capture.
+      missing_phone: !normalizedPhone,
       field_metadata: {} as Json,
       last_modified_at: ts,
       last_modified_source: "platform",
@@ -219,6 +234,14 @@ export async function createLead(input: CreateLeadInput): Promise<CreateLeadResu
     if (!contact.email && normalizedEmail) {
       patch.email = normalizedEmail;
       filledFields.push("email");
+    }
+    // El teléfono que faltaba: rellenarlo apaga `missing_phone` y habilita
+    // el espejo en Whaapy. Mismo criterio que el correo — rellena hueco,
+    // nunca pisa.
+    if (!contact.phone && normalizedPhone) {
+      patch.phone = normalizedPhone;
+      patch.missing_phone = false;
+      filledFields.push("phone");
     }
     if (isEmptyAddress(contact.address) && addressJson) {
       patch.address = addressJson;

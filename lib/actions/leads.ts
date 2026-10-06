@@ -65,10 +65,16 @@ const addressSchema = z
 
 const createSchema = z.object({
   name: z.string().trim().min(1).max(200),
-  phone: z.string().trim().min(1).max(40),
+  // El teléfono dejó de ser obligatorio: hay bases que solo traen correo.
+  // La regla "al menos una forma de contacto" se valida con `refine` abajo,
+  // no campo por campo — es una condición entre dos campos.
+  phone: z.string().trim().max(40).optional().or(z.literal("")).nullable(),
   email: z.string().trim().email().max(200).optional().or(z.literal("")).nullable(),
   advisorId: z.string().uuid().nullable().optional(),
   address: addressSchema,
+}).refine(tieneComoContactar, {
+  message: "Captura al menos teléfono o correo.",
+  path: ["phone"],
 });
 
 export interface CreateManualLeadResult {
@@ -84,6 +90,7 @@ export interface CreateManualLeadResult {
 const VALIDATION_MESSAGES: Record<LeadValidationError["code"], string> = {
   missing_name: "El nombre es obligatorio.",
   missing_phone: "El teléfono es obligatorio.",
+  missing_contact_method: "Captura al menos teléfono o correo para poder contactarlo.",
   invalid_phone: "El teléfono no es válido. Usa el formato con lada (ej. 55 1234 5678).",
   advisor_not_eligible: "El asesor seleccionado no es válido.",
 };
@@ -91,7 +98,10 @@ const VALIDATION_MESSAGES: Record<LeadValidationError["code"], string> = {
 export async function createManualLeadAction(raw: unknown): Promise<CreateManualLeadResult> {
   const parsed = createSchema.safeParse(raw);
   if (!parsed.success) {
-    return { ok: false, message: "Revisa los datos: nombre y teléfono son obligatorios." };
+    return {
+      ok: false,
+      message: "Revisa los datos: el nombre es obligatorio y necesitas teléfono o correo.",
+    };
   }
   const session = await getSession();
   if (session.status !== "ok") {
@@ -109,7 +119,7 @@ export async function createManualLeadAction(raw: unknown): Promise<CreateManual
       try {
         const result = await createLead({
           fullName: parsed.data.name,
-          phone: parsed.data.phone,
+          phone: parsed.data.phone || null,
           email,
           address,
           assignment: { mode: "explicit", advisorId: parsed.data.advisorId ?? null },
@@ -153,17 +163,35 @@ export async function createManualLeadAction(raw: unknown): Promise<CreateManual
 // SDR no es asignable; el vendedor se elige en el handoff). Marca el contacto
 // outbound y propaga la marca. Solo roles con data_scope='all' (admin/SDR) —
 // el funnel Outbound es exclusivo de ellos.
+/**
+ * Un lead sin teléfono NI correo no es contactable por nadie: solo ensucia
+ * la base. Es la única forma de contacto que sigue siendo obligatoria —
+ * cuál de las dos, lo decide quien captura.
+ */
+function tieneComoContactar(v: { phone?: string | null; email?: string | null }): boolean {
+  return Boolean(v.phone?.trim()) || Boolean(v.email?.trim());
+}
+
 const createOutboundSchema = z.object({
   name: z.string().trim().min(1).max(200),
-  phone: z.string().trim().min(1).max(40),
+  // El teléfono dejó de ser obligatorio: hay bases que solo traen correo.
+  // La regla "al menos una forma de contacto" se valida con `refine` abajo,
+  // no campo por campo — es una condición entre dos campos.
+  phone: z.string().trim().max(40).optional().or(z.literal("")).nullable(),
   email: z.string().trim().email().max(200).optional().or(z.literal("")).nullable(),
   address: addressSchema,
+}).refine(tieneComoContactar, {
+  message: "Captura al menos teléfono o correo.",
+  path: ["phone"],
 });
 
 export async function createOutboundLeadAction(raw: unknown): Promise<CreateManualLeadResult> {
   const parsed = createOutboundSchema.safeParse(raw);
   if (!parsed.success) {
-    return { ok: false, message: "Revisa los datos: nombre y teléfono son obligatorios." };
+    return {
+      ok: false,
+      message: "Revisa los datos: el nombre es obligatorio y necesitas teléfono o correo.",
+    };
   }
   const session = await getSession();
   if (session.status !== "ok") {
@@ -184,7 +212,7 @@ export async function createOutboundLeadAction(raw: unknown): Promise<CreateManu
       try {
         const result = await createLead({
           fullName: parsed.data.name,
-          phone: parsed.data.phone,
+          phone: parsed.data.phone || null,
           email,
           address,
           assignment: { mode: "explicit", advisorId: null },
