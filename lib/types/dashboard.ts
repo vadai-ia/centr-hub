@@ -1,5 +1,6 @@
 import type { UUID } from "@/lib/types/database";
 import type { PeriodPreset, ResolvedPeriod } from "@/lib/time/period";
+import type { EntryChannel } from "@/lib/services/contact-journey";
 
 /**
  * Tipos del Dashboard descriptivo (M8.2). Solo KPIs descriptivos —
@@ -56,6 +57,32 @@ export interface LeadFunnel {
   parked: number;
 }
 
+/** Reparto de la cohorte de leads por canal de entrada (punto 24). */
+export interface ChannelShare {
+  channel: EntryChannel;
+  count: number;
+  /** FRACCIÓN 0–1 sobre la cohorte. null si no hay cohorte. */
+  share: number | null;
+}
+
+/**
+ * Tiempos y origen de la cohorte de leads (punto 24). Misma cohorte que
+ * `LeadFunnel`: el embudo dice dónde se cae, esto cuánto tarda y por dónde
+ * entra.
+ */
+export interface LeadTimings {
+  cohortSize: number;
+  /** Horas hasta el primer avance de etapa. Mediana — el promedio lo arrastra
+   *  un lead olvidado y hace parecer lento a todo el equipo. */
+  medianHoursToFirstMove: number | null;
+  averageHoursToFirstMove: number | null;
+  /** Cuántos de la cohorte SÍ avanzaron (denominador de las medias). */
+  movedCount: number;
+  /** Cuántos siguen donde nacieron. Es el dato que delata leads olvidados. */
+  withoutMove: number;
+  byChannel: ChannelShare[];
+}
+
 /** KPI 11 — pérdidas agrupadas por motivo. */
 export interface LossByReason {
   reasonId: UUID | null;
@@ -103,6 +130,8 @@ export interface VentaMetrics {
   winRateByStage: StageWinRate[]; // 9
   /** Embudo leads → calificados → cotización → ganada (punto 9 de la junta). */
   leadFunnel: LeadFunnel;
+  /** Tiempos y canal de entrada de la MISMA cohorte (punto 24). */
+  leadTimings: LeadTimings;
   lossRate: number | null; // 10
   lossesByReason: LossByReason[]; // 11
   salesCycleDays: number | null; // 12

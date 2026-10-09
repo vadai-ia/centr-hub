@@ -709,3 +709,15 @@ Toda entrada NUEVA sigue este mismo formato condensado — **solo la lección ac
 ### El primer avance de etapa no puede contar el movimiento de nacimiento
 - **Causa raíz:** la tarjeta aterriza en su etapa inicial en el mismo instante en que el contacto entra, y eso es una entrada de `opportunity_stage_history` como cualquier otra. Contarla como "primer avance" da 0 días para todo el mundo y la métrica no mide nada.
 - **Regla:** el primer avance es el primer cambio de etapa **posterior** al instante de entrada. "Sin avanzar" (null) es información —es lo que delata al lead olvidado—, no un hueco de datos que haya que rellenar con un cero.
+
+### Un promedio solo, en una métrica de tiempo, hace parecer lento a todo el equipo
+- **Causa raíz:** el tiempo al primer avance tiene cola larga — un lead olvidado acumula semanas y arrastra el promedio de toda la cohorte. Medido en Centr: mediana 41 h, promedio 5 días. Reportar solo el promedio describe un equipo lento que no existe; reportar solo la mediana esconde que hay casos abandonados.
+- **Regla:** las métricas de tiempo del dashboard muestran **mediana y promedio juntos**, y por separado **cuántos no avanzaron** (que no entran en ninguna media: no tienen tiempo, tienen ausencia de tiempo). Vale para cualquier métrica de duración que se agregue después.
+
+### Dos tarjetas del mismo tablero sobre "los leads del periodo" deben compartir UNA cohorte
+- **Causa raíz:** el embudo y los tiempos responden preguntas distintas sobre el mismo grupo. Si cada uno arma su cohorte —uno por oportunidad, otro por persona; uno incluyendo absorbidos, otro no— los dos números son correctos y aun así no se pueden cruzar, y el lector concluye que el tablero miente.
+- **Regla:** `leadEntryByContact` se deriva una vez de `stageEntries` + `absorbedLeadEntries` y la consumen el embudo y los tiempos; el guard asierta que el `cohortSize` de ambos coincida. **Al agregar una métrica nueva sobre "los leads del periodo", consumir esa cohorte en lugar de reconstruirla.**
+
+### `effective_event_at` es el eje temporal de cualquier métrica de duración, no `created_at`
+- **Causa raíz:** las filas de `opportunity_stage_history` pueden estar re-fechadas al evento real de Shopify (migración 0025), así que `changed_at` no es cuándo ocurrió el hecho. Y un avance re-fechado puede quedar ANTES de la entrada del lead, lo que produce duraciones negativas que envenenan medianas y promedios sin que nada truene.
+- **Regla:** las métricas de duración leen `effective_event_at` (expuesto como `occurred_at` en `StageEntryRow`), el mismo eje con el que el dashboard ya filtra por periodo, y **acotan a cero toda duración negativa** en lugar de propagarla.

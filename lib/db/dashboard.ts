@@ -2,7 +2,7 @@ import "server-only";
 import { getTenantScopedClient } from "@/lib/db/client";
 import { fetchAllPaged as fetchAllPagedBase } from "@/lib/db/paginate";
 import type { RangeableQuery } from "@/lib/db/paginate";
-import type { UUID } from "@/lib/types/database";
+import type { ISODateString, Json, UUID } from "@/lib/types/database";
 
 /**
  * Capa de datos del Dashboard (M8.2). TODAS las agregaciones corren
@@ -133,6 +133,10 @@ export interface StageEntryRow {
   is_outbound: boolean;
   /** Contacto de la oportunidad: liga un lead con las compras de esa persona. */
   contact_id: UUID;
+  /** Cuándo ocurrió de verdad (`effective_event_at`, migración 0025): la fecha
+   *  del evento de Shopify si la hay, si no la del cambio. Es el eje temporal
+   *  de los tiempos del proceso — "cuánto tardó el primer avance". */
+  occurred_at: ISODateString;
 }
 export interface HistoryStageRow {
   opportunity_id: UUID;
@@ -394,7 +398,7 @@ export async function listStageEntriesInPeriod(
     supabase
       .from("opportunity_stage_history")
       .select(
-        "opportunity_id, to_stage_id, opportunity:opportunities!inner(assigned_advisor_id, is_outbound, cancelled_at, contact_id)",
+        "opportunity_id, to_stage_id, effective_event_at, opportunity:opportunities!inner(assigned_advisor_id, is_outbound, cancelled_at, contact_id)",
       )
       .eq("organization_id", organizationId)
       .in("to_stage_id", stageIds)
@@ -405,6 +409,7 @@ export async function listStageEntriesInPeriod(
   type Raw = {
     opportunity_id: UUID;
     to_stage_id: UUID;
+    effective_event_at: ISODateString;
     opportunity: { assigned_advisor_id: UUID | null; is_outbound: boolean; contact_id: UUID };
   };
   return ((data ?? []) as unknown as Raw[]).map((r) => ({
@@ -413,6 +418,7 @@ export async function listStageEntriesInPeriod(
     assigned_advisor_id: r.opportunity.assigned_advisor_id,
     is_outbound: r.opportunity.is_outbound,
     contact_id: r.opportunity.contact_id,
+    occurred_at: r.effective_event_at,
   }));
 }
 
@@ -441,7 +447,7 @@ export async function listAbsorbedLeadEntriesInPeriod(
     supabase
       .from("opportunity_stage_history")
       .select(
-        "opportunity_id, to_stage_id, opportunity:opportunities!inner(assigned_advisor_id, is_outbound, contact_id, cancellation_source)",
+        "opportunity_id, to_stage_id, effective_event_at, opportunity:opportunities!inner(assigned_advisor_id, is_outbound, contact_id, cancellation_source)",
       )
       .eq("organization_id", organizationId)
       .eq("to_stage_id", initialStageId)
@@ -452,6 +458,7 @@ export async function listAbsorbedLeadEntriesInPeriod(
   type Raw = {
     opportunity_id: UUID;
     to_stage_id: UUID;
+    effective_event_at: ISODateString;
     opportunity: { assigned_advisor_id: UUID | null; is_outbound: boolean; contact_id: UUID };
   };
   return ((data ?? []) as unknown as Raw[]).map((r) => ({
@@ -460,6 +467,7 @@ export async function listAbsorbedLeadEntriesInPeriod(
     assigned_advisor_id: r.opportunity.assigned_advisor_id,
     is_outbound: r.opportunity.is_outbound,
     contact_id: r.opportunity.contact_id,
+    occurred_at: r.effective_event_at,
   }));
 }
 
@@ -554,27 +562,84 @@ export async function listFullHistoryForOpportunities(
  */
 export async function listVentaStageHistoryForContacts(
   contactIds: UUID[],
-): Promise<Array<{ contact_id: UUID; to_stage_id: UUID }>> {
+): Promise<Array<{ contact_id: UUID; to_stage_id: UUID; occurred_at: ISODateString }>> {
   if (contactIds.length === 0) return [];
   const { supabase, organizationId } = getTenantScopedClient();
   const CHUNK = 300;
-  const out: Array<{ contact_id: UUID; to_stage_id: UUID }> = [];
+  const out: Array<{
+    contact_id: UUID;
+    to_stage_id: UUID;
+    occurred_at: ISODateString;
+  }> = [];
   for (let i = 0; i < contactIds.length; i += CHUNK) {
     const chunk = contactIds.slice(i, i + CHUNK);
     const page = await fetchAllPaged<unknown>(() =>
       supabase
         .from("opportunity_stage_history")
         .select(
-          "to_stage_id, opportunity:opportunities!inner(contact_id, funnel, cancelled_at)",
+          "to_stage_id, effective_event_at, opportunity:opportunities!inner(contact_id, funnel, cancelled_at)",
         )
         .eq("organization_id", organizationId)
         .eq("opportunity.funnel", "venta")
         .is("opportunity.cancelled_at", null)
         .in("opportunity.contact_id", chunk),
     );
-    type Raw = { to_stage_id: UUID; opportunity: { contact_id: UUID } };
+    type Raw = {
+      to_stage_id: UUID;
+      effective_event_at: ISODateString;
+      opportunity: { contact_id: UUID };
+    };
     for (const row of (page ?? []) as unknown as Raw[]) {
-      out.push({ contact_id: row.opportunity.contact_id, to_stage_id: row.to_stage_id });
+      out.push({
+        contact_id: row.opportunity.contact_id,
+        to_stage_id: row.to_stage_id,
+        occurred_at: row.effective_event_at,
+      });
+    }
+  }
+  return out;
+}
+
+/**
+ * Canal por el que entró cada persona, desde la BITÁCORA (punto 24).
+ *
+ * Se lee del audit log y no se infiere del estado del contacto: un lead de
+ * WhatsApp adquiere identidad de Shopify en cuanto alguien le cotiza, así
+ * que inferir del estado actual diría "Shopify" de casi todos y el reparto
+ * por canal quedaría inservible. Ver `contact-journey.ts`.
+ *
+ * Devuelve el evento MÁS VIEJO por persona: quien entró por formulario y
+ * meses después vuelve por WhatsApp sigue habiendo entrado por formulario.
+ */
+export async function listLeadEntryEventsForContacts(
+  contactIds: UUID[],
+): Promise<Array<{ contact_id: UUID; event_type: string; payload: Json }>> {
+  if (contactIds.length === 0) return [];
+  const { supabase, organizationId } = getTenantScopedClient();
+  const CHUNK = 300;
+  const out: Array<{ contact_id: UUID; event_type: string; payload: Json }> = [];
+  for (let i = 0; i < contactIds.length; i += CHUNK) {
+    const chunk = contactIds.slice(i, i + CHUNK);
+    const page = await fetchAllPaged<unknown>(() =>
+      supabase
+        .from("audit_log")
+        .select("entity_id, event_type, payload")
+        .eq("organization_id", organizationId)
+        .eq("entity_type", "contact")
+        .in("event_type", [
+          "lead_created",
+          "whaapy_contact_created_from_conversation",
+        ])
+        .in("entity_id", chunk)
+        .order("created_at", { ascending: true }),
+    );
+    type Raw = { entity_id: UUID; event_type: string; payload: Json };
+    for (const row of (page ?? []) as unknown as Raw[]) {
+      out.push({
+        contact_id: row.entity_id,
+        event_type: row.event_type,
+        payload: row.payload,
+      });
     }
   }
   return out;

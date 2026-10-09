@@ -770,6 +770,37 @@ Las keys del catálogo son `event_type` del audit log, strings que se escriben e
 
 **No requiere migración:** `audit_log`, `activities` y `opportunity_stage_history` ya existían.
 
+## Tiempos y origen de los leads (punto 24, segunda mitad)
+
+El dashboard ejecutivo que se pidió: "algo más de toma de decisiones basado en lo sucedido con cada uno de los clientes". Tarjeta en el Dashboard de Venta, **pegada al embudo y sobre la MISMA cohorte de personas**. El embudo dice DÓNDE se cae el proceso; esto dice CUÁNTO tarda y POR DÓNDE entra la gente.
+
+Medido en Centr (ago–sep 2026): **mediana 41 h al primer avance, promedio 5 días**, 101 de 102 avanzaron, 1 sin tocar. Origen: 57% formulario web, 26% WhatsApp, 7% sin determinar, 7% captura manual, 3% outbound.
+
+### Mediana Y promedio, los dos, a propósito
+
+El promedio de 5 días contra una mediana de 41 h es el ejemplo: **un solo lead olvidado arrastra el promedio y hace parecer lento a todo el equipo.** La mediana dice qué pasa en el caso típico, que es lo que se puede corregir; el promedio delata que hay cola larga. Mostrar solo uno de los dos miente de un modo distinto cada vez.
+
+### El primer avance no cuenta el movimiento de nacimiento
+
+La tarjeta aterriza en su etapa inicial en el mismo instante en que el lead entra, y eso es una fila de `opportunity_stage_history` como cualquier otra. Se mide el primer movimiento **a una posición mayor que la inicial y posterior a la entrada**. "Sin avanzar" es información —el lead olvidado—, no un hueco que rellenar con cero. Un avance fechado ANTES de la entrada (re-fechas de Shopify, migración 0025) se trata como inmediato, nunca como horas negativas que rompan la media.
+
+### El canal sale de la BITÁCORA, no del estado del contacto
+
+`listLeadEntryEventsForContacts` lee los eventos `lead_created` y `whaapy_contact_created_from_conversation` del audit log, y toma **el más viejo de cada persona**: quien entró por formulario y meses después vuelve por WhatsApp sigue habiendo entrado por formulario. Precedencia: `is_outbound` declarado (0040) → la bitácora → "Sin determinar". **Nunca se infiere de las identidades ligadas**: un lead de WhatsApp adquiere identidad de Shopify en cuanto alguien le cotiza, así que la inferencia por estado actual diría "Shopify" de casi todos y el reparto quedaría inservible. Este reparto es, además, el número propio contra el que ClickRoot puede cuadrar Analytics (punto 19).
+
+### Comparte la cohorte con el embudo, y eso es el invariante
+
+Las dos tarjetas salen de `leadEntryByContact`, derivado de las mismas `stageEntries` + `absorbedLeadEntries`. **No es ahorro: si cada tarjeta armara su cohorte, el embudo y los tiempos hablarían de grupos distintos y nadie podría cruzarlos** — justo la clase de divergencia que alimenta la queja "la data no coincide". El guard verifica que `cohortSize` de las dos coincida.
+
+### Lo que esto NO es
+
+- No es un SLA: no hay objetivo configurado contra el que comparar (eso sigue esperando los tiempos por etapa de Fer, pendiente de la lista).
+- No mide "tiempo de primera respuesta al cliente" sino **tiempo al primer movimiento en el CRM**. Si el asesor contestó por WhatsApp y no movió la tarjeta, aquí no se ve. Medir la respuesta real exige los mensajes de Whaapy, que no se descargan — la misma frontera que la bitácora.
+
+`effective_event_at` (migración 0025) se agregó a `StageEntryRow` como `occurred_at`: es el eje temporal real (la fecha del evento de Shopify cuando la hay, si no la del cambio), el mismo que ya usaba el resto del dashboard para filtrar por periodo.
+
+**No requiere migración.**
+
 ## Cambios al stack
 
 Cualquier modificación al stack documentado en `package.json` (agregar dependencia, subir versión mayor, cambiar provider externo) requiere aprobación explícita del operador antes de comitearse. Razón: el stack está fijado por experiencias previas (Kibah, FindMed, Hemenesy) y cualquier desviación inesperada introduce riesgo operacional.

@@ -12,6 +12,7 @@ import {
   listProblematicCaseOpps,
   listStageEntriesInPeriod,
   listVentaStageHistoryForContacts,
+  listLeadEntryEventsForContacts,
   listWonOppsInPeriod,
   type LivePipelineRow,
   type LivePostventaRow,
@@ -26,6 +27,8 @@ import { readOrganizationCurrency } from "@/lib/services/organization-currency";
 import { readOrganizationTimezone } from "@/lib/services/organization-timezone";
 import { resolvePipelineSnapshotWindow } from "@/lib/services/dashboard-snapshot-window";
 import { computeLeadFunnel } from "@/lib/services/lead-funnel";
+import { computeLeadTimings } from "@/lib/services/lead-timings";
+import type { EntryChannel } from "@/lib/services/contact-journey";
 import {
   resolvePostventaStages,
   resolveVentaStageBoundaries,
@@ -39,7 +42,7 @@ import {
   monthLabel,
   type ResolvedPeriod,
 } from "@/lib/time/period";
-import type { UUID } from "@/lib/types/database";
+import type { ISODateString, Json, UUID } from "@/lib/types/database";
 import { channelOutboundValue } from "@/lib/types/dashboard";
 import { recognitionSlicesInPeriod } from "@/lib/services/revenue-recognition";
 import {
@@ -47,7 +50,7 @@ import {
   listPaidOrdersForContactsSince,
   type LeadPurchaseRow,
 } from "@/lib/db/dashboard";
-import { ABSORPTION_CANCELLATION_SOURCE } from "@/lib/constants";
+import { ABSORPTION_CANCELLATION_SOURCE, TIMEZONE } from "@/lib/constants";
 import { ONLINE_ORDER_SOURCE } from "@/lib/constants";
 import type {
   AdvisorBreakdownRow,
@@ -147,6 +150,24 @@ function amountOf(row: { actual_amount: string | null; estimated_amount: string 
   return 0;
 }
 
+/**
+ * Traduce el evento de entrada de la bitácora a un canal. Vive aquí y no en
+ * el módulo puro porque depende de la forma del payload del audit log, que
+ * es cosa de la capa de datos.
+ */
+function channelFromEntryEvent(eventType: string, payload: Json): EntryChannel {
+  if (eventType === "whaapy_contact_created_from_conversation") return "whatsapp";
+  const source =
+    payload && typeof payload === "object" && !Array.isArray(payload)
+      ? (payload as Record<string, unknown>).source
+      : undefined;
+  if (source === "webhook") return "formulario";
+  if (source === "manual") return "manual";
+  if (source === "whaapy") return "whatsapp";
+  if (source === "shopify") return "shopify";
+  return "formulario";
+}
+
 function rateOrNull(numerator: number, denominator: number): number | null {
   if (denominator <= 0) return null;
   return numerator / denominator;
@@ -194,7 +215,13 @@ export interface VentaRaw {
   /** Leads del periodo archivados por absorción (avanzaron a cotización). Cuentan como leads. */
   absorbedLeadEntries: StageEntryRow[];
   /** Historial de Venta de las personas de la cohorte de leads — embudo (punto 9). */
-  leadFunnelHistory: Array<{ contact_id: UUID; to_stage_id: UUID }>;
+  leadFunnelHistory: Array<{
+    contact_id: UUID;
+    to_stage_id: UUID;
+    occurred_at: ISODateString;
+  }>;
+  /** Canal de entrada por persona, leído de la bitácora (punto 24). */
+  leadEntryChannels: Map<UUID, EntryChannel>;
   /** oppId → posición máxima NO-perdida alcanzada (para avance KPI9). */
   maxNonLostPos: Map<UUID, number>;
   boundaries: VentaStageBoundaries;
@@ -309,10 +336,19 @@ async function fetchVentaRaw(
   // compras (KPI "leads que compraron") y su historial de etapas (embudo).
   // `leadContactIds` viene SIN scope — el scope se aplica al computar, igual
   // que con el resto del bundle.
-  const [leadPurchases, leadFunnelHistory] = await Promise.all([
+  const [leadPurchases, leadFunnelHistory, leadEntryEvents] = await Promise.all([
     listPaidOrdersForContactsSince(leadContactIds, period.startUtc),
     listVentaStageHistoryForContacts(leadContactIds),
+    listLeadEntryEventsForContacts(leadContactIds),
   ]);
+  // Los eventos vienen del más viejo al más nuevo: el PRIMERO de cada
+  // persona es su entrada real (quien entró por formulario y meses después
+  // vuelve por WhatsApp sigue habiendo entrado por formulario).
+  const leadEntryChannels = new Map<UUID, EntryChannel>();
+  for (const e of leadEntryEvents) {
+    if (leadEntryChannels.has(e.contact_id)) continue;
+    leadEntryChannels.set(e.contact_id, channelFromEntryEvent(e.event_type, e.payload));
+  }
 
   return {
     paidOrders,
@@ -325,6 +361,7 @@ async function fetchVentaRaw(
     leadPurchases,
     absorbedLeadEntries,
     leadFunnelHistory,
+    leadEntryChannels,
     maxNonLostPos,
     boundaries,
     lossReasonNames,
@@ -419,6 +456,24 @@ export function computeVentaMetrics(
   // oportunidad-lead (mismo denominador que `leads`) y el monto por pedido,
   // una sola vez aunque la persona haya entrado como lead dos veces.
   const scopedLeadContacts = new Set(leadContactByOpp.values());
+  // Entrada por PERSONA para los tiempos: la más vieja de sus entradas a la
+  // etapa inicial dentro del periodo (alguien pudo entrar como lead dos
+  // veces). `isOutbound` viaja con ella porque es lo que decide su canal.
+  const leadEntryByContact = new Map<
+    UUID,
+    { occurredAt: ISODateString; isOutbound: boolean }
+  >();
+  for (const e of [...raw.stageEntries, ...raw.absorbedLeadEntries]) {
+    if (!initialId || e.to_stage_id !== initialId) continue;
+    if (!matchScope(e.assigned_advisor_id, scope) || !matchChannel(e.is_outbound, channel)) continue;
+    const prev = leadEntryByContact.get(e.contact_id);
+    if (prev === undefined || e.occurred_at < prev.occurredAt) {
+      leadEntryByContact.set(e.contact_id, {
+        occurredAt: e.occurred_at,
+        isOutbound: e.is_outbound,
+      });
+    }
+  }
   const buyers = new Set<UUID>();
   let leadsConvertedRevenue = 0;
   for (const p of raw.leadPurchases) {
@@ -516,6 +571,32 @@ export function computeVentaMetrics(
     })),
   });
 
+  // Tiempos y origen de la MISMA cohorte del embudo (punto 24). Compartir la
+  // cohorte no es ahorro: si cada tarjeta armara la suya, el embudo y los
+  // tiempos hablarían de grupos distintos y nadie podría cruzarlos.
+  const initialPosition = boundaries.initialStage?.position ?? 0;
+  const positionByStage = new Map(
+    boundaries.stages.map((s) => [s.id, s.position]),
+  );
+  const leadTimings = computeLeadTimings({
+    cohort: Array.from(leadEntryByContact.entries()).map(([contactId, e]) => ({
+      contactId,
+      entryAt: e.occurredAt,
+      isOutbound: e.isOutbound,
+    })),
+    history: raw.leadFunnelHistory.flatMap((h) => {
+      const position = positionByStage.get(h.to_stage_id);
+      return position === undefined
+        ? []
+        : [{ contactId: h.contact_id, position, occurredAt: h.occurred_at }];
+    }),
+    initialPosition,
+    channelByContact: raw.leadEntryChannels,
+    // `timezone` es opcional en VentaRaw: sin zona, los cortes caen al
+    // default de México, igual que el resto del bundle.
+    zone: raw.timezone ?? TIMEZONE,
+  });
+
   return {
     revenue,
     quotesSent,
@@ -531,6 +612,7 @@ export function computeVentaMetrics(
     winRateGlobal,
     winRateByStage,
     leadFunnel,
+    leadTimings,
     lossRate,
     lossesByReason,
     salesCycleDays,

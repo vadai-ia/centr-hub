@@ -113,17 +113,18 @@ function ventaRaw(): VentaRaw {
     ],
     absorbedLeadEntries: [],
     leadFunnelHistory: [],
+    leadEntryChannels: new Map(),
     // Leads que compraron: o1 (lead de A, contacto c-o1) pagó un pedido;
     // o2 (lead de B) no.
     leadPurchases: [
       { contact_id: "c-o1", subtotal: "500", paid_at: "2026-05-15T18:00:00.000Z" },
     ],
     stageEntries: [
-      { opportunity_id: "o1", to_stage_id: LEAD.id, assigned_advisor_id: A, is_outbound: false, contact_id: "c-o1" },
-      { opportunity_id: "o2", to_stage_id: LEAD.id, assigned_advisor_id: B, is_outbound: false, contact_id: "c-o2" },
-      { opportunity_id: "o1", to_stage_id: CALIF.id, assigned_advisor_id: A, is_outbound: false, contact_id: "c-o1" },
-      { opportunity_id: "o3", to_stage_id: CALIF.id, assigned_advisor_id: A, is_outbound: false, contact_id: "c-o3" },
-      { opportunity_id: "o1", to_stage_id: DISENO.id, assigned_advisor_id: A, is_outbound: false, contact_id: "c-o1" }, // dup en banda
+      { opportunity_id: "o1", to_stage_id: LEAD.id, assigned_advisor_id: A, is_outbound: false, contact_id: "c-o1", occurred_at: "2026-05-05T18:00:00.000Z" },
+      { opportunity_id: "o2", to_stage_id: LEAD.id, assigned_advisor_id: B, is_outbound: false, contact_id: "c-o2", occurred_at: "2026-05-05T18:00:00.000Z" },
+      { opportunity_id: "o1", to_stage_id: CALIF.id, assigned_advisor_id: A, is_outbound: false, contact_id: "c-o1", occurred_at: "2026-05-05T18:00:00.000Z" },
+      { opportunity_id: "o3", to_stage_id: CALIF.id, assigned_advisor_id: A, is_outbound: false, contact_id: "c-o3", occurred_at: "2026-05-05T18:00:00.000Z" },
+      { opportunity_id: "o1", to_stage_id: DISENO.id, assigned_advisor_id: A, is_outbound: false, contact_id: "c-o1", occurred_at: "2026-05-05T18:00:00.000Z" }, // dup en banda
     ],
     maxNonLostPos: new Map([
       ["o1", 5],
@@ -179,6 +180,39 @@ describe("computeVentaMetrics — scope 'all'", () => {
     // umbral de muestra; el % se calcula siempre).
     expect(lead.rate).toBeCloseTo(0.5);
     expect("smallSample" in lead).toBe(false);
+  });
+});
+
+describe("el embudo y los tiempos comparten UNA cohorte", () => {
+  // Si cada tarjeta armara la suya, las dos serían correctas y aun así no se
+  // podrían cruzar — justo lo que alimenta la queja "la data no coincide".
+  it("cohortSize coincide en todos los scopes y canales", () => {
+    const r = ventaRaw();
+    r.absorbedLeadEntries = [
+      {
+        opportunity_id: "o9",
+        to_stage_id: LEAD.id,
+        assigned_advisor_id: A,
+        is_outbound: false,
+        contact_id: "c-o9",
+        occurred_at: "2026-05-05T18:00:00.000Z",
+      },
+    ];
+    for (const scope of ["all", A, B, null] as const) {
+      for (const canal of ["all", "inbound", "outbound"] as const) {
+        const m = computeVentaMetrics(r, scope, canal);
+        expect(
+          m.leadTimings.cohortSize,
+          `scope=${scope} canal=${canal}`,
+        ).toBe(m.leadFunnel.cohortSize);
+      }
+    }
+  });
+
+  it("y la cohorte es de PERSONAS, no de oportunidades-lead", () => {
+    const m = computeVentaMetrics(ventaRaw(), "all");
+    expect(m.leadFunnel.leadOpportunities).toBe(m.leads);
+    expect(m.leadTimings.cohortSize).toBeLessThanOrEqual(m.leads);
   });
 });
 
@@ -286,6 +320,7 @@ describe("computeVentaMetrics — corte por canal (F4)", () => {
       leadPurchases: [],
       absorbedLeadEntries: [],
       leadFunnelHistory: [],
+      leadEntryChannels: new Map(),
       maxNonLostPos: new Map(),
     };
   }
@@ -380,6 +415,7 @@ describe("Leads archivados por absorción", () => {
     assigned_advisor_id: A,
     is_outbound: false,
     contact_id: "c-o9",
+    occurred_at: "2026-05-05T18:00:00.000Z",
   };
 
   it("un lead absorbido SÍ cuenta como lead y como compra", () => {

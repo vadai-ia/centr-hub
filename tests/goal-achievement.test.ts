@@ -69,6 +69,7 @@ function raw(): VentaRaw {
     leadPurchases: [],
     absorbedLeadEntries: [],
     leadFunnelHistory: [],
+    leadEntryChannels: new Map(),
     maxNonLostPos: new Map(),
   };
 }

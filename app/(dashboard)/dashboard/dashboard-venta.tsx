@@ -4,6 +4,7 @@ import { DashboardSection } from "./dashboard-section";
 import { AdvisorBreakdown } from "./advisor-breakdown";
 import { InfoTooltip } from "./info-tooltip";
 import { LeadFunnelCard } from "./dashboard-funnel";
+import { LeadTimingsCard } from "./dashboard-timings";
 import { IconCheck, IconPipeline, IconRevenue, IconTrophy } from "./kpi-icons";
 import {
   LossesByReasonChart,
@@ -232,6 +233,9 @@ export function DashboardVenta({
         {/* El embudo va primero: responde "¿dónde se me cae el proceso?",
             que es la pregunta de la que cuelgan las demás gráficas. */}
         <LeadFunnelCard funnel={m.leadFunnel} />
+        {/* Pegado al embudo porque habla de la MISMA cohorte: el embudo dice
+            dónde se cae, esto cuánto tarda y por dónde entró. */}
+        <LeadTimingsCard timings={m.leadTimings} />
         <RevenueByMonthChart data={m.revenueByMonth} currency={CCY} tooltip={TT.revenueByMonth} />
         <WonVsLostChart won={m.wonVsLost.won} lost={m.wonVsLost.lost} tooltip={TT.wonVsLost} />
         <LossesByReasonChart data={m.lossesByReason} currency={CCY} tooltip={TT.lossesByReason} />
