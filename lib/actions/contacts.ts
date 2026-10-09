@@ -29,6 +29,11 @@ import {
 } from "@/lib/db/users";
 import { getUserProfile } from "@/lib/db/users";
 import { getOrganizationById } from "@/lib/db/organizations";
+import { readOrganizationTimezone } from "@/lib/services/organization-timezone";
+import {
+  summarizeContactJourney,
+  type ContactJourney,
+} from "@/lib/services/contact-journey";
 import { recordAuditEvent } from "@/lib/db/operational";
 import {
   createCustomer,
@@ -309,6 +314,10 @@ export async function searchContactsAction(
 export interface ContactDetailBundle {
   detail: ContactDetail;
   timeline: TimelineEvent[];
+  /** Resumen de entrada (punto 24): cuándo entró, por dónde, cuánto tardó. */
+  journey: ContactJourney;
+  /** Zona de la organización — los "hace N días" de la bitácora. */
+  timezone: string;
   advisors: AdvisorOption[];
   role: string;
   /** True si el rol alcanza todos los datos (admin/superadmin/SDR). */
@@ -398,16 +407,35 @@ export async function loadContactDetail(opts: {
       }
     }
 
-    const [timeline, vendors] = await Promise.all([
+    const [timeline, vendors, org] = await Promise.all([
       getContactTimeline(opts.contactId),
       listActiveRealVendors(orgId),
+      getOrganizationById(orgId),
     ]);
+
+    // El resumen se calcula en el SERVIDOR, con su reloj y la zona de la
+    // organización: en el navegador, un "hace 3 días" calculado con el huso
+    // del equipo de quien mira se corre de día a primera hora.
+    const timezone = readOrganizationTimezone(org?.config ?? null);
+    const journey = summarizeContactJourney({
+      contact: {
+        createdAt: detail.contact.created_at,
+        isOutbound: detail.contact.is_outbound,
+        hasWhaapy: detail.contact.whaapy_contact_id !== null,
+        hasShopify: detail.contact.shopify_customer_id !== null,
+      },
+      events: timeline,
+      nowISO: new Date().toISOString(),
+      zone: timezone,
+    });
 
     return {
       ok: true,
       bundle: {
         detail,
         timeline,
+        journey,
+        timezone,
         role,
         canSeeAll: isAdmin,
         selfMembershipId: membership?.id ?? null,

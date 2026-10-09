@@ -337,6 +337,11 @@ describe("whitelist de audit_log", () => {
       return getContactTimeline("c-1");
     });
     expect(events[0].kind).toBe("opportunity_auto_created");
-    expect(events[0].label).toMatch(/Lead nuevo en Whaapy/);
+    expect(events[0].category).toBe("pipeline");
+    // Se asierta que DISTINGUE el disparador, no la prosa exacta: el texto
+    // es para la dirección y se reescribe; lo que no puede perderse es que
+    // "entró a WhatsApp" y "volvió a escribir" no se lean igual.
+    expect(events[0].label).not.toBe("Oportunidad creada sola");
+    expect(events[0].label).toMatch(/WhatsApp/i);
   });
 });

@@ -14,6 +14,7 @@ import { OutboundContactActions } from "@/components/outbound/outbound-contact-a
 import { ContactIndicators } from "./contact-indicators";
 import { ContactOpportunities } from "./contact-opportunities";
 import { ContactTimeline } from "./contact-timeline";
+import { ContactJourneySummary } from "./contact-journey-summary";
 import { ContactForm } from "./contact-form";
 import { ContactFormReadonly } from "./contact-form-readonly";
 
@@ -81,6 +82,10 @@ export function ContactDetailScreen({ bundle }: Props) {
       />
 
       <ContactIndicators indicators={bundle.detail.indicators} />
+
+      {/* Resumen antes de la bitácora: contesta "¿dónde está este cliente?"
+          sin obligar a leer la historia completa. */}
+      <ContactJourneySummary journey={bundle.journey} />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <ContactOpportunities

@@ -108,7 +108,54 @@ function KindIcon({ kind }: { kind: TimelineEvent["kind"] }) {
   );
 }
 
-const KIND_CONFIG: Record<TimelineEvent["kind"], { bg: string; text: string; icon: JSX.Element }> = {
+/**
+ * Ícono por tipo de evento. `Partial` a propósito: el catálogo de eventos
+ * (`timeline-catalog.ts`) crece cada vez que un hecho nuevo del negocio
+ * merece verse, y `KindIcon` ya cae a `other_audit` para lo que no tenga
+ * ícono propio. Con un Record exhaustivo, agregar un evento a la bitácora
+ * rompería la compilación de un componente que no tiene nada que ver.
+ */
+const KIND_CONFIG: Partial<
+  Record<TimelineEvent["kind"], { bg: string; text: string; icon: JSX.Element }>
+> & { other_audit: { bg: string; text: string; icon: JSX.Element } } = {
+  message_sent: {
+    bg: "bg-green-100 dark:bg-green-500/15",
+    text: "text-green-700 dark:text-green-300",
+    icon: (
+      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+      </svg>
+    ),
+  },
+  message_skipped: {
+    bg: "bg-amber-100 dark:bg-amber-500/15",
+    text: "text-amber-700 dark:text-amber-300",
+    icon: (
+      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+        <line x1="9" y1="9" x2="15" y2="15"/>
+      </svg>
+    ),
+  },
+  lead_created: {
+    bg: "bg-sky-100 dark:bg-sky-500/15",
+    text: "text-sky-700 dark:text-sky-300",
+    icon: (
+      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M12 5v14"/>
+        <path d="m5 12 7-7 7 7"/>
+      </svg>
+    ),
+  },
+  case_resolved: {
+    bg: "bg-emerald-100 dark:bg-emerald-500/15",
+    text: "text-emerald-700 dark:text-emerald-300",
+    icon: (
+      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M20 6 9 17l-5-5"/>
+      </svg>
+    ),
+  },
   stage_change: {
     bg: "bg-indigo-100 dark:bg-indigo-500/15",
     text: "text-indigo-700 dark:text-indigo-300",

@@ -735,6 +735,41 @@ La decisión es un módulo PURO: `computeLeadFunnel` en [lib/services/lead-funne
 
 **No requiere migración:** `opportunity_stage_history` ya existía.
 
+## Bitácora del cliente (punto 24, primera mitad)
+
+Lo que se pidió en la junta: "cualquier cosita que sucede queda anotada en el registro del cliente" y, encima, "saber exactamente dónde está el cliente" sin leerla. Vive en el detalle del contacto: un **resumen de entrada** arriba y la **bitácora** filtrable debajo.
+
+### La lista blanca NO contradice "bitácora completa"
+
+Medido en producción: de **18,857 filas de auditoría solo el 10% son hechos del negocio**. El resto es plomería — `shopify_webhook_received` (5,553 filas), `sync_loop_prevented` (604), intentos de sincronización, reintentos. Una bitácora literal sepultaría "le mandamos la encuesta" bajo cinco mil recibos de webhook. Lo que entra lo decide [lib/services/timeline-catalog.ts](lib/services/timeline-catalog.ts), **un solo archivo**: un `event_type` ausente del catálogo no entra, y nunca se pinta con su nombre técnico crudo (el mapeo anterior caía a `return eventType`, así que un evento sin traducir se mostraba como `postventa_whaapy_push_skipped`).
+
+### El hueco que tenía: la mitad de los hechos cuelga de la OPORTUNIDAD
+
+`fetchAuditEvents` para un contacto solo miraba `entity_type = 'contact'`. Pero la confirmación de entrega enviada, la encuesta, el caso resuelto, el lead absorbido, el handoff y la reasignación se registran contra la **oportunidad**. Medido: **844 eventos de negocio — el 43% del total — que la bitácora del contacto nunca mostró.** Ahora el timeline resuelve las oportunidades del sujeto UNA vez (`resolveScopeOpportunityIds`, compartido con el historial de etapas) y la auditoría hace dos lecturas: la del contacto y la de sus oportunidades.
+
+**Al agregar un evento nuevo que merezca verse, agregarlo al catálogo. Si se registra contra la oportunidad, ya queda cubierto.**
+
+### Mensajes: solo los que la plataforma ENVIÓ
+
+La bitácora muestra la confirmación de entrega y la encuesta de los 7 días, incluidos los **no enviados** con su motivo (`venta_delivery_push_skipped` → "no tiene teléfono"). **La conversación de WhatsApp NO está** y no puede estar: vive en el iframe de Whaapy y la plataforma no la descarga. Contar "cuántos mensajes escribió el cliente" —lo que Alex describió en la junta— exige suscribir los webhooks de mensajes de Whaapy, una tabla nueva y **recrear el webhook con su rotación de secret HMAC** (ver el SOP de rotación). Es una decisión aparte, no un pendiente de esta entrega. El resumen lo dice en pantalla para que nadie lo lea como un hueco.
+
+### Resumen de entrada
+
+[lib/services/contact-journey.ts](lib/services/contact-journey.ts) (PURO): canal de entrada, días con nosotros, **días hasta el primer avance** y días desde el último movimiento. Se calcula en el SERVIDOR con la zona de la organización — un "hace 3 días" calculado en el navegador se corre de día a primera hora.
+
+- **La precedencia del canal no es arbitraria:** `is_outbound` es la marca declarada (0040) y gana sobre cualquier inferencia; después manda la bitácora, que es un hecho fechado; y solo al final se infiere de las identidades externas, que es lo más débil — *un lead de WhatsApp acaba con identidad de Shopify en cuanto alguien le cotiza*, así que inferir del estado actual diría "Shopify" y sería falso. Con las dos identidades y sin bitácora dice "Sin determinar": mejor que inventar un canal.
+- **El primer avance NO cuenta el movimiento de nacimiento.** La tarjeta aterriza en su etapa inicial en el mismo instante en que el contacto entra; contarlo daría "0 días" a todo el mundo. **"Sin avanzar" es un dato, no un hueco**: es lo que delata al lead olvidado, y se pinta en ámbar pasados dos días.
+
+### El filtro por categoría es del lado del cliente, y eso tiene un límite
+
+Seis categorías (identidad, asignación, pipeline, cotizaciones, mensajes, tareas) y solo se ofrecen las que ESE cliente tiene. Filtra en el navegador porque la bitácora entera ya viene en la respuesta: medido, un contacto tiene **3 hechos de negocio en la mediana y 13 el que más**. Si algún día un contacto acumulara cientos, el filtro tendría que irse al servidor — filtrar en el navegador sobre una lista truncada mostraría "0 mensajes" cuando sí los hay, más abajo del corte.
+
+### Acoplamiento a vigilar
+
+Las keys del catálogo son `event_type` del audit log, strings que se escriben en otro archivo. Renombrar el evento en el emisor y no aquí saca el hecho de la bitácora **en silencio**: nada truena y el cliente simplemente parece no tener historia. El guard `tests/timeline-catalog.test.ts` recorre `lib`, `app`, `scripts` y las migraciones y falla si alguna key quedó huérfana (ya cazó un caso: el envío correctivo de la encuesta se emite desde `scripts/maintenance`). `KIND_CONFIG` de los íconos pasó a `Partial` a propósito — con un Record exhaustivo, agregar un evento a la bitácora rompía la compilación de un componente sin relación.
+
+**No requiere migración:** `audit_log`, `activities` y `opportunity_stage_history` ya existían.
+
 ## Cambios al stack
 
 Cualquier modificación al stack documentado en `package.json` (agregar dependencia, subir versión mayor, cambiar provider externo) requiere aprobación explícita del operador antes de comitearse. Razón: el stack está fijado por experiencias previas (Kibah, FindMed, Hemenesy) y cualquier desviación inesperada introduce riesgo operacional.

@@ -2,6 +2,12 @@ import "server-only";
 import { getTenantScopedClient } from "@/lib/db/client";
 import { listPipelineStages } from "@/lib/db/pipeline";
 import { TIMELINE_DEFAULT_LIMIT } from "@/lib/constants";
+import {
+  categoryOfKind,
+  describeAuditEvent,
+  type TimelineCategory,
+  type TimelineKind,
+} from "@/lib/services/timeline-catalog";
 import type {
   ActivityRow,
   AuditLogRow,
@@ -37,27 +43,19 @@ import type {
  *     no cambia — sólo se añade otro `from*` y se concatena.
  *
  * Explícitamente NO incluido:
- *   - Mensajes de Whaapy (viven en el iframe — Sección B10 del prompt).
+ *   - Los mensajes de la CONVERSACIÓN de WhatsApp (viven en el iframe de
+ *     Whaapy; la plataforma no los descarga). Sí aparecen los que la
+ *     plataforma ENVIÓ — confirmación de entrega y encuesta de los 7 días.
  *   - Eventos técnicos de audit (sync_loop_prevented, *_intent_recorded,
- *     *_sync_failed, etc) — son ruido operativo, no para el vendedor.
+ *     *_webhook_received, etc) — son ruido operativo, no para el vendedor.
+ *     Medido en producción: el 90% del audit log es plomería de ese tipo.
+ *     Qué entra y qué no lo decide `timeline-catalog.ts`, en un solo lugar.
  */
 
-export type TimelineKind =
-  | "stage_change"
-  | "order_paid"
-  | "order_cancelled"
-  | "task_created"
-  | "task_completed"
-  | "manual_note"
-  | "lead_message"
-  | "reassignment"
-  | "contact_edited"
-  | "contact_created_in_shopify"
-  | "contact_matched_in_shopify"
-  | "contact_created_in_whaapy"
-  | "opportunity_auto_created"
-  | "other_activity"
-  | "other_audit";
+// `TimelineKind` y las categorías viven en `timeline-catalog.ts` — el mismo
+// módulo que decide qué eventos entran, para que agregar uno sea un solo
+// cambio en un solo archivo.
+export type { TimelineCategory, TimelineKind };
 
 export interface TimelineEvent {
   /** Identificador único en el merger: `<source>:<row_id>:<sub?>`. */
@@ -66,6 +64,8 @@ export interface TimelineEvent {
   source: "stage_history" | "orders" | "tasks" | "activities" | "audit";
   occurredAt: ISODateString;
   kind: TimelineKind;
+  /** Agrupación para el filtro de la bitácora. */
+  category: TimelineCategory;
   /** Resumen una-línea para la UI. */
   label: string;
   /** Detalle opcional (descripción del activity, nota libre, etc). */
@@ -90,22 +90,6 @@ export interface TimelineQuery {
   /** Eventos máximos a retornar. Default `TIMELINE_DEFAULT_LIMIT`. */
   limit?: number;
 }
-
-/**
- * Event types del audit_log que SÍ entran al timeline. Mantener tan
- * corta como sea posible — todo lo que no esté acá se ignora.
- * Si M7+ necesita exponer más eventos al vendedor, agregar acá.
- */
-const AUDIT_EVENT_WHITELIST = new Set<string>([
-  "contact_reassigned",
-  "opportunity_reassigned",
-  "contact_edited_manually",
-  "shopify_customer_created_outbound",
-  "shopify_customer_matched_existing_on_create",
-  "whaapy_contact_created_outbound",
-  "whaapy_contact_matched_existing_on_create",
-  "c2_opportunity_auto_created",
-]);
 
 // ============================================================
 // API pública
@@ -132,14 +116,20 @@ export async function getOpportunityTimeline(
 async function buildTimeline(q: TimelineQuery): Promise<TimelineEvent[]> {
   const limit = q.limit ?? TIMELINE_DEFAULT_LIMIT;
 
-  const stageMap = await loadStageNameMap();
+  // Las oportunidades del sujeto se resuelven UNA vez: las necesitan dos
+  // fuentes (historial de etapas y auditoría), y la de auditoría sin ellas
+  // deja fuera casi la mitad de la bitácora — ver `fetchAuditEvents`.
+  const [stageMap, oppIds] = await Promise.all([
+    loadStageNameMap(),
+    resolveScopeOpportunityIds(q),
+  ]);
 
   const [stageChanges, orders, tasks, activities, audits] = await Promise.all([
-    fetchStageHistory(q, limit, stageMap),
+    fetchStageHistory(oppIds, limit, stageMap),
     fetchOrderEvents(q, limit),
     fetchTaskEvents(q, limit),
     fetchActivityEvents(q, limit),
-    fetchAuditEvents(q, limit),
+    fetchAuditEvents(q, oppIds, limit),
   ]);
 
   const merged = [
@@ -269,30 +259,38 @@ async function loadStageNameMap(): Promise<Map<UUID, PipelineStageRow>> {
 }
 
 // ------------------------------------------------------------
+// Oportunidades del sujeto
+// ------------------------------------------------------------
+
+/**
+ * Las oportunidades que el timeline debe mirar. Para una oportunidad es ella
+ * misma; para un contacto, TODAS las suyas — incluidas las canceladas, que
+ * son parte de su historia (un lead archivado por absorción, una cotización
+ * que Shopify borró).
+ */
+async function resolveScopeOpportunityIds(q: TimelineQuery): Promise<UUID[]> {
+  if ("opportunityId" in q.scope) return [q.scope.opportunityId];
+  const { supabase, organizationId } = getTenantScopedClient();
+  const { data, error } = await supabase
+    .from("opportunities")
+    .select("id")
+    .eq("organization_id", organizationId)
+    .eq("contact_id", q.scope.contactId);
+  if (error) throw error;
+  return (data ?? []).map((r) => (r as { id: UUID }).id);
+}
+
+// ------------------------------------------------------------
 // stage_history
 // ------------------------------------------------------------
 
 async function fetchStageHistory(
-  q: TimelineQuery,
+  oppIds: UUID[],
   limit: number,
   stageMap: Map<UUID, PipelineStageRow>,
 ): Promise<TimelineEvent[]> {
+  if (oppIds.length === 0) return [];
   const { supabase, organizationId } = getTenantScopedClient();
-
-  let oppIds: UUID[];
-  if ("opportunityId" in q.scope) {
-    oppIds = [q.scope.opportunityId];
-  } else {
-    // Para timeline de contacto: traer ids de opps del contacto.
-    const { data, error } = await supabase
-      .from("opportunities")
-      .select("id")
-      .eq("organization_id", organizationId)
-      .eq("contact_id", q.scope.contactId);
-    if (error) throw error;
-    oppIds = (data ?? []).map((r) => (r as { id: UUID }).id);
-    if (oppIds.length === 0) return [];
-  }
 
   const { data, error } = await supabase
     .from("opportunity_stage_history")
@@ -317,6 +315,7 @@ async function fetchStageHistory(
       source: "stage_history" as const,
       occurredAt: row.changed_at,
       kind: "stage_change" as const,
+      category: categoryOfKind("stage_change"),
       label,
       description: null,
       meta: {
@@ -370,6 +369,7 @@ async function fetchOrderEvents(
         source: "orders",
         occurredAt: row.paid_at,
         kind: "order_paid",
+      category: categoryOfKind("order_paid"),
         label: `Orden ${row.shopify_name ?? row.shopify_order_id} pagada`,
         description: null,
         meta: {
@@ -392,6 +392,7 @@ async function fetchOrderEvents(
         source: "orders",
         occurredAt: row.cancelled_at,
         kind: "order_cancelled",
+      category: categoryOfKind("order_cancelled"),
         label: `Orden ${row.shopify_name ?? row.shopify_order_id} cancelada`,
         description: row.cancellation_reason,
         meta: {
@@ -442,6 +443,7 @@ async function fetchTaskEvents(
       source: "tasks",
       occurredAt: row.created_at,
       kind: "task_created",
+      category: categoryOfKind("task_created"),
       label: `Tarea creada: ${row.title}`,
       description: row.description,
       meta: {
@@ -462,6 +464,7 @@ async function fetchTaskEvents(
         source: "tasks",
         occurredAt: row.completed_at,
         kind: "task_completed",
+        category: categoryOfKind("task_completed"),
         label: `Tarea completada: ${row.title}`,
         description: null,
         meta: { task_id: row.id, task_type: row.task_type },
@@ -516,6 +519,7 @@ function activityToEvent(row: ActivityRow): TimelineEvent {
     source: "activities",
     occurredAt: row.created_at,
     kind,
+    category: categoryOfKind(kind),
     label: row.description,
     description: null,
     meta: {
@@ -537,46 +541,70 @@ function activityToEvent(row: ActivityRow): TimelineEvent {
 
 async function fetchAuditEvents(
   q: TimelineQuery,
+  oppIds: UUID[],
   limit: number,
 ): Promise<TimelineEvent[]> {
   const { supabase, organizationId } = getTenantScopedClient();
-  let query = supabase
-    .from("audit_log")
-    .select("*")
-    .eq("organization_id", organizationId);
 
-  if ("opportunityId" in q.scope) {
-    query = query.eq("entity_type", "opportunity").eq("entity_id", q.scope.opportunityId);
-  } else {
-    query = query.eq("entity_type", "contact").eq("entity_id", q.scope.contactId);
+  // Sin filtro de event_type en SQL: el catálogo es chico y PostgREST no
+  // compone bien un `.in()` grande de texto. Se sobre-pide porque el 90%
+  // del audit log es plomería que se descarta aquí.
+  const over = limit * 6;
+  const base = () =>
+    supabase
+      .from("audit_log")
+      .select("*")
+      .eq("organization_id", organizationId)
+      .order("created_at", { ascending: false })
+      .limit(over);
+
+  // DOS lecturas, no una. La mitad de los hechos del negocio se registran
+  // contra la OPORTUNIDAD (`entity_type = 'opportunity'`), no contra el
+  // contacto: la confirmación de entrega enviada, la encuesta, el caso
+  // resuelto, el lead absorbido, la reasignación. Medido en producción: 844
+  // eventos de negocio, el 43% del total, que la bitácora del contacto no
+  // mostraba por mirar solo `entity_type = 'contact'`.
+  const queries = [
+    "opportunityId" in q.scope
+      ? base().eq("entity_type", "opportunity").eq("entity_id", q.scope.opportunityId)
+      : base().eq("entity_type", "contact").eq("entity_id", q.scope.contactId),
+  ];
+  if (!("opportunityId" in q.scope) && oppIds.length > 0) {
+    queries.push(base().eq("entity_type", "opportunity").in("entity_id", oppIds));
   }
 
-  // Sin filtro de event_type a nivel SQL — PostgREST no soporta
-  // bien arrays grandes con `.in()` para texto, y la whitelist es
-  // pequeña, así que filtramos en memoria. Para volúmenes mayores
-  // (M10+), conviene índice + filter SQL específico.
-  const { data, error } = await query
-    .order("created_at", { ascending: false })
-    .limit(limit * 3); // sobre-pedimos: muchos audits caerán en el descarte
-  if (error) throw error;
+  const results = await Promise.all(queries);
+  const rows: AuditLogRow[] = [];
+  const seen = new Set<string>();
+  for (const res of results) {
+    if (res.error) throw res.error;
+    for (const row of (res.data ?? []) as AuditLogRow[]) {
+      if (seen.has(row.id)) continue;
+      seen.add(row.id);
+      rows.push(row);
+    }
+  }
+  rows.sort((a, b) => (b.created_at < a.created_at ? -1 : 1));
 
-  const rows = (data ?? []) as AuditLogRow[];
   const events: TimelineEvent[] = [];
   for (const row of rows) {
-    if (!AUDIT_EVENT_WHITELIST.has(row.event_type)) continue;
-    events.push(auditToEvent(row));
+    const event = auditToEvent(row);
+    // `null` = no está en el catálogo, o sea: no es un hecho del negocio.
+    if (!event) continue;
+    events.push(event);
     if (events.length >= limit) break;
   }
   return events;
 }
 
-function auditToEvent(row: AuditLogRow): TimelineEvent {
+function auditToEvent(row: AuditLogRow): TimelineEvent | null {
   const payload = (typeof row.payload === "object" && row.payload !== null
     ? (row.payload as Record<string, unknown>)
     : {}) as Record<string, unknown>;
 
-  const kind = mapAuditKind(row.event_type);
-  const label = mapAuditLabel(row.event_type, payload);
+  const described = describeAuditEvent(row.event_type, payload);
+  if (!described) return null;
+
   // Para reasignaciones la entidad ancla puede ser contact u opportunity
   // — usamos el entity_id como opportunityId solo si entity_type lo es.
   const opportunityId =
@@ -586,8 +614,9 @@ function auditToEvent(row: AuditLogRow): TimelineEvent {
     id: `audit:${row.id}`,
     source: "audit",
     occurredAt: row.created_at,
-    kind,
-    label,
+    kind: described.kind,
+    category: described.category,
+    label: described.label,
     description: null,
     meta: { event_type: row.event_type, ...payload },
     actorUserId: row.actor_user_id,
@@ -595,66 +624,6 @@ function auditToEvent(row: AuditLogRow): TimelineEvent {
     opportunityId,
     opportunityReference: null,
   };
-}
-
-function mapAuditKind(eventType: string): TimelineKind {
-  switch (eventType) {
-    case "contact_reassigned":
-    case "opportunity_reassigned":
-      return "reassignment";
-    case "contact_edited_manually":
-      return "contact_edited";
-    case "shopify_customer_created_outbound":
-      return "contact_created_in_shopify";
-    case "shopify_customer_matched_existing_on_create":
-      return "contact_matched_in_shopify";
-    case "whaapy_contact_created_outbound":
-    case "whaapy_contact_matched_existing_on_create":
-      return "contact_created_in_whaapy";
-    case "c2_opportunity_auto_created":
-      return "opportunity_auto_created";
-    default:
-      return "other_audit";
-  }
-}
-
-function mapAuditLabel(
-  eventType: string,
-  payload: Record<string, unknown>,
-): string {
-  switch (eventType) {
-    case "contact_reassigned":
-      return "Contacto reasignado";
-    case "opportunity_reassigned":
-      return "Oportunidad reasignada";
-    case "contact_edited_manually": {
-      const fields = payload.fields as unknown;
-      if (Array.isArray(fields) && fields.length > 0) {
-        return `Contacto editado (${fields.join(", ")})`;
-      }
-      return "Contacto editado";
-    }
-    case "shopify_customer_created_outbound":
-      return "Contacto creado en Shopify";
-    case "shopify_customer_matched_existing_on_create":
-      return "Contacto vinculado a customer existente en Shopify";
-    case "whaapy_contact_created_outbound":
-      return "Contacto creado en Whaapy";
-    case "whaapy_contact_matched_existing_on_create":
-      return "Contacto vinculado a contacto existente en Whaapy";
-    case "c2_opportunity_auto_created": {
-      const trigger = payload.trigger as string | undefined;
-      if (trigger === "new_contact_in_whaapy") {
-        return "Oportunidad creada automáticamente (Lead nuevo en Whaapy)";
-      }
-      if (trigger === "reactivity_after_n_days") {
-        return "Oportunidad creada automáticamente (re-actividad del contacto)";
-      }
-      return "Oportunidad creada automáticamente";
-    }
-    default:
-      return eventType;
-  }
 }
 
 export type { Json };
