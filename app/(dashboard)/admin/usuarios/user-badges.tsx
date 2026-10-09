@@ -1,4 +1,6 @@
 "use client";
+import { formatLastSeen, isOnline } from "@/lib/services/presence-display";
+import type { ISODateString } from "@/lib/types/database";
 import type { UserLoginStatus } from "@/lib/types/admin";
 
 /** Badges del listado de usuarios (M9.2). Extraídos para acotar la pantalla. */
@@ -69,6 +71,45 @@ export function LoginBadge({ status }: { status: UserLoginStatus }) {
   return (
     <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${cls}`}>
       {label}
+    </span>
+  );
+}
+
+/**
+ * Presencia (0057) — "¿estuvo conectado sí o no?", que es lo que se pidió.
+ *
+ * Distingue tres cosas, no dos: en línea ahora, última vez conocida, y sin
+ * actividad registrada. Esto último NO significa "nunca entró" —eso lo dice
+ * `LoginBadge`—, sino que no hay latidos en la ventana de consulta.
+ */
+export function PresenceBadge({
+  lastSeenAt,
+  now,
+  timezone,
+}: {
+  lastSeenAt: ISODateString | null;
+  now: ISODateString;
+  /** Zona de la ORGANIZACIÓN: "hoy 14:30" tiene que ser el día de quien
+   *  estuvo conectado, no el de México. */
+  timezone: string;
+}) {
+  const online = isOnline(lastSeenAt, now);
+  return (
+    <span
+      className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium ${
+        online
+          ? "bg-green-50 text-green-700 dark:bg-green-900/30 dark:text-green-300"
+          : "bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400"
+      }`}
+      title={lastSeenAt ? `Última actividad: ${lastSeenAt}` : "Sin actividad registrada"}
+    >
+      <span
+        className={`h-1.5 w-1.5 rounded-full ${
+          online ? "bg-green-500" : "bg-gray-400 dark:bg-gray-500"
+        }`}
+        aria-hidden
+      />
+      {formatLastSeen(lastSeenAt, now, timezone)}
     </span>
   );
 }

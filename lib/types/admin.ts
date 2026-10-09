@@ -1,5 +1,6 @@
 import type {
   DataScope,
+  ISODateString,
   LossReasonRow,
   PipelineStageRow,
   TagClassification,
@@ -147,6 +148,9 @@ export interface ManagedUserView {
    *  rol — un admin/líder que sigue vendiendo la conserva. El rol 'vendedor'
    *  la tiene siempre encendida y no es editable para él. */
   isAdvisor: boolean;
+  /** Último latido de presencia (0057). null = sin actividad en la ventana
+   *  de consulta. NO es "nunca entró": eso lo dice `loginStatus`. */
+  lastSeenAt: ISODateString | null;
 }
 
 export type UsersActionResult =
@@ -160,7 +164,17 @@ export type UsersActionResult =
  * conserva los roles del load inicial.
  */
 export type LoadAdminUsersResult =
-  | { ok: true; users: ManagedUserView[]; assignableRoles: RoleOption[] }
+  | {
+      ok: true;
+      users: ManagedUserView[];
+      assignableRoles: RoleOption[];
+      /** Reloj del SERVIDOR al armar la lista — contra él se evalúa "en línea"
+       *  en el primer render. El del navegador puede estar corrido. */
+      now: ISODateString;
+      /** Zona de la organización: el historial de conexiones se cuenta en el
+       *  día que vivió la persona, no en el de México. */
+      timezone: string;
+    }
   | { ok: false; message: string };
 
 /**

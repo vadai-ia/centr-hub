@@ -3,6 +3,7 @@ import { getSession } from "@/lib/auth/session";
 import { Navbar } from "@/components/ui/navbar";
 import { Sidebar } from "@/components/ui/sidebar";
 import { NoAccessScreen } from "@/components/ui/no-access-screen";
+import { PresenceHeartbeat } from "@/components/ui/presence-heartbeat";
 
 export default async function DashboardLayout({
   children,
@@ -23,6 +24,10 @@ export default async function DashboardLayout({
 
   return (
     <div className="h-screen flex flex-col bg-gray-50 dark:bg-gray-900 overflow-hidden">
+      {/* Registra "está usando la plataforma" desde cualquier pantalla.
+          Va aquí y no en cada página para que no se pueda olvidar en una
+          pantalla nueva. */}
+      <PresenceHeartbeat />
       <Navbar session={data} />
       <div className="flex flex-1 min-h-0 overflow-hidden">
         <Sidebar role={data.activeRole} />

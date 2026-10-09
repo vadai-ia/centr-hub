@@ -1,21 +1,30 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   activateUserAction,
   deactivateUserAction,
   resendInviteAction,
 } from "@/lib/actions/admin-users";
+import { loadTeamPresenceAction } from "@/lib/actions/presence";
+import { PRESENCE_REFRESH_MS } from "@/lib/constants";
 import type { ManagedUserView, RoleOption } from "@/lib/types/admin";
+import type { ISODateString, UUID } from "@/lib/types/database";
 import { UserEditModal } from "./user-edit-modal";
 import { InviteUserModal } from "./invite-vendor-modal";
 import { LinkLoginModal } from "./link-login-modal";
 import { DeactivateModal } from "./deactivate-modal";
-import { AdvisorBadge, RoleBadge, StateBadge, LoginBadge } from "./user-badges";
+import { ActivityModal } from "./activity-modal";
+import { UserRow } from "./user-row";
 
 interface Props {
   initialUsers: ManagedUserView[];
   /** Roles asignables de la org (para invitar / editar) — 0039. */
   assignableRoles: RoleOption[];
+  /** Reloj del servidor al armar la lista (0057) — contra él se evalúa
+   *  "en línea" hasta el primer refresco. */
+  serverNow: ISODateString;
+  /** Zona de la organización, para el "hoy/ayer" de la última actividad. */
+  timezone: string;
 }
 
 /**
@@ -25,8 +34,28 @@ interface Props {
  * modal. Invitar/vincular login y activar/desactivar se agregan en los
  * Blocks 2 y 3.
  */
-export function UsuariosScreen({ initialUsers, assignableRoles }: Props) {
+export function UsuariosScreen({
+  initialUsers,
+  assignableRoles,
+  serverNow,
+  timezone,
+}: Props) {
   const [users, setUsers] = useState(initialUsers);
+  const [activityUser, setActivityUser] = useState<ManagedUserView | null>(null);
+  // Presencia (0057). Vive APARTE de `users` y se refresca sola: lo único
+  // que cambia minuto a minuto es quién está conectado, y recargar la página
+  // entera para eso cerraría cualquier modal abierto y perdería el banner.
+  const [presence, setPresence] = useState<{
+    now: ISODateString;
+    lastSeen: Record<UUID, ISODateString>;
+  }>({
+    now: serverNow,
+    lastSeen: Object.fromEntries(
+      initialUsers
+        .filter((u) => u.lastSeenAt !== null)
+        .map((u) => [u.userId, u.lastSeenAt as ISODateString]),
+    ),
+  });
   const [editing, setEditing] = useState<ManagedUserView | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [inviteOpen, setInviteOpen] = useState(false);
@@ -40,6 +69,21 @@ export function UsuariosScreen({ initialUsers, assignableRoles }: Props) {
     tone: "error" | "success";
     text: string;
   } | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function refresh() {
+      if (typeof document !== "undefined" && document.hidden) return;
+      const res = await loadTeamPresenceAction();
+      if (cancelled || !res.ok) return;
+      setPresence({ now: res.now, lastSeen: res.lastSeen });
+    }
+    const timer = window.setInterval(refresh, PRESENCE_REFRESH_MS);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, []);
 
   function openEdit(user: ManagedUserView) {
     setEditing(user);
@@ -128,84 +172,20 @@ export function UsuariosScreen({ initialUsers, assignableRoles }: Props) {
 
       <ul className="space-y-2">
         {users.map((u) => (
-          <li
+          <UserRow
             key={u.membershipId}
-            className="flex flex-col sm:flex-row sm:items-center gap-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-4 py-3"
-          >
-            <div className="flex items-center gap-3 min-w-0 flex-1">
-              <span
-                className="h-8 w-8 flex-shrink-0 rounded-full ring-2 ring-white dark:ring-gray-800 shadow"
-                style={{ backgroundColor: u.color }}
-                aria-hidden
-              />
-              <div className="min-w-0">
-                <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
-                  {u.fullName}
-                  {u.isSelf && (
-                    <span className="ml-1.5 text-xs text-gray-400 dark:text-gray-500">
-                      (tú)
-                    </span>
-                  )}
-                </p>
-                <p className="text-xs text-gray-500 dark:text-gray-400 truncate">
-                  {u.email ?? "Sin acceso configurado"}
-                </p>
-              </div>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-2">
-              <RoleBadge role={u.role} label={u.roleLabel} />
-              {u.isAdvisor && u.role !== "vendedor" && <AdvisorBadge />}
-              <StateBadge active={u.isActive} />
-              <LoginBadge status={u.loginStatus} />
-              {u.loginStatus === "placeholder" && (
-                <button
-                  type="button"
-                  onClick={() => setLinkUser(u)}
-                  className="px-2.5 py-1 text-xs rounded-md bg-orange-600 text-white hover:bg-orange-700"
-                >
-                  Vincular login
-                </button>
-              )}
-              {u.loginStatus === "pending" && (
-                <button
-                  type="button"
-                  onClick={() => handleResend(u)}
-                  disabled={busyId === u.membershipId}
-                  className="px-2.5 py-1 text-xs rounded-md border border-amber-300 text-amber-700 dark:border-amber-700 dark:text-amber-300 hover:bg-amber-50 dark:hover:bg-amber-900/20 disabled:opacity-50"
-                >
-                  {busyId === u.membershipId ? "Enviando..." : "Reenviar"}
-                </button>
-              )}
-              <button
-                type="button"
-                onClick={() => openEdit(u)}
-                className="px-2.5 py-1 text-xs rounded-md border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700"
-              >
-                Editar
-              </button>
-              {!u.isSelf &&
-                (u.isActive ? (
-                  <button
-                    type="button"
-                    onClick={() => handleDeactivate(u)}
-                    disabled={busyId === u.membershipId}
-                    className="px-2.5 py-1 text-xs rounded-md border border-red-200 text-red-700 dark:border-red-800 dark:text-red-300 hover:bg-red-50 dark:hover:bg-red-900/20 disabled:opacity-50"
-                  >
-                    {busyId === u.membershipId ? "..." : "Desactivar"}
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => handleActivate(u)}
-                    disabled={busyId === u.membershipId}
-                    className="px-2.5 py-1 text-xs rounded-md border border-green-200 text-green-700 dark:border-green-800 dark:text-green-300 hover:bg-green-50 dark:hover:bg-green-900/20 disabled:opacity-50"
-                  >
-                    {busyId === u.membershipId ? "..." : "Reactivar"}
-                  </button>
-                ))}
-            </div>
-          </li>
+            user={u}
+            lastSeenAt={presence.lastSeen[u.userId] ?? null}
+            now={presence.now}
+            timezone={timezone}
+            busy={busyId === u.membershipId}
+            onActivity={() => setActivityUser(u)}
+            onEdit={() => openEdit(u)}
+            onLinkLogin={() => setLinkUser(u)}
+            onResend={() => void handleResend(u)}
+            onDeactivate={() => void handleDeactivate(u)}
+            onActivate={() => void handleActivate(u)}
+          />
         ))}
       </ul>
 
@@ -214,6 +194,12 @@ export function UsuariosScreen({ initialUsers, assignableRoles }: Props) {
           <p>No hay usuarios gestionables todavía.</p>
         </div>
       )}
+
+      <ActivityModal
+        open={activityUser !== null}
+        user={activityUser}
+        onClose={() => setActivityUser(null)}
+      />
 
       <UserEditModal
         open={modalOpen}

@@ -598,6 +598,20 @@ type Insertable<R extends { id: UUID; created_at: ISODateString; updated_at: ISO
   Omit<R, "id" | "created_at" | "updated_at"> &
     Partial<Pick<R, "id" | "created_at" | "updated_at">>;
 
+/**
+ * Un tramo de uso continuo de una persona (0057). No hay `ended_at`: el
+ * fin del tramo ES `last_seen_at`, porque cerrar la pestaña o perder la
+ * red no emiten ningún evento.
+ */
+export interface UserActivitySessionRow {
+  id: UUID;
+  organization_id: UUID;
+  user_id: UUID;
+  started_at: ISODateString;
+  last_seen_at: ISODateString;
+  created_at: ISODateString;
+}
+
 type Updatable<R> = Partial<R>;
 
 export interface Database {
@@ -752,6 +766,12 @@ export interface Database {
           Partial<Pick<InboundWebhookSourceRow, "last_used_at" | "rotated_at">>;
         Update: Updatable<InboundWebhookSourceRow>;
       };
+      user_activity_sessions: {
+        Row: UserActivitySessionRow;
+        Insert: Pick<UserActivitySessionRow, "organization_id" | "user_id"> &
+          Partial<Omit<UserActivitySessionRow, "organization_id" | "user_id">>;
+        Update: Updatable<UserActivitySessionRow>;
+      };
       integration_connections: {
         Row: IntegrationConnectionRow;
         // Todo lo que no es (organization_id, provider) tiene DEFAULT en SQL
@@ -800,6 +820,15 @@ export interface Database {
       count_integration_linked_rows: {
         Args: { p_organization_id: UUID; p_provider: IntegrationProvider };
         Returns: Json;
+      };
+      /** Latido de presencia (0057) — extiende el tramo vigente o abre uno nuevo. */
+      record_user_presence: {
+        Args: {
+          p_organization_id: UUID;
+          p_user_id: UUID;
+          p_gap_minutes?: number;
+        };
+        Returns: UUID;
       };
       /** Reemplazo ATÓMICO de conexión: discriminador + desenlace + Vault (0046). */
       replace_integration_connection: {

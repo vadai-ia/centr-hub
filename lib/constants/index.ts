@@ -261,3 +261,33 @@ export const ONLINE_ORDER_SOURCE = "web";
  * leads que avanzaron volverían a desaparecer del conteo sin ningún error.
  */
 export const ABSORPTION_CANCELLATION_SOURCE = "absorbed_by_advanced_opportunity" as const;
+
+// ---------------------------------------------------------------------------
+// Presencia de usuarios (0057) — "¿está conectado ahora?" + historial corto
+// ---------------------------------------------------------------------------
+
+/** Cada cuánto late el navegador. Una fila por TRAMO, no por latido. */
+export const PRESENCE_HEARTBEAT_MS = 120_000 as const;
+
+/**
+ * Hueco sin latidos que corta el tramo y abre uno nuevo. Más holgado que el
+ * intervalo del latido a propósito: un par de latidos perdidos (pestaña en
+ * segundo plano, red intermitente, equipo que se durmió un momento) no deben
+ * partir en dos lo que fue una sola sesión de trabajo.
+ */
+export const PRESENCE_SESSION_GAP_MINUTES = 10 as const;
+
+/**
+ * Ventana de "en línea". Debe ser MAYOR que el intervalo del latido, o la
+ * persona parpadearía a "desconectada" entre un latido y el siguiente.
+ */
+export const PRESENCE_ONLINE_WINDOW_MINUTES = 5 as const;
+
+/** Hasta dónde mira atrás la columna "última vez". Más allá: "sin actividad". */
+export const PRESENCE_LOOKBACK_DAYS = 90 as const;
+
+/** Tramos que lista el historial de una persona. */
+export const PRESENCE_HISTORY_LIMIT = 60 as const;
+
+/** Cada cuánto la pantalla de Usuarios re-pide la presencia (no la página). */
+export const PRESENCE_REFRESH_MS = 45_000 as const;

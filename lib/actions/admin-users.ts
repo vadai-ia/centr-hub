@@ -25,6 +25,9 @@ import {
   updateUserProfile,
 } from "@/lib/db/users";
 import { listActiveOpportunitiesByAdvisor } from "@/lib/db/opportunities";
+import { listLastSeenByUser } from "@/lib/db/presence";
+import { getOrganizationById } from "@/lib/db/organizations";
+import { readOrganizationTimezone } from "@/lib/services/organization-timezone";
 import { listRoles } from "@/lib/db/roles";
 import { recordAuditEvent } from "@/lib/db/operational";
 import { reassignOpportunityAdvisor } from "@/lib/services/opportunity-reassignment";
@@ -134,6 +137,8 @@ export async function buildManagedUsers(
   const memberships = await listManageableMemberships(orgId);
   const activeOpps = await countActiveOpportunitiesByAdvisor(orgId);
   const map = rolesMap ?? (await loadOrgRolesMap(orgId));
+  // Presencia (0057) — en lote, no una lectura por persona.
+  const lastSeen = await listLastSeenByUser(memberships.map((m) => m.user_id));
 
   const users: ManagedUserView[] = [];
   for (const m of memberships) {
@@ -152,6 +157,7 @@ export async function buildManagedUsers(
       activeOpportunities: activeOpps.get(m.id) ?? 0,
       inLeadRotation: m.in_lead_rotation,
       isAdvisor: m.is_advisor,
+      lastSeenAt: lastSeen.get(m.user_id) ?? null,
     });
   }
   return users;
@@ -170,10 +176,15 @@ export async function loadAdminUsers(): Promise<LoadAdminUsersResult> {
         admin.ctx.userId,
         rolesMap,
       );
+      const timezone = readOrganizationTimezone(
+        (await getOrganizationById(admin.ctx.orgId))?.config ?? null,
+      );
       return {
         ok: true as const,
         users,
         assignableRoles: assignableRolesFrom(roleRows),
+        now: new Date().toISOString(),
+        timezone,
       };
     },
     { source: "user_session" },

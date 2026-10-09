@@ -646,6 +646,34 @@ Pantalla admin que **da de alta una organización nueva** (una tienda más) y **
 
 **Aplicar la migración 0048.** Agrega la pestaña `admin-organizaciones` a los roles admin/superadmin **existentes** (sin este backfill, Centr y Rustr nunca la ven), re-CREA `bootstrap_organization` desde la VIGENTE (0046) con esa key añadida, y crea `bootstrap_organization_with_owner`. Es idempotente y no destructivo.
 
+## Presencia de usuarios: "¿estuvo conectado?" (migración 0057)
+
+Lo que la dirección pidió es deliberadamente angosto: saber si una persona **está usando la plataforma ahora** y tener un **historial corto** ("estuvo conectado de tal hora a tal hora, tal día"). NO es auditoría de acciones —eso ya lo cubre `audit_log`— ni telemetría de pantallas.
+
+**Se ve en Admin → Usuarios**, no en una pestaña nueva: la pantalla ya lista al equipo. Cada fila trae el distintivo de presencia (punto verde "En línea", o "hace 30 min" / "ayer 10:00" / "Sin actividad") y un botón **"Actividad"** que abre el historial por día con los tramos y su duración. El distintivo se refresca solo cada 45 s pidiendo únicamente la presencia (`loadTeamPresenceAction`), no recargando la página: recargar cerraría cualquier modal abierto y perdería el aviso en pantalla.
+
+**El modelo es UNA fila por TRAMO de uso continuo, no por latido.** El navegador late cada 2 min desde el layout autenticado (`PresenceHeartbeat`); el latido **extiende** el tramo vigente (`last_seen_at`) y solo abre uno nuevo cuando pasaron más de 10 min sin señal. En un día de trabajo normal son una o dos filas por persona.
+
+**No hay `ended_at` y es a propósito:** el fin de sesión no llega de forma fiable —la gente cierra la pestaña, se le duerme el equipo, se cae la red—, así que el fin del tramo ES su último latido. Cualquier intento de detectar el cierre (`beforeunload`, o leer `visibilitychange` como "se fue") produciría tramos truncados y cierres falsos.
+
+**Las tres ventanas están escalonadas y el orden es el invariante:** latido (2 min) < ventana de "en línea" (5 min) < corte de tramo (10 min). Si la ventana de en línea no fuera mayor que el latido, la persona parpadearía a "desconectada" en cada hueco normal entre latidos; si el corte no fuera mayor que la ventana, un par de latidos perdidos partiría en dos una sola sesión de trabajo. Lo fija el guard `tests/presence-display.test.ts`.
+
+**Solo late con la pestaña visible.** Una pestaña olvidada en segundo plano reportaría a alguien "conectado" todo el fin de semana — exactamente lo contrario de lo que se quiere saber. Al volver a la pestaña late de inmediato, sin esperar el intervalo.
+
+**El `userId` sale de la sesión, nunca del cliente:** `presenceHeartbeatAction()` no recibe parámetros, así que no hay forma de latir por otra persona. El historial se pide por `membershipId`, y resolverlo contra `listManageableMemberships` ES la autorización (un id de otro tenant no resuelve y no hay nada que filtrar).
+
+**El día del historial se cuenta en la zona de la ORGANIZACIÓN** (`readOrganizationTimezone`), no en la de México: con una tienda en Bogotá el día saldría corrido respecto a lo que esa persona vivió. Un tramo que cruza la medianoche se reporta en el día en que **empezó** — es como lo cuenta quien trabajó ("me quedé hasta la una").
+
+**El latido es atómico en BD a propósito.** "Buscar el tramo vigente y, si no hay, crearlo" es leer-y-luego-escribir: dos pestañas de la misma persona latiendo a la vez abrirían dos tramos para una sola sesión, y el historial mostraría conexiones simultáneas que nunca existieron. El RPC `record_user_presence` lo serializa con `pg_advisory_xact_lock` por (org, persona). **Un índice único NO sirve aquí:** la unicidad depende del TIEMPO (hay varios tramos legítimos por persona y día).
+
+**Acoplamiento a vigilar:** el nombre y los parámetros del RPC viven en SQL y en `lib/db/presence.ts`, y el latido vive montado en el layout autenticado. Romper cualquiera de los dos deja de registrar presencia **en silencio** — el síntoma es "nadie aparece conectado", indistinguible de "nadie entró". Lo cubre `tests/presence-sql-contract.test.ts`.
+
+### Paso operativo obligatorio (NO es código del repo)
+
+**Aplicar la migración 0057 ANTES de desplegar.** Crea `user_activity_sessions` con sus 4 tenant policies y el RPC `record_user_presence`. Sin ella el latido falla en cada request (silencioso: no tumba ninguna pantalla) y Admin → Usuarios muestra a todos como "Sin actividad". Es aditiva y no destructiva: no toca ninguna tabla existente.
+
+El historial arranca VACÍO y se llena de aquí en adelante — no hay forma de reconstruir hacia atrás quién estuvo conectado antes del deploy. Vale comunicarlo para que nadie lo lea como un error.
+
 ## Cambios al stack
 
 Cualquier modificación al stack documentado en `package.json` (agregar dependencia, subir versión mayor, cambiar provider externo) requiere aprobación explícita del operador antes de comitearse. Razón: el stack está fijado por experiencias previas (Kibah, FindMed, Hemenesy) y cualquier desviación inesperada introduce riesgo operacional.

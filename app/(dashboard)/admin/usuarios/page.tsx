@@ -20,6 +20,8 @@ export default async function UsuariosPage() {
     <UsuariosScreen
       initialUsers={res.users}
       assignableRoles={res.assignableRoles}
+      serverNow={res.now}
+      timezone={res.timezone}
     />
   );
 }
