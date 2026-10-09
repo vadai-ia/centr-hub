@@ -31,6 +31,7 @@ import { structuredAddressToJson } from "@/lib/contacts/address";
 import type { StructuredAddress } from "@/lib/contacts/address";
 import { getOrganizationById } from "@/lib/db/organizations";
 import { readOrganizationCurrency } from "@/lib/services/organization-currency";
+import { readOrganizationPhoneCountry } from "@/lib/services/organization-phone-country";
 import type { ContactRow, Funnel, Json, UUID } from "@/lib/types/database";
 
 /**
@@ -126,9 +127,12 @@ export async function createLead(input: CreateLeadInput): Promise<CreateLeadResu
   const organizationId = getCurrentOrganizationId();
   // La moneda de la tienda, no el MXN del arranque: un lead de Colombia
   // cotiza en COP.
-  const orgCurrency = readOrganizationCurrency(
-    (await getOrganizationById(organizationId))?.config ?? null,
-  );
+  const orgConfig = (await getOrganizationById(organizationId))?.config ?? null;
+  const orgCurrency = readOrganizationCurrency(orgConfig);
+  // País de la TIENDA para los teléfonos sin lada: un "310 456 7890"
+  // capturado en Colombia es +57, no +52. Un número que ya viene con lada
+  // internacional se respeta tal cual.
+  const orgPhoneCountry = readOrganizationPhoneCountry(orgConfig);
   // Funnel donde nace el lead (Fase 2). "outbound" cambia la etapa inicial,
   // el guard de opp activa, el funnel de la opp y marca el contacto outbound.
   const leadFunnel: Funnel = input.channel === "outbound" ? "outbound" : "venta";
@@ -146,7 +150,9 @@ export async function createLead(input: CreateLeadInput): Promise<CreateLeadResu
   const fullName = input.fullName?.trim() ?? "";
   if (!fullName) throw new LeadValidationError("missing_name");
   const rawPhone = input.phone?.trim() ?? "";
-  const normalizedPhone = rawPhone ? normalizePhone(rawPhone, "MX") : null;
+  const normalizedPhone = rawPhone
+    ? normalizePhone(rawPhone, orgPhoneCountry as never)
+    : null;
   // Un teléfono ESCRITO que no normaliza sigue siendo un error: es un typo,
   // no una ausencia deliberada.
   if (rawPhone && !normalizedPhone) throw new LeadValidationError("invalid_phone");
@@ -179,6 +185,7 @@ export async function createLead(input: CreateLeadInput): Promise<CreateLeadResu
 
   // 3. Dedup por identidad → enlazar a existente o crear contacto nuevo.
   const match = await matchLeadIdentity({
+    defaultCountry: orgPhoneCountry as never,
     phone: normalizedPhone,
     email: normalizedEmail,
   });
