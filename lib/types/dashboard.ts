@@ -27,6 +27,35 @@ export interface StageWinRate {
   rate: number | null;
 }
 
+/** Un paso del embudo de leads (punto 9). */
+export interface FunnelStep {
+  stageId: UUID;
+  stageName: string;
+  position: number;
+  /** Personas de la cohorte que llegaron AL MENOS a esta etapa. */
+  reached: number;
+/** FRACCIÓN 0–1 sobre el tope del embudo (los leads). null si no hay cohorte. */
+  shareOfLeads: number | null;
+  /** FRACCIÓN 0–1 que pasó del paso anterior a este. null en el primero. */
+  stepConversion: number | null;
+}
+
+/**
+ * Embudo de leads — cohorte de PERSONAS que entraron como lead en el periodo
+ * y hasta dónde llegó cada una. Ver `lib/services/lead-funnel.ts` para las
+ * tres decisiones que lo hacen correcto (cohorte por persona, monotónico, y
+ * el corte en la etapa ganada).
+ */
+export interface LeadFunnel {
+  /** Personas distintas en la cohorte. Es el denominador de todo el embudo. */
+  cohortSize: number;
+  /** Oportunidades-lead del periodo: explica por qué N entradas son M personas. */
+  leadOpportunities: number;
+  steps: FunnelStep[];
+  /** Personas que acabaron en un sumidero posterior a la ganada ("Cold"). */
+  parked: number;
+}
+
 /** KPI 11 — pérdidas agrupadas por motivo. */
 export interface LossByReason {
   reasonId: UUID | null;
@@ -72,6 +101,8 @@ export interface VentaMetrics {
   activeWithDraft: number; // 7
   winRateGlobal: number | null; // 8
   winRateByStage: StageWinRate[]; // 9
+  /** Embudo leads → calificados → cotización → ganada (punto 9 de la junta). */
+  leadFunnel: LeadFunnel;
   lossRate: number | null; // 10
   lossesByReason: LossByReason[]; // 11
   salesCycleDays: number | null; // 12

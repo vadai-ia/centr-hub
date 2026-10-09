@@ -11,6 +11,7 @@ import {
   type PaidOrderRow,
   listProblematicCaseOpps,
   listStageEntriesInPeriod,
+  listVentaStageHistoryForContacts,
   listWonOppsInPeriod,
   type LivePipelineRow,
   type LivePostventaRow,
@@ -24,6 +25,7 @@ import { getOrganizationById } from "@/lib/db/organizations";
 import { readOrganizationCurrency } from "@/lib/services/organization-currency";
 import { readOrganizationTimezone } from "@/lib/services/organization-timezone";
 import { resolvePipelineSnapshotWindow } from "@/lib/services/dashboard-snapshot-window";
+import { computeLeadFunnel } from "@/lib/services/lead-funnel";
 import {
   resolvePostventaStages,
   resolveVentaStageBoundaries,
@@ -191,6 +193,8 @@ export interface VentaRaw {
   leadPurchases: LeadPurchaseRow[];
   /** Leads del periodo archivados por absorción (avanzaron a cotización). Cuentan como leads. */
   absorbedLeadEntries: StageEntryRow[];
+  /** Historial de Venta de las personas de la cohorte de leads — embudo (punto 9). */
+  leadFunnelHistory: Array<{ contact_id: UUID; to_stage_id: UUID }>;
   /** oppId → posición máxima NO-perdida alcanzada (para avance KPI9). */
   maxNonLostPos: Map<UUID, number>;
   boundaries: VentaStageBoundaries;
@@ -301,7 +305,14 @@ async function fetchVentaRaw(
         ),
       )
     : [];
-  const leadPurchases = await listPaidOrdersForContactsSince(leadContactIds, period.startUtc);
+  // Las dos lecturas que cuelgan de la cohorte de leads, en paralelo: sus
+  // compras (KPI "leads que compraron") y su historial de etapas (embudo).
+  // `leadContactIds` viene SIN scope — el scope se aplica al computar, igual
+  // que con el resto del bundle.
+  const [leadPurchases, leadFunnelHistory] = await Promise.all([
+    listPaidOrdersForContactsSince(leadContactIds, period.startUtc),
+    listVentaStageHistoryForContacts(leadContactIds),
+  ]);
 
   return {
     paidOrders,
@@ -313,6 +324,7 @@ async function fetchVentaRaw(
     stageEntries,
     leadPurchases,
     absorbedLeadEntries,
+    leadFunnelHistory,
     maxNonLostPos,
     boundaries,
     lossReasonNames,
@@ -484,6 +496,26 @@ export function computeVentaMetrics(
       };
     });
 
+  // Embudo de leads (punto 9) — cohorte de PERSONAS, no de oportunidades: el
+  // lead vive en una opp y la venta se cierra en la de la cotización. Comparte
+  // `scopedLeadContacts` con "leads que compraron", así el tope del embudo y
+  // el KPI de leads no pueden divergir.
+  const leadFunnel = computeLeadFunnel({
+    cohortContacts: Array.from(scopedLeadContacts),
+    leadOpportunityCount: leadOpps.size,
+    history: raw.leadFunnelHistory.map((h) => ({
+      contactId: h.contact_id,
+      stageId: h.to_stage_id,
+    })),
+    stages: boundaries.stages.map((s) => ({
+      id: s.id,
+      name: s.name,
+      position: s.position,
+      isWon: s.is_won,
+      isLost: s.is_lost,
+    })),
+  });
+
   return {
     revenue,
     quotesSent,
@@ -498,6 +530,7 @@ export function computeVentaMetrics(
     activeWithDraft,
     winRateGlobal,
     winRateByStage,
+    leadFunnel,
     lossRate,
     lossesByReason,
     salesCycleDays,

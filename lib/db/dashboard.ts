@@ -537,6 +537,49 @@ export async function listFullHistoryForOpportunities(
   return out;
 }
 
+/**
+ * Historial de etapas de TODAS las oportunidades de Venta de un grupo de
+ * PERSONAS — insumo del embudo de leads (punto 9).
+ *
+ * Por persona y no por oportunidad porque el viaje de alguien se parte en
+ * dos filas: su lead vive en una opp y la venta se cierra en la de la
+ * cotización de Shopify. Preguntando por oportunidad, el lead parece no
+ * haber avanzado nunca.
+ *
+ * Excluye canceladas, como el resto de las métricas (CLAUDE.md "Cancelado ≠
+ * Perdido"). La consecuencia conocida: una cotización cuyo Draft Order
+ * Shopify auto-borró al año deja de contar como "llegó a Cotización". La
+ * pertenencia a la cohorte NO depende de esto — los leads archivados por
+ * absorción entran por su propio camino.
+ */
+export async function listVentaStageHistoryForContacts(
+  contactIds: UUID[],
+): Promise<Array<{ contact_id: UUID; to_stage_id: UUID }>> {
+  if (contactIds.length === 0) return [];
+  const { supabase, organizationId } = getTenantScopedClient();
+  const CHUNK = 300;
+  const out: Array<{ contact_id: UUID; to_stage_id: UUID }> = [];
+  for (let i = 0; i < contactIds.length; i += CHUNK) {
+    const chunk = contactIds.slice(i, i + CHUNK);
+    const page = await fetchAllPaged<unknown>(() =>
+      supabase
+        .from("opportunity_stage_history")
+        .select(
+          "to_stage_id, opportunity:opportunities!inner(contact_id, funnel, cancelled_at)",
+        )
+        .eq("organization_id", organizationId)
+        .eq("opportunity.funnel", "venta")
+        .is("opportunity.cancelled_at", null)
+        .in("opportunity.contact_id", chunk),
+    );
+    type Raw = { to_stage_id: UUID; opportunity: { contact_id: UUID } };
+    for (const row of (page ?? []) as unknown as Raw[]) {
+      out.push({ contact_id: row.opportunity.contact_id, to_stage_id: row.to_stage_id });
+    }
+  }
+  return out;
+}
+
 // ============================================================
 // Funnel Post-venta
 // ============================================================

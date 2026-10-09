@@ -708,6 +708,33 @@ Una hora imposible (25, 8.5, texto) vuelve al default a propósito: desplazaría
 
 **No requiere migración:** `tasks` y `notifications` ya existían.
 
+## Embudo de leads: leads → calificados → cotización → ganada (punto 9)
+
+Tarjeta en el Dashboard de Venta. De las **personas** que entraron como lead en el periodo, cuántas llegaron a cada etapa, con la conversión de paso a paso. Responde a la pregunta de la que cuelgan las demás gráficas: *¿dónde se cae el proceso?* Medido en Centr (ago–sep 2026): 102 leads → 86 contactados (84%) → 70 calificados → 63 cotizaron (62%) → **17 ganadas (17%)**.
+
+### Las tres decisiones que lo hacen correcto
+
+**1. La cohorte es de PERSONAS, no de oportunidades.** El viaje de alguien se parte en dos filas: su lead vive en una oportunidad y la venta se cierra en OTRA (la de la cotización de Shopify), y al avanzar el lead se archiva por absorción. Un embudo por oportunidad apila dos poblaciones distintas: los leads por un lado y, por otro, cotizaciones que "nacieron" ya cotizando. Mismo criterio que "Leads que compraron", y comparte con él `scopedLeadContacts` para que el tope del embudo y el KPI de leads no puedan divergir.
+
+**2. Es MONOTÓNICO — "llegó al menos hasta aquí".** Los webhooks de Shopify saltan etapas (un Draft Order manda la tarjeta de "Lead nuevo" directo a "Cotización"), así que contar solo las etapas que el historial registra deja el embudo lleno de agujeros. Lo que un embudo mide es profundidad de avance: la posición MÁXIMA alcanzada, sobre el historial de TODAS las oportunidades de Venta de esa persona.
+
+**3. El embudo TERMINA en la etapa ganada.** Una etapa posterior a la ganada es un sumidero, no un paso más profundo. En Centr "Cold" vive en la posición 10, **después** de "Ganada" (9), y no está marcada como perdida: sin este corte su posición supera la de la ganada y el monotónico cuenta como cerrado a quien se enfrió. **Medido en producción: "Ganada" marcaba 19 cuando eran 17.** El corte se deriva de la bandera `is_won`, nunca de nombres de etapa — nombres y posiciones los edita el admin. Esas personas se reportan aparte (`parked`), no como avance.
+
+### El número del embudo NO es el KPI de Ganadas, y hay que decirlo
+
+El tablero muestra "Ganadas" (todas las cerradas en el periodo, vengan de leads de cualquier mes: 181 en ago–sep) y el embudo cierra en 17. Las dos son correctas y miden cosas distintas —cohorte vs periodo—, pero puestas una sobre otra se leen como que los datos no cuadran, que es **la queja que ya existe sobre el dashboard** (punto 12 de su lista). La tarjeta lo explica en una línea fija al pie, y el tooltip lo repite. **No quitar esa línea.**
+
+### Qué queda fuera a propósito
+
+- **Canceladas**, como el resto de las métricas (CLAUDE.md "Cancelado ≠ Perdido"). Consecuencia conocida: una cotización cuyo Draft Order Shopify auto-borró al año deja de contar como "llegó a Cotización". La pertenencia a la cohorte NO depende de esto — los leads archivados por absorción entran por su propio camino (`listAbsorbedLeadEntriesInPeriod`).
+- **"Perdida" no es un paso**: se ve en la caída entre renglones, no como renglón propio.
+
+### Dónde vive
+
+La decisión es un módulo PURO: `computeLeadFunnel` en [lib/services/lead-funnel.ts](lib/services/lead-funnel.ts). La lectura es `listVentaStageHistoryForContacts` (por persona, chunked, excluye canceladas) y se dispara en paralelo con las compras de la cohorte, reusando el mismo `leadContactIds`. **El historial se trae SIN filtro de asesor** (el scope se aplica al computar, como el resto del bundle), así que la función ignora el historial de quien no esté en la cohorte — sin esa guarda, el embudo de un vendedor mostraría el avance de personas ajenas. Guard: `tests/lead-funnel.test.ts`, con el caso de "Cold" que se midió en producción.
+
+**No requiere migración:** `opportunity_stage_history` ya existía.
+
 ## Cambios al stack
 
 Cualquier modificación al stack documentado en `package.json` (agregar dependencia, subir versión mayor, cambiar provider externo) requiere aprobación explícita del operador antes de comitearse. Razón: el stack está fijado por experiencias previas (Kibah, FindMed, Hemenesy) y cualquier desviación inesperada introduce riesgo operacional.

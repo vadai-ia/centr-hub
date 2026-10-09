@@ -112,6 +112,7 @@ function ventaRaw(): VentaRaw {
       { opportunity_id: "l2", assigned_advisor_id: B, is_outbound: false, actual_amount: null, estimated_amount: null, loss_reason_id: null },
     ],
     absorbedLeadEntries: [],
+    leadFunnelHistory: [],
     // Leads que compraron: o1 (lead de A, contacto c-o1) pagó un pedido;
     // o2 (lead de B) no.
     leadPurchases: [
@@ -284,6 +285,7 @@ describe("computeVentaMetrics — corte por canal (F4)", () => {
       stageEntries: [],
       leadPurchases: [],
       absorbedLeadEntries: [],
+      leadFunnelHistory: [],
       maxNonLostPos: new Map(),
     };
   }

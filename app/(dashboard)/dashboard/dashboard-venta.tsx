@@ -3,6 +3,7 @@ import { KpiCard } from "./kpi-card";
 import { DashboardSection } from "./dashboard-section";
 import { AdvisorBreakdown } from "./advisor-breakdown";
 import { InfoTooltip } from "./info-tooltip";
+import { LeadFunnelCard } from "./dashboard-funnel";
 import { IconCheck, IconPipeline, IconRevenue, IconTrophy } from "./kpi-icons";
 import {
   LossesByReasonChart,
@@ -228,6 +229,9 @@ export function DashboardVenta({
 
       {/* Gráficas */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        {/* El embudo va primero: responde "¿dónde se me cae el proceso?",
+            que es la pregunta de la que cuelgan las demás gráficas. */}
+        <LeadFunnelCard funnel={m.leadFunnel} />
         <RevenueByMonthChart data={m.revenueByMonth} currency={CCY} tooltip={TT.revenueByMonth} />
         <WonVsLostChart won={m.wonVsLost.won} lost={m.wonVsLost.lost} tooltip={TT.wonVsLost} />
         <LossesByReasonChart data={m.lossesByReason} currency={CCY} tooltip={TT.lossesByReason} />
