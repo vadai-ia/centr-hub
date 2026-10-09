@@ -291,3 +291,30 @@ export const PRESENCE_HISTORY_LIMIT = 60 as const;
 
 /** Cada cuánto la pantalla de Usuarios re-pide la presencia (no la página). */
 export const PRESENCE_REFRESH_MS = 45_000 as const;
+
+// ---------------------------------------------------------------------------
+// Recordatorios de tareas — "aviso el mismo día a primera hora, insistiendo"
+// ---------------------------------------------------------------------------
+
+/**
+ * Tipo de aviso del recordatorio. Es el ancla que une el cron que lo crea,
+ * el cierre al completar la tarea y la lectura de la campanita: cambiarlo en
+ * un solo lado deja recordatorios huérfanos que nadie cierra.
+ */
+export const TASK_REMINDER_NOTIFICATION_TYPE = "task_due_reminder" as const;
+
+/**
+ * "Primera hora" por defecto, en la zona de la ORGANIZACIÓN. Configurable
+ * por organización en `config.defaults.task_reminder_hour`.
+ */
+export const DEFAULT_TASK_REMINDER_HOUR = 8 as const;
+
+/**
+ * Cuánto espera el sistema antes de volver a insistir con una tarea que
+ * sigue pendiente y cuyo recordatorio la persona descartó sin completarla.
+ *
+ * Es la pieza que hace "insiste hasta que lo marquen" sin inundar: mientras
+ * el recordatorio esté ABIERTO no se crea otro (sería el mismo aviso dos
+ * veces); descartarlo sin completar la tarea solo compra un día.
+ */
+export const TASK_REMINDER_REINSIST_HOURS = 24 as const;

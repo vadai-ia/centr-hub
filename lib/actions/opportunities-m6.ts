@@ -15,6 +15,7 @@ import {
   type TimelineEvent,
 } from "@/lib/services/timeline";
 import { getOpportunityById } from "@/lib/db/opportunities";
+import { closeOpenRemindersForTask } from "@/lib/db/task-reminders";
 import { listPipelineStages } from "@/lib/db/pipeline";
 import {
   getMembership,
@@ -739,6 +740,17 @@ export async function toggleTaskCompletedAction(
         status: isCompleting ? "completed" : "pending",
         completed_at: isCompleting ? new Date().toISOString() : null,
       });
+      // El recordatorio que insiste se apaga EN EL ACTO al marcar la tarea.
+      // El cron también lo cerraría, pero hasta una hora después: dejar el
+      // aviso puesto tras completar es lo que enseña a ignorar la campanita.
+      // Non-fatal — la tarea ya quedó completada, que es lo que importa.
+      if (isCompleting) {
+        try {
+          await closeOpenRemindersForTask(target.id);
+        } catch {
+          // best-effort; el cron lo recoge en el siguiente tick.
+        }
+      }
       try {
         await recordAuditEvent({
           actorUserId: access.userId,
@@ -821,6 +833,15 @@ export async function deleteTaskAction(raw: unknown): Promise<TaskActionResult> 
 
   return withTenantContext(access.orgId, async () => {
     try {
+      // Antes de borrar: el aviso cuelga de `origin_reference.task_id`, no de
+      // una FK, así que borrar la tarea NO se lo lleva. Sin esto quedaría un
+      // recordatorio insistiendo por una tarea que ya no existe y que nadie
+      // puede marcar — imposible de quitar desde la plataforma.
+      try {
+        await closeOpenRemindersForTask(parsed.data.taskId);
+      } catch {
+        // best-effort; el cron lo cierra en el siguiente tick.
+      }
       await deleteTask(parsed.data.taskId);
       try {
         await recordAuditEvent({

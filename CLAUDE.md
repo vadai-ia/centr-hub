@@ -674,6 +674,40 @@ Lo que la dirección pidió es deliberadamente angosto: saber si una persona **e
 
 El historial arranca VACÍO y se llena de aquí en adelante — no hay forma de reconstruir hacia atrás quién estuvo conectado antes del deploy. Vale comunicarlo para que nadie lo lea como un error.
 
+## Recordatorios de tareas: aviso el mismo día, insistiendo hasta que la marquen
+
+Punto 13 de la junta. El cron `task-due-reminders-hourly` pone un **aviso en la campanita de Mi Día** el día en que una tarea vence, **a primera hora**, y lo vuelve a poner cada día mientras siga pendiente.
+
+**El canal es la plataforma, no el correo.** En la misma junta se descartó la integración de mail porque satura (punto 14): la decisión fue resolverlo con notificación dentro de la plataforma. Consecuencia a comunicar: **quien no abre Centr Hub ese día no ve el aviso.** No es un despiste, es el canal acordado.
+
+**La hora de arranque y la zona son de CADA organización** — `config.defaults.task_reminder_hour` (default 8, validado 0–23 entero) y la zona de `readOrganizationTimezone`. La expresión cron está en horario de México: sin leer la zona de la organización, una tienda en Bogotá recibiría su aviso una hora corrida. Cambiar la hora es un UPDATE, no un deploy:
+
+```sql
+UPDATE organizations
+SET config = jsonb_set(config, '{defaults,task_reminder_hour}', to_jsonb(7))
+WHERE slug = 'centr';
+```
+
+Una hora imposible (25, 8.5, texto) vuelve al default a propósito: desplazaría el aviso a un momento que nunca llega, y el síntoma sería "no salen los recordatorios" sin ningún error.
+
+**"A primera hora" es un PISO, no una ventana.** El tick de las 8 avisa; los de las 7 y antes no. Una tarea creada hoy a las 11 la toma el tick de las 11 — no espera a mañana.
+
+**Cómo insiste sin inundar:** hay **como máximo UN recordatorio abierto por tarea**. Mientras esté en la campanita no se crea otro (sería el mismo aviso dos veces). Si la persona lo descarta **sin** marcar la tarea, vuelve pasadas `TASK_REMINDER_REINSIST_HOURS` (24 h) — descartar solo compra un día. El título cambia con el estado ("Tarea para hoy" → "Tarea vencida ayer" → "Tarea vencida hace 4 días"): un aviso que se lee igual el día uno y el día cuatro es el que se aprende a ignorar.
+
+**El apagado importa tanto como el encendido, y va por DOS caminos.** Marcar la tarea cierra su recordatorio **en el acto** (`closeOpenRemindersForTask` dentro de `toggleTaskCompletedAction`); el cron hace lo mismo como red de seguridad para cualquier otro camino. Sin el cierre inmediato el aviso seguiría puesto hasta una hora después de completar, y una campanita que miente es una campanita que se ignora. **Borrar la tarea también lo cierra**: el aviso cuelga de `origin_reference.task_id`, NO de una FK, así que borrar la tarea no se lo lleva — quedaría insistiendo por algo que ya no existe y que nadie puede marcar.
+
+**Al reasignar una tarea el recordatorio cambia de dueño:** el del asesor anterior se cierra (`reassigned`) y el nuevo lo recibe en el mismo tick, sin esperar la ventana de insistencia. Un aviso colgado de quien ya no es responsable no lo puede resolver nadie.
+
+**No tiene kill switch de env, a diferencia de los mensajes de WhatsApp.** Solo escribe avisos dentro de la plataforma: no manda WhatsApp ni correo, no mueve etapas, no toca dinero. Lo más que puede hacer de más es poner un aviso en la campanita de alguien. **Sí se calla durante el backfill** (`backfill_in_progress`): importar el histórico puede traer tareas con fechas viejas y el primer tick las convertiría todas en avisos.
+
+**Corre en el minuto 30** para no solaparse con el motor de reglas (minuto 0) ni con el seguimiento de Post-venta (minuto 15) — los tres recorren todas las organizaciones.
+
+**La decisión es un módulo PURO** (`lib/services/task-reminders.ts`, `decideTaskReminders`): el "ahora", la zona y la hora entran como parámetros. Todo lo que importa aquí es lógica temporal, y probarla contra una BD sería probar Postgres en vez de la regla. La lectura/escritura vive en `task-reminder-run.ts`.
+
+**Acoplamientos a vigilar** — los tres fallan EN SILENCIO (nada truena, `tsc` contento, simplemente los avisos dejan de salir o de apagarse): el cron tiene que estar en `allFunctions`; el cierre tiene que estar en los caminos de completar y borrar tarea; y el tipo de aviso tiene que salir siempre de `TASK_REMINDER_NOTIFICATION_TYPE`, nunca escrito a mano. Guards: `tests/task-reminders.test.ts` y `tests/task-reminder-wiring.test.ts`.
+
+**No requiere migración:** `tasks` y `notifications` ya existían.
+
 ## Cambios al stack
 
 Cualquier modificación al stack documentado en `package.json` (agregar dependencia, subir versión mayor, cambiar provider externo) requiere aprobación explícita del operador antes de comitearse. Razón: el stack está fijado por experiencias previas (Kibah, FindMed, Hemenesy) y cualquier desviación inesperada introduce riesgo operacional.
