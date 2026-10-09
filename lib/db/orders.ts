@@ -197,6 +197,47 @@ export async function sumPaidOrdersForContact(
 }
 
 /**
+ * Qué contactos YA COMPRARON, en lote.
+ *
+ * Es el criterio nuevo de "cliente" (punto 10 de la junta): antes bastaba
+ * con existir en Shopify, y como el vendedor crea la ficha allá para poder
+ * cotizar, **toda** la columna de leads amanecía marcada como CLIENTE. La
+ * dirección perdía de vista el embudo real: "aquí ya no tengo ningún lead".
+ *
+ * "Compró" = pedido pagado y NO cancelado — el mismo predicado que usa la
+ * venta del dashboard. Shopify deja cancelar sin reembolsar, y en ese caso
+ * `financial_status` se queda en `paid`: sin el segundo filtro, una venta
+ * revocada seguiría convirtiendo a esa persona en cliente.
+ *
+ * En lote y por tramos: el kanban pide hasta 50 contactos por columna y
+ * `.in()` con listas enormes revienta la URL del request.
+ */
+export async function listContactsWithPaidOrders(
+  contactIds: UUID[],
+): Promise<Set<UUID>> {
+  const result = new Set<UUID>();
+  if (contactIds.length === 0) return result;
+  const { supabase, organizationId } = getTenantScopedClient();
+  const CHUNK = 300;
+  for (let i = 0; i < contactIds.length; i += CHUNK) {
+    const chunk = contactIds.slice(i, i + CHUNK);
+    const { data, error } = await supabase
+      .from("orders")
+      .select("contact_id")
+      .eq("organization_id", organizationId)
+      .eq("financial_status", "paid")
+      .is("cancelled_at", null)
+      .in("contact_id", chunk);
+    if (error) throw error;
+    for (const row of data ?? []) {
+      const id = (row as { contact_id: UUID | null }).contact_id;
+      if (id) result.add(id);
+    }
+  }
+  return result;
+}
+
+/**
  * Lista órdenes de un contacto ordenadas por `paid_at DESC` (con
  * fallback `created_at`). Usada por el timeline del detalle de
  * contacto (M6) para emitir eventos `order_paid` / `order_cancelled`.

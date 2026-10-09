@@ -28,6 +28,15 @@ import { searchContactsForList } from "@/lib/db/contacts";
 
 const ORG = "org-1";
 
+/**
+ * El listado hace DOS lecturas: contacts y, en lote, los pedidos pagados
+ * para el badge Lead/Cliente. Los asserts de filtros miran la de contacts,
+ * no simplemente la última del historial.
+ */
+function lastContactsSelect() {
+  return fake.history.filter((h) => h.table === "contacts").at(-1);
+}
+
 function seedContacts(count: number, opts: { advisorId?: string | null } = {}) {
   const rows = Array.from({ length: count }, (_, i) => ({
     id: `c-${i}`,
@@ -65,6 +74,31 @@ describe("searchContactsForList", () => {
     expect(withoutShopify?.contactType).toBe("lead");
   });
 
+  it("hasPaidOrder sale de los pedidos pagados, NO de la ficha de Shopify", async () => {
+    // El caso reportado: el vendedor crea la ficha en Shopify solo para poder
+    // cotizar, así que "existe en Shopify" marcaba CLIENTE a medio listado.
+    seedContacts(2);
+    fake.setTable("orders", [
+      {
+        id: "o-1",
+        organization_id: ORG,
+        contact_id: "c-1",
+        subtotal: "1000",
+        currency: "MXN",
+        financial_status: "paid",
+        cancelled_at: null,
+      },
+    ]);
+    const result = await withTenantContext(ORG, async () => {
+      return searchContactsForList({ limit: 50 });
+    });
+    // c-0 tiene shopify_customer_id pero no compró; c-1 compró sin tenerlo.
+    expect(result.rows.find((r) => r.id === "c-0")?.contactType).toBe("cliente");
+    expect(result.rows.find((r) => r.id === "c-0")?.hasPaidOrder).toBe(false);
+    expect(result.rows.find((r) => r.id === "c-1")?.contactType).toBe("lead");
+    expect(result.rows.find((r) => r.id === "c-1")?.hasPaidOrder).toBe(true);
+  });
+
   it("hasMore=true cuando hay más filas que limit", async () => {
     seedContacts(6);
     const result = await withTenantContext(ORG, async () => {
@@ -91,7 +125,7 @@ describe("searchContactsForList", () => {
     await withTenantContext(ORG, async () => {
       await searchContactsForList({ limit: 10, assignedAdvisorId: "m-1" });
     });
-    const lastSelect = fake.history.at(-1);
+    const lastSelect = lastContactsSelect();
     const eqAdvisor = lastSelect?.filters.find(
       (f) => f.field === "assigned_advisor_id" && f.op === "eq",
     );
@@ -103,7 +137,7 @@ describe("searchContactsForList", () => {
     await withTenantContext(ORG, async () => {
       await searchContactsForList({ limit: 10, assignedAdvisorId: null });
     });
-    const lastSelect = fake.history.at(-1);
+    const lastSelect = lastContactsSelect();
     const isAdvisor = lastSelect?.filters.find(
       (f) => f.field === "assigned_advisor_id" && f.op === "is",
     );
@@ -116,7 +150,7 @@ describe("searchContactsForList", () => {
     await withTenantContext(ORG, async () => {
       await searchContactsForList({ limit: 10 });
     });
-    const lastSelect = fake.history.at(-1);
+    const lastSelect = lastContactsSelect();
     const advisorFilters = lastSelect?.filters.filter(
       (f) => f.field === "assigned_advisor_id",
     );
@@ -128,7 +162,7 @@ describe("searchContactsForList", () => {
     await withTenantContext(ORG, async () => {
       await searchContactsForList({ limit: 10, query: "Regina" });
     });
-    const lastSelect = fake.history.at(-1);
+    const lastSelect = lastContactsSelect();
     const orFilter = lastSelect?.filters.find((f) => f.op === "or");
     expect(orFilter).toBeDefined();
     const expr = orFilter?.value as string;
@@ -146,7 +180,7 @@ describe("searchContactsForList", () => {
         query: "Re,gina(test).val%ue",
       });
     });
-    const lastSelect = fake.history.at(-1);
+    const lastSelect = lastContactsSelect();
     const orFilter = lastSelect?.filters.find((f) => f.op === "or");
     const expr = orFilter?.value as string;
     // El chain SÍ usa "," como separador de predicados (sintaxis
@@ -166,7 +200,7 @@ describe("searchContactsForList", () => {
     await withTenantContext(ORG, async () => {
       await searchContactsForList({ limit: 10, query: "   " });
     });
-    const lastSelect = fake.history.at(-1);
+    const lastSelect = lastContactsSelect();
     const orFilter = lastSelect?.filters.find((f) => f.op === "or");
     expect(orFilter).toBeUndefined();
   });

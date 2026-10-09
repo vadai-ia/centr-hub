@@ -47,6 +47,7 @@ import {
   mergePagedItems,
   moveCardLocal,
   moveCardLocalRollback,
+  mergeKeepingLoaded,
   removeOppById,
   replaceOpp,
   upsertOpp,
@@ -139,6 +140,12 @@ export function PipelineBoard({
   // en cada applyState (toggle funnel/filtro/umbral/polling).
   const [showClosedByStage, setShowClosedByStage] = useState<Set<UUID>>(
     () => new Set(),
+  );
+  const [amountsByStage, setAmountsByStage] = useState<Record<UUID, number>>(
+    initial.amountsByStage,
+  );
+  const [notesByOpp, setNotesByOpp] = useState<Record<UUID, number>>(
+    initial.notesByOpp,
   );
   const [pendingTasksByOpp, setPendingTasksByOpp] = useState<Record<UUID, number>>(
     initial.pendingTasksByOpp,
@@ -284,17 +291,37 @@ export function PipelineBoard({
   // El advisor se respeta o se actualiza según el resp del server
   // (puede haber cambiado por filtro admin).
   const applyState = useCallback(
-    (state: PipelineInitialState, updateAdvisor: boolean) => {
+    (
+      state: PipelineInitialState,
+      updateAdvisor: boolean,
+      /**
+       * Refresco de fondo (polling): el estado que llega trae SOLO la
+       * primera página de cada columna. Pisar con eso tira todo lo que el
+       * usuario ya cargó al bajar, la columna se encoge y el navegador lo
+       * manda de vuelta arriba — el salto que reportaron. Con esto, el
+       * refresco actualiza la primera página y CONSERVA lo demás.
+       *
+       * Un cambio deliberado (funnel, filtros) sí debe reemplazar todo:
+       * ahí las cards viejas ya no pertenecen a la vista.
+       */
+      preserveLoadedPages = false,
+    ) => {
       setStages(state.stages);
-      setCardsByStage(state.cardsByStage);
+      setCardsByStage((cur) =>
+        preserveLoadedPages ? mergeKeepingLoaded(state.cardsByStage, cur) : state.cardsByStage,
+      );
       setHasMoreByStage(state.hasMoreByStage);
       setCountsByStage(state.countsByStage);
       setHiddenClosedByStage(state.hiddenClosedByStage);
       setHideClosedAfterDays(state.hideClosedAfterDays);
-      setShowClosedByStage(new Set());
+      if (!preserveLoadedPages) setShowClosedByStage(new Set());
+      setAmountsByStage(state.amountsByStage);
+      setNotesByOpp(state.notesByOpp);
       setPendingTasksByOpp(state.pendingTasksByOpp);
       setProblematicStageId(state.problematicStageId);
-      setPageByStage(() => initialPageByStage(state.stages));
+      // La página en curso solo se reinicia cuando la vista cambió de
+      // verdad; si no, el siguiente "cargar más" volvería a pedir la página 1.
+      setPageByStage((cur) => (preserveLoadedPages ? cur : initialPageByStage(state.stages)));
       setCustomerSuccess(state.customerSuccess);
       if (updateAdvisor) setEffectiveAdvisorId(state.effectiveAdvisorId);
     },
@@ -307,7 +334,7 @@ export function PipelineBoard({
       unassignedFilter: isAdmin && unassignedFilter,
       filters: filtersToPayload(filters, resolvedView),
     });
-    if (res.ok) applyState(res.state, false);
+    if (res.ok) applyState(res.state, false, true);
   }, [applyState, funnel, isAdmin, unassignedFilter, filters, resolvedView]);
 
   const realtimeStatus: RealtimeStatus = usePipelineRealtime({
@@ -682,6 +709,8 @@ export function PipelineBoard({
                 page={pageByStage[stage.id] ?? 0}
                 totalCount={countsByStage[stage.id]}
                 hiddenClosedCount={hiddenClosedByStage[stage.id] ?? 0}
+                totalAmount={amountsByStage[stage.id]}
+                notesByOpp={notesByOpp}
                 isClosedStage={stage.is_won || stage.is_lost}
                 showingClosed={showClosedByStage.has(stage.id)}
                 onToggleClosed={toggleClosedForStage}

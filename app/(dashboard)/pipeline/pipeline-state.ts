@@ -137,6 +137,33 @@ export function mergePagedItems(
 }
 
 /**
+ * Refresco de fondo que NO pierde lo ya cargado.
+ *
+ * El polling trae solo la primera página de cada columna. Reemplazar con
+ * eso encogía la columna de golpe: quien había bajado cargando páginas
+ * perdía todo y el navegador lo devolvía al inicio. Ese era el salto que
+ * reportaron al usar "Cargar más".
+ *
+ * Toma la página fresca como base —así los cambios recientes se ven— y le
+ * agrega detrás las cards que ya estaban y el refresco no trae. Una card
+ * que desapareció del servidor (se movió de etapa, se canceló) **no** se
+ * conserva: solo sobreviven las que están más allá de la primera página.
+ */
+export function mergeKeepingLoaded(
+  fresh: Record<string, KanbanOpportunity[]>,
+  current: Record<string, KanbanOpportunity[]>,
+): Record<string, KanbanOpportunity[]> {
+  const out: Record<string, KanbanOpportunity[]> = { ...fresh };
+  for (const [stageId, freshCards] of Object.entries(fresh)) {
+    const loaded = current[stageId];
+    if (!loaded || loaded.length <= freshCards.length) continue;
+    // Solo el excedente: lo que vivía más allá de la primera página.
+    out[stageId] = mergePagedItems(freshCards, loaded.slice(freshCards.length));
+  }
+  return out;
+}
+
+/**
  * Construye el estado inicial de `pageByStage` a partir de las
  * stages activas.
  */

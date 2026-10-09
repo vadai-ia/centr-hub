@@ -2,6 +2,7 @@ import "server-only";
 import { getTenantScopedClient } from "@/lib/db/client";
 import {
   getLinkedOrderInfoByShopifyOrderIds,
+  listContactsWithPaidOrders,
   searchShopifyOrderIdsForQuery,
   type LinkedOrderInfo,
 } from "@/lib/db/orders";
@@ -77,16 +78,29 @@ function pipelineSearchOrClauses(
  * camino, así que ninguna puede quedarse enseñando el folio del borrador.
  * Una sola consulta por lote.
  */
-async function attachOrderReferences<T extends { shopify_order_id: string | null }>(
+async function attachOrderReferences<
+  T extends { shopify_order_id: string | null; contact_id: UUID },
+>(
   rows: T[],
-): Promise<Array<T & { order_reference: string | null; order_source: string | null }>> {
+): Promise<
+  Array<
+    T & {
+      order_reference: string | null;
+      order_source: string | null;
+      contact_has_paid_order: boolean;
+    }
+  >
+> {
   const ids = rows
     .map((r) => r.shopify_order_id)
     .filter((id): id is string => !!id);
-  const info =
+  // Dos lecturas en lote por página de cards, no una por tarjeta.
+  const [info, compraron] = await Promise.all([
     ids.length > 0
-      ? await getLinkedOrderInfoByShopifyOrderIds(ids)
-      : new Map<string, LinkedOrderInfo>();
+      ? getLinkedOrderInfoByShopifyOrderIds(ids)
+      : Promise.resolve(new Map<string, LinkedOrderInfo>()),
+    listContactsWithPaidOrders(rows.map((r) => r.contact_id)),
+  ]);
   return rows.map((r) => {
     const linked = r.shopify_order_id ? info.get(r.shopify_order_id) : undefined;
     return {
@@ -94,6 +108,7 @@ async function attachOrderReferences<T extends { shopify_order_id: string | null
       order_reference: linked?.name ?? null,
       // Origen del pedido: alimenta el distintivo "Compra online" de la card.
       order_source: linked?.source ?? null,
+      contact_has_paid_order: compraron.has(r.contact_id),
     };
   });
 }
@@ -430,6 +445,11 @@ export interface KanbanOpportunity {
   delivery_message_sent_at: string | null;
   /** Cuándo salió la encuesta de los 7 días (0049). NULL = no enviada. */
   followup_message_sent_at: string | null;
+  /** El contacto YA COMPRÓ (pedido pagado y no cancelado). Es el criterio
+   *  de "cliente" desde la junta: existir en Shopify no basta, porque el
+   *  vendedor crea la ficha allá solo para poder cotizar. Derivado en
+   *  lote, no es columna de la opp. */
+  contact_has_paid_order: boolean;
   contact: KanbanContactEmbed | null;
 }
 
@@ -708,7 +728,13 @@ export async function countKanbanOpportunitiesByStage(opts: {
   /** "Sin encuesta enviada" (0049) — mismo eje que en
    *  `listKanbanOpportunities`; mantiene el conteo alineado con la lista. */
   pendingFollowupOnly?: boolean;
-}): Promise<{ counts: Record<UUID, number>; hiddenCounts: Record<UUID, number> }> {
+}): Promise<{
+  counts: Record<UUID, number>;
+  hiddenCounts: Record<UUID, number>;
+  /** Suma del monto de las opps VISIBLES de cada etapa — encabezado de la
+   *  columna. Misma regla de monto que la card (real, si no estimado). */
+  amounts: Record<UUID, number>;
+}> {
   const { supabase, organizationId } = getTenantScopedClient();
 
   let contactIds = opts.matchingContactIds;
@@ -727,8 +753,12 @@ export async function countKanbanOpportunitiesByStage(opts: {
     ? opts.query!.trim().replace(/[,.()*%\\]/g, " ").slice(0, 80)
     : "";
 
-  // Trae las fechas de cierre solo si hay que bucketear ocultas.
-  const select = opts.closedHide ? "stage_id, won_at, lost_at" : "stage_id";
+  // Los montos viajan SIEMPRE: el encabezado de cada columna los suma, y
+  // pedirlos en esta misma consulta evita una segunda pasada por la tabla.
+  // Las fechas de cierre solo si hay que bucketear ocultas.
+  const select = opts.closedHide
+    ? "stage_id, actual_amount, estimated_amount, won_at, lost_at"
+    : "stage_id, actual_amount, estimated_amount";
   let query = supabase
     .from("opportunities")
     .select(select)
@@ -776,7 +806,7 @@ export async function countKanbanOpportunitiesByStage(opts: {
 
   if (hasQuery) {
     const clauses = pipelineSearchOrClauses(sanitized, contactIds, orderIds);
-    if (clauses.length === 0) return { counts: {}, hiddenCounts: {} };
+    if (clauses.length === 0) return { counts: {}, hiddenCounts: {}, amounts: {} };
     query = query.or(clauses.join(","));
   }
 
@@ -790,6 +820,7 @@ export async function countKanbanOpportunitiesByStage(opts: {
 
   const counts: Record<UUID, number> = {};
   const hiddenCounts: Record<UUID, number> = {};
+  const amounts: Record<UUID, number> = {};
   const hide = opts.closedHide;
   const wonSet = hide ? new Set(hide.wonStageIds) : null;
   const lostSet = hide ? new Set(hide.lostStageIds) : null;
@@ -797,6 +828,8 @@ export async function countKanbanOpportunitiesByStage(opts: {
   const retention = hide?.retentionCutoffIso;
   for (const row of (data ?? []) as unknown as Array<{
     stage_id: UUID;
+    actual_amount?: string | null;
+    estimated_amount?: string | null;
     won_at?: string | null;
     lost_at?: string | null;
   }>) {
@@ -833,9 +866,16 @@ export async function countKanbanOpportunitiesByStage(opts: {
       hiddenCounts[stageId] = (hiddenCounts[stageId] ?? 0) + 1;
     } else {
       counts[stageId] = (counts[stageId] ?? 0) + 1;
+      // MISMO criterio que el monto de la card (`deriveDisplayAmount`):
+      // el real manda y el estimado es respaldo. Si divergieran, la suma
+      // del encabezado no cuadraría con las tarjetas que tiene debajo.
+      const amount = Number(row.actual_amount ?? row.estimated_amount ?? 0);
+      if (Number.isFinite(amount)) {
+        amounts[stageId] = (amounts[stageId] ?? 0) + amount;
+      }
     }
   }
-  return { counts, hiddenCounts };
+  return { counts, hiddenCounts, amounts };
 }
 
 /**

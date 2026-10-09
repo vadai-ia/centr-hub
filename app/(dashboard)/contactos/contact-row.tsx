@@ -38,7 +38,8 @@ export function ContactRow({ row, advisors, derivedAdvisor }: Props) {
   const indicators = systemIndicators(row);
   const ownAdvisor = resolveAdvisor(row.assigned_advisor_id, advisors);
   const lastActivity = formatRelative(lastActivityISO(row));
-  const isCustomer = row.contactType === "cliente";
+  // Cliente = ya compró, no "existe en Shopify" (ver ContactListRow).
+  const isCustomer = row.hasPaidOrder;
 
   // Asesor a mostrar: si el contacto tiene assigned_advisor_id usamos
   // ese (derecho). Si no, pero hay un derivado único (de opps activas),

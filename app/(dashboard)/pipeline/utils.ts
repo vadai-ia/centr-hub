@@ -123,11 +123,18 @@ export function contactDisplayName(
 }
 
 /**
- * Clasificación lead vs cliente derivada (O12 — doctrina v5.1).
- * "Cliente" si el contact tiene `shopify_customer_id`; "lead" si no.
+ * Lead vs cliente: **cliente es quien YA COMPRÓ**, no quien existe en
+ * Shopify (cambio pedido en la junta de octubre).
+ *
+ * El criterio anterior (`shopify_customer_id`) convertía en cliente a
+ * cualquiera en cuanto el vendedor le creaba la ficha para poder cotizarle,
+ * así que la columna de leads amanecía entera marcada como CLIENTE y el
+ * embudo real se volvía invisible: "aquí ya no tengo ningún lead".
+ *
+ * La bandera la resuelve la capa de datos en lote (`contact_has_paid_order`):
+ * pedido pagado y NO cancelado. Lo de "existe en Shopify" sigue vivo, pero
+ * en su propio distintivo (`SystemBadge`), que es lo que de verdad significa.
  */
-export function contactIsCustomer(
-  contact: KanbanOpportunity["contact"],
-): boolean {
-  return !!contact?.shopify_customer_id;
+export function contactIsCustomer(opp: KanbanOpportunity): boolean {
+  return opp.contact_has_paid_order;
 }

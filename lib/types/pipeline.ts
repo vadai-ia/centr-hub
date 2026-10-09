@@ -57,8 +57,15 @@ export interface PipelineInitialState {
   /** Umbral global vigente (días) para el auto-ocultar — pinta el
    *  control admin del pipeline. */
   hideClosedAfterDays: number;
+  /** Suma del monto de cada etapa — encabezado de la columna. La dirección
+   *  lo usa para proyectar el cierre de la semana y del mes. Mismo criterio
+   *  de monto que la card. */
+  amountsByStage: Record<UUID, number>;
   /** Conteo de tareas pendientes por opportunity_id (lote polish M6). */
   pendingTasksByOpp: Record<UUID, number>;
+  /** Seguimientos escritos por una persona en cada opp — responde "¿este
+   *  cliente está siendo atendido?" sin abrir la ficha. */
+  notesByOpp: Record<UUID, number>;
   /** Id de la etapa "Caso problemático" del Post-venta (M4v2) — resuelto
    *  por la ancla canónica `resolvePostventaStages`. Permite que el card
    *  muestre el botón "Caso resuelto" sin acoplarse al nombre de la etapa.

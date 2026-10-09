@@ -237,6 +237,39 @@ export async function listPendingTaskCountsByOpportunity(
   return result;
 }
 
+/**
+ * Cuántas NOTAS humanas lleva cada oportunidad, en lote.
+ *
+ * Es lo que la dirección pidió ver sin abrir la ficha: "¿Pepe está al
+ * pendiente de este cliente o lleva tres semanas sin tocarlo?". El número
+ * de seguimientos en la card responde eso de un vistazo.
+ *
+ * Cuenta SOLO `manual_note` — lo que una persona escribió. Contar todas las
+ * `activities` metería eventos de sistema (cambios de etapa, webhooks) y el
+ * número dejaría de significar "atención humana", que es justo lo que se
+ * quiere medir.
+ */
+export async function listNoteCountsByOpportunity(
+  opportunityIds: UUID[],
+): Promise<Map<UUID, number>> {
+  const result = new Map<UUID, number>();
+  if (opportunityIds.length === 0) return result;
+  const { supabase, organizationId } = getTenantScopedClient();
+  const { data, error } = await supabase
+    .from("activities")
+    .select("opportunity_id")
+    .eq("organization_id", organizationId)
+    .eq("activity_type", "manual_note")
+    .in("opportunity_id", opportunityIds);
+  if (error) throw error;
+  for (const row of data ?? []) {
+    const oppId = (row as { opportunity_id: UUID | null }).opportunity_id;
+    if (!oppId) continue;
+    result.set(oppId, (result.get(oppId) ?? 0) + 1);
+  }
+  return result;
+}
+
 // ============================================================
 // notifications
 // ============================================================

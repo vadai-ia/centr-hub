@@ -16,7 +16,11 @@ import {
 import { searchShopifyOrderIdsForQuery } from "@/lib/db/orders";
 import { reopenOpportunityIntoProblemCase } from "@/lib/services/opportunity-reopen";
 import { collapseReopenResults } from "@/lib/services/reopen-search";
-import { listPendingTaskCountsByOpportunity, recordAuditEvent } from "@/lib/db/operational";
+import {
+  listNoteCountsByOpportunity,
+  listPendingTaskCountsByOpportunity,
+  recordAuditEvent,
+} from "@/lib/db/operational";
 import { listLossReasons, listPipelineStages } from "@/lib/db/pipeline";
 import {
   getMembership,
@@ -631,6 +635,7 @@ export async function loadInitialPipelineState(opts: {
       ),
     ]);
     const countsByStage = countResult.counts;
+    const amountsByStage = countResult.amounts;
     const hiddenClosedByStage = countResult.hiddenCounts;
 
     const cardsByStage: Record<UUID, KanbanOpportunity[]> = {};
@@ -644,9 +649,15 @@ export async function loadInitialPipelineState(opts: {
       for (const o of sliced) allOppIds.push(o.id);
     }
 
-    const pendingMap = await listPendingTaskCountsByOpportunity(allOppIds);
+    const [pendingMap, notesMap] = await Promise.all([
+      listPendingTaskCountsByOpportunity(allOppIds),
+      listNoteCountsByOpportunity(allOppIds),
+    ]);
     const pendingTasksByOpp: Record<UUID, number> = {};
     pendingMap.forEach((count, oppId) => { pendingTasksByOpp[oppId] = count; });
+    // Seguimientos escritos por una persona (ver listNoteCountsByOpportunity).
+    const notesByOpp: Record<UUID, number> = {};
+    notesMap.forEach((count, oppId) => { notesByOpp[oppId] = count; });
 
     // Ancla canónica de "Caso problemático" (solo Post-venta) — habilita el
     // botón "Caso resuelto" en el card sin acoplarse al nombre (M4v2).
@@ -665,7 +676,9 @@ export async function loadInitialPipelineState(opts: {
         countsByStage,
         hiddenClosedByStage,
         hideClosedAfterDays,
+        amountsByStage,
         pendingTasksByOpp,
+        notesByOpp,
         problematicStageId,
         effectiveAdvisorId,
         advisors: vendors.map((v) => ({

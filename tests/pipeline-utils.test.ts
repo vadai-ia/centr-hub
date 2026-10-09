@@ -29,6 +29,7 @@ function makeOpp(overrides: Partial<KanbanOpportunity> = {}): KanbanOpportunity 
     order_reference: null,
 
     order_source: null,
+    contact_has_paid_order: false,
     actual_amount: null,
     estimated_amount: null,
     currency: "MXN",
@@ -178,31 +179,31 @@ describe("contactDisplayName / contactIsCustomer", () => {
     expect(contactDisplayName(null)).toBe("Contacto desconocido");
   });
 
-  it("contactIsCustomer true cuando hay shopify_customer_id (derivación O12)", () => {
-    expect(
-      contactIsCustomer({
-        id: "c",
-        full_name: "Ana",
-        phone: "+5251",
-        email: null,
-        shopify_customer_id: "sc-1",
-        whaapy_contact_id: null,
-        shopify_tags: [],
-      }),
-    ).toBe(true);
+  it("contactIsCustomer true cuando el contacto YA COMPRÓ", () => {
+    expect(contactIsCustomer(makeOpp({ contact_has_paid_order: true }))).toBe(
+      true,
+    );
   });
 
-  it("contactIsCustomer false sin shopify_customer_id (lead)", () => {
+  it("contactIsCustomer false sin compra, aunque exista en Shopify", () => {
+    // El caso que reportaron: el vendedor crea la ficha en Shopify solo para
+    // poder cotizar, y con el criterio viejo la columna de leads amanecía
+    // entera marcada como CLIENTE.
     expect(
-      contactIsCustomer({
-        id: "c",
-        full_name: "Ana",
-        phone: "+5251",
-        email: null,
-        shopify_customer_id: null,
-        whaapy_contact_id: null,
-        shopify_tags: [],
-      }),
+      contactIsCustomer(
+        makeOpp({
+          contact_has_paid_order: false,
+          contact: {
+            id: "c",
+            full_name: "Ana",
+            phone: "+5251",
+            email: null,
+            shopify_customer_id: "sc-1",
+            whaapy_contact_id: null,
+            shopify_tags: [],
+          },
+        }),
+      ),
     ).toBe(false);
   });
 });

@@ -24,6 +24,9 @@ interface Props {
   isDraggingDisabled?: boolean;
   /** Tareas pendientes asociadas a la opp (lote polish M6). */
   pendingTasksCount?: number;
+  /** Seguimientos escritos por una persona en esta oportunidad. Responde
+   *  "¿la están atendiendo?" sin abrir la ficha — lo pidió la dirección. */
+  notesCount?: number;
   /** True si la card vive en la columna "Caso problemático" (M4v2): si
    *  además no está resuelta, muestra el botón "Caso resuelto". */
   canResolveCase?: boolean;
@@ -48,6 +51,7 @@ export function KanbanCard({
   showAdvisor,
   isDraggingDisabled,
   pendingTasksCount,
+  notesCount,
   canResolveCase,
   onResolveCase,
   onSelect,
@@ -80,7 +84,9 @@ export function KanbanCard({
     ? resolveCustomerSuccess(opp.customer_success_membership_id, customerSuccess ?? [])
     : null;
   const name = contactDisplayName(opp.contact);
-  const isCustomer = contactIsCustomer(opp.contact);
+  // El criterio es "ya compró", no "existe en Shopify" — por eso recibe la
+  // opp entera y no solo el contacto embebido (ver utils.ts).
+  const isCustomer = contactIsCustomer(opp);
 
   // Lead sin cotización: el monto no aporta valor — mostramos el
   // teléfono para que el vendedor pueda llamar sin abrir la card.
@@ -137,6 +143,9 @@ export function KanbanCard({
           />
           {pendingTasksCount !== undefined && pendingTasksCount > 0 && (
             <TasksBadge count={pendingTasksCount} />
+          )}
+          {notesCount !== undefined && notesCount > 0 && (
+            <NotesBadge count={notesCount} />
           )}
           <ContactTypeBadge isCustomer={isCustomer} />
         </div>
@@ -363,6 +372,26 @@ function TasksBadge({ count }: { count: number }) {
   );
 }
 
+/**
+ * Cuántos seguimientos humanos lleva la oportunidad (notas que alguien
+ * escribió, no eventos del sistema). Sin badge = ninguno, que es justo la
+ * señal que la dirección buscaba: un cliente al que nadie le ha escrito.
+ */
+function NotesBadge({ count }: { count: number }) {
+  const plural = count === 1 ? "" : "s";
+  return (
+    <span
+      className="text-[9px] px-1 py-px rounded font-medium flex-shrink-0 inline-flex items-center gap-0.5 bg-indigo-100 text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-300"
+      title={`${count} seguimiento${plural} registrado${plural}`}
+    >
+      <svg viewBox="0 0 24 24" className="w-2.5 h-2.5" fill="currentColor" aria-hidden>
+        <path d="M20 2H4a2 2 0 0 0-2 2v18l4-4h14a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2z" />
+      </svg>
+      {count}
+    </span>
+  );
+}
+
 function ContactTypeBadge({ isCustomer }: { isCustomer: boolean }) {
   return (
     <span
@@ -373,7 +402,10 @@ function ContactTypeBadge({ isCustomer }: { isCustomer: boolean }) {
           : "bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300",
       ].join(" ")}
     >
-      {isCustomer ? "Cliente" : "Lead"}
+      {/* "Oportunidad" y no "Lead": en el tablero la tarjeta ES una
+          oportunidad, y pasa a "Cliente" sola en cuanto la persona compra
+          (nombre acordado en la junta de octubre). */}
+      {isCustomer ? "Cliente" : "Oportunidad"}
     </span>
   );
 }

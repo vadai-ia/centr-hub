@@ -10,6 +10,7 @@ import type {
 import type { PipelineStageRow, UUID } from "@/lib/types/database";
 import { PIPELINE_VIRTUALIZATION_THRESHOLD } from "@/lib/constants";
 import { KanbanCard } from "./kanban-card";
+import { formatAmount } from "./utils";
 
 interface Props {
   stage: PipelineStageRow;
@@ -34,8 +35,13 @@ interface Props {
   showingClosed?: boolean;
   /** Toggle "Ver cerradas" / "Ocultar cerradas" de la etapa. */
   onToggleClosed?: (stage: PipelineStageRow) => void | Promise<void>;
+  /** Suma del monto de las opps visibles de la etapa. La dirección lo usa
+   *  para proyectar: "¿cuánto traigo en Cierre esta semana?". */
+  totalAmount?: number;
   /** Conteo de tareas pendientes por opportunity_id (lote polish M6). */
   pendingTasksByOpp?: Record<UUID, number>;
+  /** Seguimientos humanos por opportunity_id — badge de la card. */
+  notesByOpp?: Record<UUID, number>;
   /** True si esta columna es "Caso problemático" (M4v2): sus cards no
    *  resueltos muestran el botón "Caso resuelto". */
   isProblematicStage?: boolean;
@@ -70,11 +76,13 @@ export function KanbanColumn({
   page,
   isOverlay,
   totalCount,
+  totalAmount,
   hiddenClosedCount = 0,
   isClosedStage = false,
   showingClosed = false,
   onToggleClosed,
   pendingTasksByOpp,
+  notesByOpp,
   isProblematicStage = false,
   onResolveCase,
   onOpenReopen,
@@ -89,6 +97,7 @@ export function KanbanColumn({
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const loadingRef = useRef(false);
   const [isTogglingClosed, setIsTogglingClosed] = useState(false);
 
   const handleToggleClosed = useCallback(async () => {
@@ -115,16 +124,22 @@ export function KanbanColumn({
     isClosedStage && (hiddenClosedCount > 0 || showingClosed);
 
   const handleLoadMore = useCallback(async () => {
-    if (isLoadingMore || !hasMore) return;
+    // El latch es un ref, no el estado: varios eventos de scroll caen en el
+    // mismo frame y todos leerían `isLoadingMore` en false (el valor que
+    // capturó el closure), pidiendo la misma página dos y tres veces.
+    if (loadingRef.current || !hasMore) return;
+    loadingRef.current = true;
     setIsLoadingMore(true);
     try {
       await onLoadMore(stage, page + 1);
     } finally {
+      loadingRef.current = false;
       setIsLoadingMore(false);
     }
-  }, [hasMore, isLoadingMore, onLoadMore, page, stage]);
+  }, [hasMore, onLoadMore, page, stage]);
 
-  // Scroll al final → cargar más. Solo cuando hay >= virtualization
+  // Scroll al final → cargar más. Única vía desde que se quitó el botón.
+  // Solo cuando hay >= virtualization
   // threshold para no inflar el observer en columnas pequeñas.
   useEffect(() => {
     const el = scrollRef.current;
@@ -205,6 +220,19 @@ export function KanbanColumn({
         </div>
       </div>
 
+      {/* Monto de la etapa. Solo cuando hay algo que sumar: un "$0" en cada
+          columna vacía es ruido que compite con el dato que importa. */}
+      {totalAmount !== undefined && totalAmount > 0 ? (
+        <div className="px-2 pb-1.5 -mt-1">
+          <span
+            className="text-[11px] font-semibold tabular-nums text-gray-600 dark:text-gray-300"
+            title="Suma de las oportunidades visibles en esta etapa"
+          >
+            {formatAmount(String(totalAmount))}
+          </span>
+        </div>
+      ) : null}
+
       <div
         ref={scrollRef}
         className="flex-1 overflow-y-auto px-1.5 pb-1.5 centr-scrollbar"
@@ -241,6 +269,7 @@ export function KanbanColumn({
                     customerSuccess={customerSuccess}
                     showAdvisor={showAdvisor}
                     pendingTasksCount={pendingTasksByOpp?.[opp.id]}
+                    notesCount={notesByOpp?.[opp.id]}
                     canResolveCase={isProblematicStage}
                     onResolveCase={onResolveCase}
                     onSelect={onSelectOpportunity}
@@ -259,6 +288,7 @@ export function KanbanColumn({
                 customerSuccess={customerSuccess}
                 showAdvisor={showAdvisor}
                 pendingTasksCount={pendingTasksByOpp?.[opp.id]}
+                notesCount={notesByOpp?.[opp.id]}
                 canResolveCase={isProblematicStage}
                 onResolveCase={onResolveCase}
                 onSelect={onSelectOpportunity}
@@ -267,15 +297,15 @@ export function KanbanColumn({
           </div>
         )}
 
-        {hasMore && (
-          <button
-            type="button"
-            onClick={() => void handleLoadMore()}
-            disabled={isLoadingMore}
-            className="w-full mt-2 py-2 text-xs font-medium text-amber-700 dark:text-amber-300 hover:bg-white dark:hover:bg-gray-700 rounded transition-colors disabled:opacity-50"
-          >
-            {isLoadingMore ? "Cargando..." : "Cargar más"}
-          </button>
+        {/* Sin botón "Cargar más": la columna carga sola al bajar. El botón
+            obligaba a buscarlo al final de una lista que crece, y tras cada
+            carga había que volver a bajar. Solo queda el aviso de que está
+            trayendo más, para que el vacío momentáneo no se lea como "ya no
+            hay". */}
+        {hasMore && isLoadingMore && (
+          <p className="w-full mt-2 py-2 text-center text-[11px] text-gray-400 dark:text-gray-500">
+            Cargando más…
+          </p>
         )}
 
         {showClosedToggle && (

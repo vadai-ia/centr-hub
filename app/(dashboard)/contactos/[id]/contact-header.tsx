@@ -93,7 +93,9 @@ export function ContactHeader({
           <div className="flex items-center flex-wrap gap-2 mt-2">
             <SystemBadge kind="shopify" active={indicators.inShopify} />
             <SystemBadge kind="whaapy" active={indicators.inWhaapy} />
-            <ContactTypeBadge isCustomer={contactType === "cliente"} />
+            {/* Cliente = ya compró. `contactType` (identidad Shopify) sigue
+                gobernando el botón "Crear contacto en Shopify", no el badge. */}
+            <ContactTypeBadge isCustomer={detail.indicators.paidOrdersCount > 0} />
             {contact.is_outbound && <OutboundBadge />}
             {contact.missing_phone && (
               <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">

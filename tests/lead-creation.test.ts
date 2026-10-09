@@ -581,7 +581,7 @@ describe("createLead — lead conocido que vuelve por el formulario", () => {
     expect(c.address).toEqual({ address1: "Av. Reforma 123" });
 
     const audit = fake.getTable("audit_log").find((a) => a.event_type === "lead_created");
-    expect(audit?.payload.contact_fields_filled).toEqual(["email", "address"]);
+    expect((audit?.payload as { contact_fields_filled?: string[] } | undefined)?.contact_fields_filled).toEqual(["email", "address"]);
   });
 
   it("NO pisa un dato que el maestro ya tenía", async () => {
@@ -608,7 +608,7 @@ describe("createLead — lead conocido que vuelve por el formulario", () => {
     expect(c.address).toEqual({ address1: "Domicilio real" });
 
     const audit = fake.getTable("audit_log").find((a) => a.event_type === "lead_created");
-    expect(audit?.payload.contact_fields_filled).toEqual([]);
+    expect((audit?.payload as { contact_fields_filled?: string[] } | undefined)?.contact_fields_filled).toEqual([]);
   });
 
   it("una dirección vacía heredada (`{}`) cuenta como hueco y se rellena", async () => {
