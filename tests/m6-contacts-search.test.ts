@@ -82,6 +82,9 @@ describe("searchContactsForList", () => {
       {
         id: "o-1",
         organization_id: ORG,
+        // El folio de Shopify no es decorativo: la marca "1ª compra" se
+        // resuelve comparando contra el PRIMER pedido de la persona.
+        shopify_order_id: "so-1",
         contact_id: "c-1",
         subtotal: "1000",
         currency: "MXN",

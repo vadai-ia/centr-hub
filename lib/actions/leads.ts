@@ -6,6 +6,7 @@ import { canSeeAllData } from "@/lib/auth/capabilities";
 import { withTenantContext } from "@/lib/tenant/context";
 import { listActiveRealVendors } from "@/lib/db/users";
 import { createLead, LeadValidationError } from "@/lib/services/lead-creation";
+import { resolveOutboundOwner } from "@/lib/services/outbound-owner";
 
 /**
  * Server actions de creación manual de leads (0038, Bloque A).
@@ -210,12 +211,15 @@ export async function createOutboundLeadAction(raw: unknown): Promise<CreateManu
     orgId,
     async (): Promise<CreateManualLeadResult> => {
       try {
+        // Mismo dueño que la otra vía de creación: si una sola de las dos
+        // asignara, la mitad de las tarjetas seguiría naciendo huérfana.
+        const ownerId = await resolveOutboundOwner(orgId, userId);
         const result = await createLead({
           fullName: parsed.data.name,
           phone: parsed.data.phone || null,
           email,
           address,
-          assignment: { mode: "explicit", advisorId: null },
+          assignment: { mode: "explicit", advisorId: ownerId },
           source: "manual",
           actorUserId: userId,
           channel: "outbound",

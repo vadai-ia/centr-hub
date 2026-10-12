@@ -215,24 +215,59 @@ export async function sumPaidOrdersForContact(
 export async function listContactsWithPaidOrders(
   contactIds: UUID[],
 ): Promise<Set<UUID>> {
-  const result = new Set<UUID>();
+  const map = await listFirstPaidOrderByContact(contactIds);
+  return new Set(map.keys());
+}
+
+/**
+ * El PRIMER pedido pagado de cada persona (`shopify_order_id`).
+ *
+ * Alimenta la marca "1ª compra": la dirección pidió poder distinguir al lead
+ * que se ganó por primera vez de la recompra de un cliente de siempre. Sin
+ * esto, toda venta a un cliente antiguo se leería como una conversión.
+ *
+ * "Primero" se decide por `paid_at` y se desempata por `shopify_order_id`:
+ * dos pedidos pueden compartir timestamp (importación, mismo minuto) y sin
+ * desempate la marca saltaría de un pedido a otro entre recargas.
+ */
+export async function listFirstPaidOrderByContact(
+  contactIds: UUID[],
+): Promise<Map<UUID, string>> {
+  const result = new Map<UUID, string>();
   if (contactIds.length === 0) return result;
   const { supabase, organizationId } = getTenantScopedClient();
   const CHUNK = 300;
+  const best = new Map<UUID, { paidAt: string; orderId: string }>();
   for (let i = 0; i < contactIds.length; i += CHUNK) {
     const chunk = contactIds.slice(i, i + CHUNK);
     const { data, error } = await supabase
       .from("orders")
-      .select("contact_id")
+      .select("contact_id, shopify_order_id, paid_at")
       .eq("organization_id", organizationId)
       .eq("financial_status", "paid")
       .is("cancelled_at", null)
       .in("contact_id", chunk);
     if (error) throw error;
     for (const row of data ?? []) {
-      const id = (row as { contact_id: UUID | null }).contact_id;
-      if (id) result.add(id);
+      const r = row as {
+        contact_id: UUID | null;
+        shopify_order_id: string | null;
+        paid_at: string | null;
+      };
+      if (!r.contact_id || !r.shopify_order_id) continue;
+      // Sin fecha de pago se manda al final: un pedido sin fechar no debe
+      // desplazar al que sí tiene fecha.
+      const paidAt = r.paid_at ?? "9999";
+      const prev = best.get(r.contact_id);
+      const gana =
+        prev === undefined ||
+        paidAt < prev.paidAt ||
+        (paidAt === prev.paidAt && r.shopify_order_id < prev.orderId);
+      if (gana) best.set(r.contact_id, { paidAt, orderId: r.shopify_order_id });
     }
+  }
+  for (const [contactId, v] of Array.from(best.entries())) {
+    result.set(contactId, v.orderId);
   }
   return result;
 }

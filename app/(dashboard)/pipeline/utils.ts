@@ -123,18 +123,35 @@ export function contactDisplayName(
 }
 
 /**
- * Lead vs cliente: **cliente es quien YA COMPRÓ**, no quien existe en
- * Shopify (cambio pedido en la junta de octubre).
+ * Las TRES etiquetas de la tarjeta, tal como las definió la dirección:
  *
- * El criterio anterior (`shopify_customer_id`) convertía en cliente a
- * cualquiera en cuanto el vendedor le creaba la ficha para poder cotizarle,
- * así que la columna de leads amanecía entera marcada como CLIENTE y el
- * embudo real se volvía invisible: "aquí ya no tengo ningún lead".
+ *   Lead  —  de "Lead nuevo" hasta "Reunión": todavía no hay nada en Shopify.
+ *   Oportunidad  —  "al momento de ser cargado a Shopify", o sea cuando
+ *                   existe la cotización (Draft Order).
+ *   Cliente  —  "al pasar ganado", o sea cuando hay PEDIDO.
  *
- * La bandera la resuelve la capa de datos en lote (`contact_has_paid_order`):
- * pedido pagado y NO cancelado. Lo de "existe en Shopify" sigue vivo, pero
- * en su propio distintivo (`SystemBadge`), que es lo que de verdad significa.
+ * Es una propiedad de ESTA tarjeta, no de la persona: la misma persona puede
+ * tener una cotización abierta (Oportunidad) y un pedido viejo (Cliente), y
+ * cada tarjeta debe decir en qué punto está ELLA.
+ *
+ * Por eso se deriva de los enlaces de la propia oportunidad y no de su etapa
+ * por nombre ni por posición: los nombres y el orden los edita el admin desde
+ * M7, y "cargado a Shopify" es literalmente tener el borrador. De paso cubre
+ * Post-venta sin regla aparte — esas tarjetas nacen de un pedido, así que
+ * salen como Cliente, que es lo correcto.
  */
-export function contactIsCustomer(opp: KanbanOpportunity): boolean {
-  return opp.contact_has_paid_order;
+export type ContactCardStatus = "lead" | "oportunidad" | "cliente";
+
+export const CONTACT_CARD_STATUS_LABELS: Record<ContactCardStatus, string> = {
+  lead: "Lead",
+  oportunidad: "Oportunidad",
+  cliente: "Cliente",
+};
+
+export function deriveContactCardStatus(
+  opp: KanbanOpportunity,
+): ContactCardStatus {
+  if (opp.shopify_order_id) return "cliente";
+  if (opp.shopify_draft_order_id) return "oportunidad";
+  return "lead";
 }

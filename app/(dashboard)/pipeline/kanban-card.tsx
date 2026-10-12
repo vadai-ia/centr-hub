@@ -9,7 +9,9 @@ import { OutboundBadge } from "@/components/outbound/outbound-badge";
 import { ONLINE_ORDER_SOURCE } from "@/lib/constants";
 import {
   contactDisplayName,
-  contactIsCustomer,
+  CONTACT_CARD_STATUS_LABELS,
+  deriveContactCardStatus,
+  type ContactCardStatus,
   deriveDisplayAmount,
   resolveAdvisor,
   resolveCustomerSuccess,
@@ -84,9 +86,11 @@ export function KanbanCard({
     ? resolveCustomerSuccess(opp.customer_success_membership_id, customerSuccess ?? [])
     : null;
   const name = contactDisplayName(opp.contact);
-  // El criterio es "ya compró", no "existe en Shopify" — por eso recibe la
-  // opp entera y no solo el contacto embebido (ver utils.ts).
-  const isCustomer = contactIsCustomer(opp);
+  // Lead → Oportunidad → Cliente según dónde está ESTA tarjeta (ver utils.ts).
+  const cardStatus = deriveContactCardStatus(opp);
+  // "1ª compra": la marca que la dirección pidió para no confundir al lead
+  // que acabamos de ganar con la recompra de un cliente de siempre.
+  const isFirstPurchase = cardStatus === "cliente" && opp.is_first_purchase;
 
   // Lead sin cotización: el monto no aporta valor — mostramos el
   // teléfono para que el vendedor pueda llamar sin abrir la card.
@@ -147,7 +151,8 @@ export function KanbanCard({
           {notesCount !== undefined && notesCount > 0 && (
             <NotesBadge count={notesCount} />
           )}
-          <ContactTypeBadge isCustomer={isCustomer} />
+          <ContactTypeBadge status={cardStatus} />
+          {isFirstPurchase && <FirstPurchaseBadge />}
         </div>
       </div>
 
@@ -392,20 +397,34 @@ function NotesBadge({ count }: { count: number }) {
   );
 }
 
-function ContactTypeBadge({ isCustomer }: { isCustomer: boolean }) {
+const STATUS_CLASSES: Record<ContactCardStatus, string> = {
+  lead: "bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300",
+  oportunidad: "bg-sky-100 text-sky-700 dark:bg-sky-500/15 dark:text-sky-300",
+  cliente: "bg-purple-100 text-purple-700 dark:bg-purple-500/15 dark:text-purple-300",
+};
+
+function ContactTypeBadge({ status }: { status: ContactCardStatus }) {
   return (
     <span
-      className={[
-        "text-[9px] uppercase tracking-wide px-1 py-px rounded font-medium flex-shrink-0",
-        isCustomer
-          ? "bg-purple-100 text-purple-700 dark:bg-purple-500/15 dark:text-purple-300"
-          : "bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300",
-      ].join(" ")}
+      className={`text-[9px] uppercase tracking-wide px-1 py-px rounded font-medium flex-shrink-0 ${STATUS_CLASSES[status]}`}
     >
-      {/* "Oportunidad" y no "Lead": en el tablero la tarjeta ES una
-          oportunidad, y pasa a "Cliente" sola en cuanto la persona compra
-          (nombre acordado en la junta de octubre). */}
-      {isCustomer ? "Cliente" : "Oportunidad"}
+      {CONTACT_CARD_STATUS_LABELS[status]}
+    </span>
+  );
+}
+
+/**
+ * "1ª compra" — la traza que pidió la dirección para medir "era lead y
+ * logramos ganarlo". Solo en la PRIMERA compra de la persona: en la segunda
+ * ya no convertimos a nadie, le vendimos otra vez a un cliente.
+ */
+function FirstPurchaseBadge() {
+  return (
+    <span
+      className="text-[9px] uppercase tracking-wide px-1 py-px rounded font-medium flex-shrink-0 bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300"
+      title="Primera compra de esta persona: entró como lead y se ganó"
+    >
+      1ª compra
     </span>
   );
 }

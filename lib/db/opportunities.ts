@@ -2,7 +2,7 @@ import "server-only";
 import { getTenantScopedClient } from "@/lib/db/client";
 import {
   getLinkedOrderInfoByShopifyOrderIds,
-  listContactsWithPaidOrders,
+  listFirstPaidOrderByContact,
   searchShopifyOrderIdsForQuery,
   type LinkedOrderInfo,
 } from "@/lib/db/orders";
@@ -88,6 +88,7 @@ async function attachOrderReferences<
       order_reference: string | null;
       order_source: string | null;
       contact_has_paid_order: boolean;
+      is_first_purchase: boolean;
     }
   >
 > {
@@ -99,7 +100,7 @@ async function attachOrderReferences<
     ids.length > 0
       ? getLinkedOrderInfoByShopifyOrderIds(ids)
       : Promise.resolve(new Map<string, LinkedOrderInfo>()),
-    listContactsWithPaidOrders(rows.map((r) => r.contact_id)),
+    listFirstPaidOrderByContact(rows.map((r) => r.contact_id)),
   ]);
   return rows.map((r) => {
     const linked = r.shopify_order_id ? info.get(r.shopify_order_id) : undefined;
@@ -109,6 +110,11 @@ async function attachOrderReferences<
       // Origen del pedido: alimenta el distintivo "Compra online" de la card.
       order_source: linked?.source ?? null,
       contact_has_paid_order: compraron.has(r.contact_id),
+      // La tarjeta ES la primera compra solo si su pedido es el primero de
+      // esa persona. Una opp sin pedido (cotización, lead) nunca lo es.
+      is_first_purchase:
+        r.shopify_order_id !== null &&
+        compraron.get(r.contact_id) === r.shopify_order_id,
     };
   });
 }
@@ -445,11 +451,14 @@ export interface KanbanOpportunity {
   delivery_message_sent_at: string | null;
   /** Cuándo salió la encuesta de los 7 días (0049). NULL = no enviada. */
   followup_message_sent_at: string | null;
-  /** El contacto YA COMPRÓ (pedido pagado y no cancelado). Es el criterio
-   *  de "cliente" desde la junta: existir en Shopify no basta, porque el
-   *  vendedor crea la ficha allá solo para poder cotizar. Derivado en
-   *  lote, no es columna de la opp. */
+  /** El contacto YA COMPRÓ (pedido pagado y no cancelado). Derivado en lote.
+   *  NO decide el badge Lead/Oportunidad/Cliente (eso lo marca la etapa de
+   *  ESTA tarjeta); se conserva para la marca "1ª compra". */
   contact_has_paid_order: boolean;
+  /** Esta tarjeta corresponde a la PRIMERA compra de la persona. Es la marca
+   *  que la dirección pidió para distinguir "era lead y lo ganamos" de la
+   *  recompra de un cliente de siempre. Derivado en lote. */
+  is_first_purchase: boolean;
   contact: KanbanContactEmbed | null;
 }
 
@@ -1184,6 +1193,40 @@ export async function replaceLineItems(
     .select("*");
   if (error) throw error;
   return data ?? [];
+}
+
+/**
+ * Qué personas tienen al menos una COTIZACIÓN viva (oportunidad no cancelada
+ * con borrador de Shopify). Es el escalón intermedio del badge de Contactos:
+ * Lead → Oportunidad → Cliente.
+ *
+ * En el tablero el escalón se lee de la propia tarjeta; aquí no hay tarjeta,
+ * hay una persona, así que la pregunta es si ALGUNA de sus oportunidades
+ * llegó a cotizarse.
+ */
+export async function listContactsWithQuotes(
+  contactIds: UUID[],
+): Promise<Set<UUID>> {
+  const result = new Set<UUID>();
+  if (contactIds.length === 0) return result;
+  const { supabase, organizationId } = getTenantScopedClient();
+  const CHUNK = 300;
+  for (let i = 0; i < contactIds.length; i += CHUNK) {
+    const chunk = contactIds.slice(i, i + CHUNK);
+    const { data, error } = await supabase
+      .from("opportunities")
+      .select("contact_id")
+      .eq("organization_id", organizationId)
+      .is("cancelled_at", null)
+      .not("shopify_draft_order_id", "is", null)
+      .in("contact_id", chunk);
+    if (error) throw error;
+    for (const row of data ?? []) {
+      const id = (row as { contact_id: UUID | null }).contact_id;
+      if (id) result.add(id);
+    }
+  }
+  return result;
 }
 
 // ============================================================

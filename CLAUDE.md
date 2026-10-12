@@ -801,6 +801,61 @@ Las dos tarjetas salen de `leadEntryByContact`, derivado de las mismas `stageEnt
 
 **No requiere migración.**
 
+## Lead → Oportunidad → Cliente: la etiqueta es de la TARJETA, no de la persona
+
+Corrección pedida por la dirección sobre el punto 10, que se había implementado mal. Las tres etiquetas y su disparador:
+
+| Etiqueta | Cuándo |
+|---|---|
+| **Lead** | De "Lead nuevo" hasta "Reunión": todavía no hay nada en Shopify |
+| **Oportunidad** | "Al momento de ser cargado a Shopify" — existe el borrador (`shopify_draft_order_id`) |
+| **Cliente** | "Al pasar ganado" — existe el PEDIDO (`shopify_order_id`) |
+
+**El error que se corrigió:** la primera versión usó "ya compró" como criterio de cliente, leyendo el CONTACTO. Como la etiqueta era de la persona y no de la tarjeta, cualquiera con una compra vieja aparecía como CLIENTE también en su tarjeta de "Lead nuevo", y la columna de leads volvía a mentir — el mismo síntoma que se quería arreglar, por la otra punta. **La escalera es de la tarjeta: la misma persona puede tener una cotización abierta (Oportunidad) y un pedido viejo (Cliente), y cada tarjeta debe decir en qué punto está ELLA.**
+
+**Se deriva de los enlaces de la propia oportunidad, no de la etapa.** Ni por nombre ni por posición: los dos los edita el admin desde M7, y "cargado a Shopify" es literalmente tener el borrador. De paso cubre Post-venta sin regla aparte — esas tarjetas nacen de un pedido, así que salen como Cliente, que es lo correcto. `deriveContactCardStatus` en [app/(dashboard)/pipeline/utils.ts](app/(dashboard)/pipeline/utils.ts), módulo compartido con Contactos para que las pantallas no diverjan.
+
+**En Contactos la pregunta es por la PERSONA**, que no tiene tarjeta: Cliente si ya compró, Oportunidad si tiene alguna cotización viva (`listContactsWithQuotes`), Lead si ninguna. Dos lecturas en lote por página, nunca una por fila.
+
+### "1ª compra" — la traza de que era lead y lo ganamos
+
+La dirección pidió que en ganado quedara "algo que nos permita medir que era Lead y logramos ganarlo", **y solo en esa primera compra**. La tarjeta Cliente lleva el distintivo **"1ª compra"** cuando su pedido es el primero de esa persona (`listFirstPaidOrderByContact`). En la segunda venta no convertimos a nadie: le vendimos otra vez a un cliente, y marcarla igual inflaría la conversión de leads.
+
+"Primero" se decide por `paid_at` y **se desempata por `shopify_order_id`**: dos pedidos pueden compartir timestamp (importación, mismo minuto) y sin desempate la marca saltaría de un pedido a otro entre recargas. Un pedido sin `paid_at` se manda al final — no debe desplazar al que sí tiene fecha.
+
+`contact_has_paid_order` sigue existiendo pero **ya NO decide el badge**; solo alimenta esta marca.
+
+## El pipeline de Outbound nacía sin dueño
+
+Las dos vías de creación —"Meter a Outbound" desde el contacto y "Crear lead en Outbound" desde el formulario— pasaban `advisorId: null` **cableado**. Medido en producción: **85 de 90 oportunidades de Outbound activas sin asesor**. Una tarjeta sin dueño no la trabaja nadie y no se mide contra nadie.
+
+`resolveOutboundOwner` ([lib/services/outbound-owner.ts](lib/services/outbound-owner.ts)) lo resuelve en UN solo lugar —arreglarlo en una sola de las dos vías habría dejado la mitad huérfana igual— con esta precedencia:
+
+1. El dueño configurado: `organizations.config.outbound.default_owner_membership_id`. Cambiar de persona es un UPDATE, no un deploy (mismo patrón que el Customer Success de 0047).
+2. Quien la crea, si opera cartera. Cubre el caso normal: el SDR mete el contacto a su propio pipeline.
+3. NULL — sigue siendo válido, pero ya es la excepción.
+
+**Los dos escalones se validan contra los asesores ACTIVOS.** Un ancla que apunta a alguien dado de baja no debe tumbar la creación del lead: cae al siguiente escalón. `createLead` rechaza un asesor no elegible con `LeadValidationError`, así que sin esa validación un ancla vieja rompería el botón entero.
+
+**Para que un SDR pueda ser dueño necesita la ranura `is_advisor` encendida** (Admin → Usuarios → "Opera oportunidades como asesor"). Es exactamente el mecanismo de 0050 para "opera cartera sin ser vendedor de planta"; **filtrar por `role` aquí rompería ese invariante**. Efecto lateral a vigilar: con la ranura encendida la persona aparece también en el selector de asesor de Venta y en el desglose del dashboard; si no debe recibir leads de Venta por reparto automático, apagarle `in_lead_rotation` (toggle aparte en la misma pantalla).
+
+### Pasos operativos (NO son código del repo)
+
+1. **Encender la ranura de asesor** del SDR en Admin → Usuarios, y apagarle el reparto round-robin si no debe recibir leads de Venta.
+2. **Anclar el dueño** de Outbound:
+   ```sql
+   UPDATE organizations
+   SET config = jsonb_set(config, '{outbound,default_owner_membership_id}',
+                          to_jsonb('<membership_id>'::text))
+   WHERE slug = 'centr';
+   ```
+3. **Correctivo de las que ya nacieron sin dueño**, dry-run primero:
+   ```
+   npm run maintenance:assign-outbound-owner -- --org-slug centr
+   npm run maintenance:assign-outbound-owner -- --org-slug centr --apply
+   ```
+   **Solo toca lo que está SIN asesor** (`assigned_advisor_id IS NULL`, re-filtrado en el propio UPDATE por si alguien asignó a mano entre la lectura y la escritura): jamás pisa una asignación existente. Idempotente, con audit `outbound_opportunity_owner_backfilled`.
+
 ## Cambios al stack
 
 Cualquier modificación al stack documentado en `package.json` (agregar dependencia, subir versión mayor, cambiar provider externo) requiere aprobación explícita del operador antes de comitearse. Razón: el stack está fijado por experiencias previas (Kibah, FindMed, Hemenesy) y cualquier desviación inesperada introduce riesgo operacional.

@@ -10,6 +10,7 @@ import { listActiveRealVendors } from "@/lib/db/users";
 import { setContactOutbound } from "@/lib/services/outbound-mark";
 import { handoffOutboundOpportunity } from "@/lib/services/outbound-handoff";
 import { createLead, LeadValidationError } from "@/lib/services/lead-creation";
+import { resolveOutboundOwner } from "@/lib/services/outbound-owner";
 
 /**
  * Acciones de la marca outbound (Fase 2).
@@ -17,8 +18,8 @@ import { createLead, LeadValidationError } from "@/lib/services/lead-creation";
  * - `addContactToOutboundAction`: mete un contacto EXISTENTE al pipeline
  *   Outbound (lo trabaja el SDR). Reusa el camino canónico `createLead` con
  *   `channel:"outbound"` → dedup contra sí mismo, marca outbound + propaga a
- *   sus opps no terminales, y crea la opp Outbound (sin asignar). Gate:
- *   data_scope='all' (admin/SDR).
+ *   sus opps no terminales, y crea la opp Outbound CON DUEÑO (ver
+ *   `resolveOutboundOwner`). Gate: data_scope='all' (admin/SDR).
  * - `unsetContactOutboundAction`: corrección ADMIN de un marcado erróneo.
  *   Des-marca el contacto + sus opps no terminales, audit `contact_outbound_unset`.
  *   Gate: acceso a panel de administración (admin/superadmin, NO SDR).
@@ -54,11 +55,12 @@ export async function addContactToOutboundAction(raw: unknown): Promise<Outbound
         return { ok: false, message: "El contacto necesita teléfono antes de meterlo a Outbound." };
       }
       try {
+        const ownerId = await resolveOutboundOwner(orgId, userId);
         const result = await createLead({
           fullName: contact.full_name,
           phone: contact.phone,
           email: contact.email,
-          assignment: { mode: "explicit", advisorId: null },
+          assignment: { mode: "explicit", advisorId: ownerId },
           source: "manual",
           actorUserId: userId,
           channel: "outbound",

@@ -23,6 +23,7 @@ function row(overrides: Partial<ContactListRow> = {}): ContactListRow {
     whaapy_contact_id: null,
     contactType: "lead",
     hasPaidOrder: false,
+    hasQuote: false,
     is_outbound: false,
     assigned_advisor_id: null,
     last_modified_at: "2026-05-01T10:00:00.000Z",

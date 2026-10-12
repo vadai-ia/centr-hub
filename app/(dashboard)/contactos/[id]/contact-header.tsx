@@ -1,4 +1,8 @@
 "use client";
+import {
+  CONTACT_CARD_STATUS_LABELS,
+  type ContactCardStatus,
+} from "@/app/(dashboard)/pipeline/utils";
 import Link from "next/link";
 import type { ContactDetail } from "@/lib/db/contacts-detail";
 import type { AdvisorOption } from "@/lib/actions/contacts";
@@ -69,6 +73,19 @@ export function ContactHeader({
     : ownAdvisor;
   const lastActivity = formatRelative(lastActivityISO(contact));
   const isLead = contactType === "lead";
+  // Lead → Oportunidad → Cliente (misma escalera que el tablero y el
+  // listado). "Oportunidad" = tiene alguna cotización viva; el folio del
+  // borrador es justo lo que lo delata.
+  const tieneCotizacion = [
+    ...detail.opportunities.venta,
+    ...detail.opportunities.postVenta,
+  ].some((o) => o.cancelled_at === null && o.display_reference !== null);
+  const status: ContactCardStatus =
+    detail.indicators.paidOrdersCount > 0
+      ? "cliente"
+      : tieneCotizacion
+        ? "oportunidad"
+        : "lead";
 
   return (
     <header className="bg-white dark:bg-gray-800 rounded-md border border-gray-200 dark:border-gray-700 p-4">
@@ -93,9 +110,9 @@ export function ContactHeader({
           <div className="flex items-center flex-wrap gap-2 mt-2">
             <SystemBadge kind="shopify" active={indicators.inShopify} />
             <SystemBadge kind="whaapy" active={indicators.inWhaapy} />
-            {/* Cliente = ya compró. `contactType` (identidad Shopify) sigue
-                gobernando el botón "Crear contacto en Shopify", no el badge. */}
-            <ContactTypeBadge isCustomer={detail.indicators.paidOrdersCount > 0} />
+            {/* `contactType` (identidad Shopify) sigue gobernando el botón
+                "Crear contacto en Shopify", no el badge. */}
+            <ContactTypeBadge status={status} />
             {contact.is_outbound && <OutboundBadge />}
             {contact.missing_phone && (
               <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">
@@ -211,17 +228,18 @@ function SystemBadge({ kind, active }: { kind: "shopify" | "whaapy"; active: boo
   );
 }
 
-function ContactTypeBadge({ isCustomer }: { isCustomer: boolean }) {
+function ContactTypeBadge({ status }: { status: ContactCardStatus }) {
+  const cls: Record<ContactCardStatus, string> = {
+    lead: "bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300",
+    oportunidad: "bg-sky-50 text-sky-700 dark:bg-sky-900/30 dark:text-sky-300",
+    cliente:
+      "bg-indigo-50 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300",
+  };
   return (
     <span
-      className={[
-        "text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded",
-        isCustomer
-          ? "bg-indigo-50 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300"
-          : "bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300",
-      ].join(" ")}
+      className={`text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded ${cls[status]}`}
     >
-      {isCustomer ? "Cliente" : "Lead"}
+      {CONTACT_CARD_STATUS_LABELS[status]}
     </span>
   );
 }

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   contactDisplayName,
-  contactIsCustomer,
+  deriveContactCardStatus,
   deriveDisplayAmount,
   deriveOriginIndicator,
   formatAmount,
@@ -30,6 +30,7 @@ function makeOpp(overrides: Partial<KanbanOpportunity> = {}): KanbanOpportunity 
 
     order_source: null,
     contact_has_paid_order: false,
+    is_first_purchase: false,
     actual_amount: null,
     estimated_amount: null,
     currency: "MXN",
@@ -179,31 +180,42 @@ describe("contactDisplayName / contactIsCustomer", () => {
     expect(contactDisplayName(null)).toBe("Contacto desconocido");
   });
 
-  it("contactIsCustomer true cuando el contacto YA COMPRÓ", () => {
-    expect(contactIsCustomer(makeOpp({ contact_has_paid_order: true }))).toBe(
-      true,
-    );
+  it("Lead mientras no haya nada en Shopify", () => {
+    expect(
+      deriveContactCardStatus(
+        makeOpp({ shopify_draft_order_id: null, shopify_order_id: null }),
+      ),
+    ).toBe("lead");
   });
 
-  it("contactIsCustomer false sin compra, aunque exista en Shopify", () => {
-    // El caso que reportaron: el vendedor crea la ficha en Shopify solo para
-    // poder cotizar, y con el criterio viejo la columna de leads amanecía
-    // entera marcada como CLIENTE.
+  it("Oportunidad al cargarse la cotización en Shopify", () => {
     expect(
-      contactIsCustomer(
+      deriveContactCardStatus(
+        makeOpp({ shopify_draft_order_id: "do-1", shopify_order_id: null }),
+      ),
+    ).toBe("oportunidad");
+  });
+
+  it("Cliente cuando ya hay PEDIDO, aunque siga habiendo borrador", () => {
+    // El pedido gana sobre el borrador: la opp conserva su draft al ganarse.
+    expect(
+      deriveContactCardStatus(
+        makeOpp({ shopify_draft_order_id: "do-1", shopify_order_id: "o-1" }),
+      ),
+    ).toBe("cliente");
+  });
+
+  it("NO depende de que la persona haya comprado antes, sino de ESTA tarjeta", () => {
+    // El criterio anterior miraba al contacto y marcaba CLIENTE la columna de
+    // leads entera en cuanto la persona tenía una compra vieja.
+    expect(
+      deriveContactCardStatus(
         makeOpp({
-          contact_has_paid_order: false,
-          contact: {
-            id: "c",
-            full_name: "Ana",
-            phone: "+5251",
-            email: null,
-            shopify_customer_id: "sc-1",
-            whaapy_contact_id: null,
-            shopify_tags: [],
-          },
+          contact_has_paid_order: true,
+          shopify_draft_order_id: null,
+          shopify_order_id: null,
         }),
       ),
-    ).toBe(false);
+    ).toBe("lead");
   });
 });

@@ -10,6 +10,10 @@ import {
   resolveAdvisor,
   systemIndicators,
 } from "./utils";
+import {
+  CONTACT_CARD_STATUS_LABELS,
+  type ContactCardStatus,
+} from "@/app/(dashboard)/pipeline/utils";
 import { OutboundBadge } from "@/components/outbound/outbound-badge";
 
 interface Props {
@@ -38,8 +42,13 @@ export function ContactRow({ row, advisors, derivedAdvisor }: Props) {
   const indicators = systemIndicators(row);
   const ownAdvisor = resolveAdvisor(row.assigned_advisor_id, advisors);
   const lastActivity = formatRelative(lastActivityISO(row));
-  // Cliente = ya compró, no "existe en Shopify" (ver ContactListRow).
-  const isCustomer = row.hasPaidOrder;
+  // Lead → Oportunidad → Cliente, igual que en el tablero. Aquí la pregunta
+  // es por la PERSONA, no por una tarjeta: compró / tiene cotización / nada.
+  const status = row.hasPaidOrder
+    ? "cliente"
+    : row.hasQuote
+      ? "oportunidad"
+      : "lead";
 
   // Asesor a mostrar: si el contacto tiene assigned_advisor_id usamos
   // ese (derecho). Si no, pero hay un derivado único (de opps activas),
@@ -69,7 +78,11 @@ export function ContactRow({ row, advisors, derivedAdvisor }: Props) {
           <span
             className={[
               "inline-block w-1 h-4 rounded-full flex-shrink-0",
-              isCustomer ? "bg-purple-500" : "bg-amber-500",
+              status === "cliente"
+                ? "bg-purple-500"
+                : status === "oportunidad"
+                  ? "bg-sky-500"
+                  : "bg-amber-500",
             ].join(" ")}
             aria-hidden
           />
@@ -98,7 +111,7 @@ export function ContactRow({ row, advisors, derivedAdvisor }: Props) {
 
       {/* Columna 2: badges de tipo (fija) */}
       <div className="hidden md:flex items-center gap-1 justify-start">
-        <ContactTypeBadge isCustomer={isCustomer} />
+        <ContactTypeBadge status={status} />
         {row.is_outbound && <OutboundBadge />}
       </div>
 
@@ -198,17 +211,22 @@ function SystemBadge({ kind, active }: { kind: "shopify" | "whaapy"; active: boo
   );
 }
 
-function ContactTypeBadge({ isCustomer }: { isCustomer: boolean }) {
+/**
+ * Lead → Oportunidad → Cliente. Las clases y las etiquetas se comparten con
+ * la tarjeta del tablero para que las dos pantallas no puedan divergir.
+ */
+function ContactTypeBadge({ status }: { status: ContactCardStatus }) {
+  const cls: Record<ContactCardStatus, string> = {
+    lead: "bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300",
+    oportunidad: "bg-sky-100 text-sky-700 dark:bg-sky-500/15 dark:text-sky-300",
+    cliente:
+      "bg-purple-100 text-purple-700 dark:bg-purple-500/15 dark:text-purple-300",
+  };
   return (
     <span
-      className={[
-        "text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded font-medium flex-shrink-0",
-        isCustomer
-          ? "bg-purple-100 text-purple-700 dark:bg-purple-500/15 dark:text-purple-300"
-          : "bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300",
-      ].join(" ")}
+      className={`text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded font-medium flex-shrink-0 ${cls[status]}`}
     >
-      {isCustomer ? "Cliente" : "Lead"}
+      {CONTACT_CARD_STATUS_LABELS[status]}
     </span>
   );
 }

@@ -1,6 +1,7 @@
 import "server-only";
 import { getTenantScopedClient } from "@/lib/db/client";
 import { listContactsWithPaidOrders } from "@/lib/db/orders";
+import { listContactsWithQuotes } from "@/lib/db/opportunities";
 import { normalizeEmail, normalizePhone } from "@/lib/services/identity-matching";
 import type {
   ContactRow,
@@ -194,10 +195,11 @@ export interface ContactListRow {
   /** Identidad Shopify enlazada (O12). Es lo que habilita el botón
    *  "Crear contacto en Shopify" — NO es el criterio del badge. */
   contactType: "lead" | "cliente";
-  /** El contacto YA COMPRÓ (pedido pagado y no cancelado). Es el criterio
-   *  del badge Lead/Cliente: tener ficha en Shopify no basta, porque el
-   *  vendedor la crea solo para poder cotizar. */
+  /** El contacto YA COMPRÓ (pedido pagado y no cancelado). */
   hasPaidOrder: boolean;
+  /** Tiene al menos una cotización viva (oportunidad con borrador de
+   *  Shopify). Escalón intermedio del badge: Lead → Oportunidad → Cliente. */
+  hasQuote: boolean;
   /** Marca outbound (0040) — badge visible a TODOS los roles. */
   is_outbound: boolean;
   assigned_advisor_id: UUID | null;
@@ -460,18 +462,26 @@ export async function searchContactsForList(
   const { data, error } = await query;
   if (error) throw error;
 
-  type Selected = Omit<ContactListRow, "contactType" | "hasPaidOrder">;
+  type Selected = Omit<
+    ContactListRow,
+    "contactType" | "hasPaidOrder" | "hasQuote"
+  >;
   const fetched = (data ?? []) as unknown as Selected[];
   const hasMore = fetched.length > limit;
   const slice = hasMore ? fetched.slice(0, limit) : fetched;
 
-  // Una sola lectura en lote por página del listado, no una por fila.
-  const compraron = await listContactsWithPaidOrders(slice.map((r) => r.id));
+  // Dos lecturas en lote por página del listado, no una por fila.
+  const ids = slice.map((r) => r.id);
+  const [compraron, cotizaron] = await Promise.all([
+    listContactsWithPaidOrders(ids),
+    listContactsWithQuotes(ids),
+  ]);
 
   const rows: ContactListRow[] = slice.map((r) => ({
     ...r,
     contactType: r.shopify_customer_id ? "cliente" : "lead",
     hasPaidOrder: compraron.has(r.id),
+    hasQuote: cotizaron.has(r.id),
   }));
   return { rows, hasMore };
 }
