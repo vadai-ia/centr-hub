@@ -7,6 +7,7 @@ import {
   PointerSensor,
   TouchSensor,
   closestCenter,
+  pointerWithin,
   useSensor,
   useSensors,
   type DragEndEvent,
@@ -85,6 +86,23 @@ interface PendingLoss {
  *   - Real-time selectivo + polling fallback (hook).
  *   - Toast solo para acciones manuales.
  */
+/**
+ * Qué columna recibe la tarjeta.
+ *
+ * Manda el PUNTERO (`pointerWithin`): el tablero se desplaza en horizontal y
+ * las columnas son muy altas, así que "el centro más cercano" acababa
+ * eligiendo una columna que el cursor ni siquiera tocaba. La gente apunta con
+ * el cursor, no con el centro geométrico de la tarjeta.
+ *
+ * `closestCenter` se queda de respaldo para cuando el puntero cae en el hueco
+ * entre columnas o fuera del tablero: sin él, soltar ahí no haría nada y el
+ * movimiento se perdería sin explicación.
+ */
+function detectarColumnaDestino(args: Parameters<typeof closestCenter>[0]) {
+  const bajoElPuntero = pointerWithin(args);
+  return bajoElPuntero.length > 0 ? bajoElPuntero : closestCenter(args);
+}
+
 export function PipelineBoard({
   initial,
   canSeeAll,
@@ -691,7 +709,7 @@ export function PipelineBoard({
 
       <DndContext
         sensors={dndSensors}
-        collisionDetection={closestCenter}
+        collisionDetection={detectarColumnaDestino}
         onDragStart={onDragStart}
         onDragEnd={onDragEnd}
       >
@@ -727,13 +745,18 @@ export function PipelineBoard({
           </div>
         </div>
 
-        <DragOverlay>
+        {/* Sin animación de caída: para cuando se suelta, la tarjeta YA está
+            en su columna nueva (movimiento optimista). La animación por
+            defecto devuelve la copia flotante al sitio de ORIGEN, así que se
+            veía volar de regreso a la columna de la que acababa de salir. */}
+        <DragOverlay dropAnimation={null}>
           {activeDragCard ? (
             <KanbanCard
               opp={activeDragCard}
               advisors={advisors}
               customerSuccess={customerSuccess}
               showAdvisor={isAdmin}
+              isOverlay
             />
           ) : null}
         </DragOverlay>

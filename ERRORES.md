@@ -753,3 +753,15 @@ Toda entrada NUEVA sigue este mismo formato condensado — **solo la lección ac
 ### Un contenedor fijo de overlay se traga los clicks aunque esté vacío
 - **Causa raíz:** el contenedor de los avisos emergentes ocupa una esquina entera de la pantalla con `position: fixed`. Sin desactivar sus eventos, intercepta los clicks de lo que haya debajo incluso cuando no hay ningún aviso — y el síntoma ("este botón a veces no responde") no apunta a las notificaciones por ningún lado.
 - **Regla:** contenedor con `pointer-events-none` y `pointer-events-auto` en cada tarjeta. Vale para cualquier capa fija que se monte siempre y esté vacía la mayor parte del tiempo.
+
+### Dos `useDraggable` con el MISMO id: la copia del `DragOverlay` secuestra las medidas
+- **Causa raíz:** el `DragOverlay` del kanban renderizaba el mismo componente `KanbanCard`, que llama `useDraggable({ id: opp.id })`. dnd-kit indexa los arrastrables por id, así que al montarse la copia flotante a media arrastrada el nodo medido pasaba a ser ELLA —que viaja con el puntero—, y el desplazamiento se retroalimentaba. Síntoma: con un movimiento mínimo la tarjeta salía disparada varias columnas a la derecha y ya no se dejaba traer de regreso. Nada truena y `tsc` está contento.
+- **Regla:** la copia del overlay se marca (`isOverlay`) y usa un id DISTINTO (`${id}__overlay`), con `disabled` y sin `setNodeRef` ni listeners. Vale para cualquier componente que se reutilice dentro de un `DragOverlay`. Guard: `tests/kanban-drag-wiring.test.ts`.
+
+### Con `DragOverlay`, la fuente NO lleva el `transform` de dnd-kit
+- **Causa raíz:** la tarjeta del tablero aplicaba `CSS.Translate.toString(draggable.transform)` *además* de existir el overlay. Son dos cosas moviéndose por un mismo gesto, y peor: al desplazarse la fuente cambia el layout de la columna, así que la columna que el detector de colisiones cree tener debajo se mueve sola.
+- **Regla:** cuando hay `DragOverlay`, la fuente se queda en su sitio (solo atenuada) y el movimiento lo hace la copia. El `transform` de `useDraggable` es para el caso SIN overlay.
+
+### `closestCenter` elige mal en un tablero que se desplaza en horizontal
+- **Causa raíz:** con columnas muy altas y scroll horizontal, "el centro más cercano" compara centros geométricos y acaba eligiendo una columna que el cursor ni siquiera toca.
+- **Regla:** en un kanban manda el PUNTERO (`pointerWithin`), con `closestCenter` como respaldo para cuando el puntero cae en el hueco entre columnas — sin ese respaldo, soltar ahí no hace nada y el movimiento se pierde sin explicación. Y `dropAnimation={null}` cuando el movimiento es optimista: la animación por defecto devuelve la copia al sitio de ORIGEN, así que se ve volar de regreso a la columna de la que acaba de salir.

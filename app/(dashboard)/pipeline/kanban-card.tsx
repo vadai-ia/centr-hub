@@ -1,6 +1,5 @@
 "use client";
 import { useDraggable } from "@dnd-kit/core";
-import { CSS } from "@dnd-kit/utilities";
 import type { KanbanOpportunity } from "@/lib/db/opportunities";
 import { primaryOpportunityReference } from "@/lib/format/opportunity-reference";
 import type { AdvisorOption } from "@/lib/types/pipeline";
@@ -24,6 +23,16 @@ interface Props {
   customerSuccess?: AdvisorOption[];
   showAdvisor: boolean;
   isDraggingDisabled?: boolean;
+  /**
+   * Esta copia es la que FLOTA con el puntero (`DragOverlay`), no la del
+   * tablero. Es obligatorio marcarla: dnd-kit indexa los arrastrables por id
+   * y dos componentes con el MISMO id se pisan el nodo medido. Al montarse
+   * el overlay a media arrastrada, las medidas pasaban a salir de la copia
+   * flotante y el desplazamiento se retroalimentaba — la tarjeta salía
+   * disparada varias columnas a la derecha con un movimiento mínimo y ya no
+   * se dejaba traer de regreso.
+   */
+  isOverlay?: boolean;
   /** Tareas pendientes asociadas a la opp (lote polish M6). */
   pendingTasksCount?: number;
   /** Seguimientos escritos por una persona en esta oportunidad. Responde
@@ -52,6 +61,7 @@ export function KanbanCard({
   customerSuccess,
   showAdvisor,
   isDraggingDisabled,
+  isOverlay,
   pendingTasksCount,
   notesCount,
   canResolveCase,
@@ -59,10 +69,12 @@ export function KanbanCard({
   onSelect,
 }: Props) {
   const draggable = useDraggable({
-    id: opp.id,
+    // La copia flotante lleva id propio: con el mismo id que la del tablero,
+    // dnd-kit mide el nodo equivocado (ver `isOverlay`).
+    id: isOverlay ? `${opp.id}__overlay` : opp.id,
     // Un caso resuelto está archivado: no se arrastra (el motor tampoco lo
     // toca). Solo se consulta en la vista "Casos resueltos".
-    disabled: isDraggingDisabled || opp.resolved_at !== null,
+    disabled: isOverlay || isDraggingDisabled || opp.resolved_at !== null,
     data: {
       opportunityId: opp.id,
       fromStageId: opp.stage_id,
@@ -70,9 +82,12 @@ export function KanbanCard({
     },
   });
 
+  // La tarjeta del tablero NO se mueve: se queda en su sitio, atenuada,
+  // mientras la copia del `DragOverlay` sigue al puntero. Trasladarla además
+  // a ella duplicaba el movimiento y, al cambiar su posición, movía también
+  // la columna que el detector de colisiones creía tener debajo.
   const style = {
-    transform: CSS.Translate.toString(draggable.transform),
-    opacity: draggable.isDragging ? 0.4 : 1,
+    opacity: !isOverlay && draggable.isDragging ? 0.4 : 1,
     touchAction: "none" as const,
   };
 
@@ -116,14 +131,17 @@ export function KanbanCard({
 
   return (
     <div
-      ref={draggable.setNodeRef}
+      ref={isOverlay ? undefined : draggable.setNodeRef}
       style={style}
-      {...draggable.listeners}
-      {...draggable.attributes}
-      onClick={handleClick}
+      {...(isOverlay ? {} : draggable.listeners)}
+      {...(isOverlay ? {} : draggable.attributes)}
+      onClick={isOverlay ? undefined : handleClick}
       aria-label={`Oportunidad de ${name}`}
       role={onSelect ? "button" : undefined}
       className={[
+        // La copia flotante se levanta del tablero: sombra y giro mínimo para
+        // que se lea "la traigo en la mano" y no "hay dos tarjetas iguales".
+        isOverlay ? "rotate-2 shadow-2xl ring-2 ring-indigo-400/60 cursor-grabbing" : "",
         // Ronda 2 #9: sin outline amber al focus (el dnd-kit ya marca
         // visualmente la card durante el drag con el opacity 0.4).
         // Ronda 2 #11: escala ~80% — paddings y font-sizes reducidos.
