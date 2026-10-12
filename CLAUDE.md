@@ -876,6 +876,26 @@ Para agregar otro país basta una entrada en el mapa `PAIS` del script (lada + p
 
 Corregidos 65 en `centr-colombia`. Quedan pendientes de decisión: **4 duplicados** (fusionar) y **1 enlazado a Shopify** (propagar o no).
 
+## Avisos: campanita en el navbar y emergentes en todas las vistas
+
+La campanita está junto al nombre de usuario, así que se ve desde **cualquier** pantalla, y los avisos nuevos además **emergen** en la esquina inferior derecha como una notificación del sistema. Antes la campanita existía solo dentro de Mi Día: un aviso no aparecía hasta entrar a esa pantalla, que es justo lo contrario de para qué sirve — y los recordatorios de tareas salen a primera hora, cuando nadie está necesariamente ahí.
+
+**Hay UNA sola campanita en toda la aplicación.** La de Mi Día se retiró, no se duplicó: dos campanitas con dos fuentes de datos acaban mostrando conteos distintos en la misma pantalla y el usuario no sabe a cuál creerle. Por lo mismo **los emergentes salen de la MISMA consulta** que la campanita, no de una propia — un emergente que anuncia algo que la campanita no muestra es peor que no tener emergentes.
+
+**Lectura propia y mínima** (`loadMyNotificationsAction`), no `loadMiDiaAction`: ese arma el tablero entero (tareas, tarjetas, clientes callados, histograma de la semana). Esto se refresca solo cada minuto en todas las pantallas, así que pagar ese bundle en cada tick sería caro y además ataría el navbar a una pantalla concreta.
+
+**El `userId` sale de la sesión y la action no recibe parámetros** — nadie puede pedir los avisos de otra persona. La lectura va envuelta en `try/catch` que devuelve "sin datos": se pinta en TODAS las pantallas, así que una lectura que lance se llevaría por delante la aplicación entera; prefiere quedarse con lo que ya tenía y reintentar.
+
+**Solo consulta con la pestaña visible** (`document.hidden` + `visibilitychange`), igual que el latido de presencia.
+
+### Las tres reglas de los emergentes
+
+- **La primera consulta de la pestaña NO hace emerger nada.** Lo que ya estaba pendiente no es noticia, es trabajo acumulado: entrar por la mañana con cinco recordatorios taparía la pantalla entera. Se siembra el set de "ya anunciados" con lo que había y de ahí en adelante solo emerge lo que llega nuevo.
+- **Cerrar el emergente NO descarta el aviso**, solo lo quita de la pantalla; sigue pendiente en la campanita. Es la diferencia entre "ya lo vi" y "ya lo atendí", y confundirlas haría desaparecer pendientes sin que nadie los atienda.
+- **Los `alert` no se van solos.** El resto se desvanece a los 10 s; una alerta es justo la que el admin tiene que ver sí o sí, y un emergente que se desvanece es un aviso que no se vio. Se apilan como máximo tres — el resto espera en la campanita, que es donde vive el pendiente.
+
+El contenedor de emergentes lleva `pointer-events-none` (y `auto` en cada tarjeta): ocupa una esquina entera de la pantalla y sin eso se tragaría los clicks de lo que haya debajo aunque esté vacío. Guard: `tests/notifications-bell-wiring.test.ts`.
+
 ## Cambios al stack
 
 Cualquier modificación al stack documentado en `package.json` (agregar dependencia, subir versión mayor, cambiar provider externo) requiere aprobación explícita del operador antes de comitearse. Razón: el stack está fijado por experiencias previas (Kibah, FindMed, Hemenesy) y cualquier desviación inesperada introduce riesgo operacional.

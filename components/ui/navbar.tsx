@@ -1,4 +1,5 @@
 import { UserMenu } from "./user-menu";
+import { NotificationsBell } from "./notifications-bell";
 import { OrgSelector } from "./org-selector";
 import type { SessionData } from "@/lib/auth/session";
 
@@ -20,6 +21,10 @@ export function Navbar({ session }: Props) {
       {session.orgs.length > 1 && (
         <OrgSelector orgs={session.orgs} activeOrgId={session.activeOrg.id} />
       )}
+
+      {/* Junto al nombre de usuario y no dentro de Mi Día: un aviso que
+          solo se ve al entrar a una pantalla concreta no es una campanita. */}
+      <NotificationsBell />
 
       <UserMenu email={session.email} displayName={session.displayName} />
     </header>

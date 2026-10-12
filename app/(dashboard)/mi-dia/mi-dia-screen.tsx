@@ -6,7 +6,6 @@ import { loadMiDiaAction, snoozeTaskAction } from "@/lib/actions/mi-dia";
 import { toggleTaskCompletedAction, createTaskForOpportunityAction } from "@/lib/actions/opportunities-m6";
 import { MiDiaHeader } from "./mi-dia-header";
 import { MiDiaCardItem } from "./mi-dia-card";
-import { MiDiaBell } from "./mi-dia-bell";
 import { MiDiaSidebar } from "./mi-dia-sidebar";
 import { useMiDiaRealtime } from "./use-mi-dia-realtime";
 import { MiDiaUnassigned } from "./mi-dia-unassigned";
@@ -44,7 +43,6 @@ export function MiDiaScreen({
   const [exiting, setExiting] = useState<Set<string>>(new Set());
   const [restOpen, setRestOpen] = useState(false);
   const [restVisible, setRestVisible] = useState(REST_PAGE);
-  const [bellOpen, setBellOpen] = useState(false);
   const [, startTransition] = useTransition();
 
   const refresh = useCallback(() => {
@@ -154,14 +152,6 @@ export function MiDiaScreen({
             Lo que necesita tu atención hoy, una oportunidad a la vez.
           </p>
         </div>
-        <MiDiaBell
-          items={data.bell}
-          open={bellOpen}
-          onToggle={() => setBellOpen((o) => !o)}
-          onClose={() => setBellOpen(false)}
-          onView={onView}
-          onAfterAction={refresh}
-        />
       </div>
 
       <MiDiaHeader indicators={data.indicators} />

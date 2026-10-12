@@ -292,6 +292,27 @@ export const PRESENCE_HISTORY_LIMIT = 60 as const;
 /** Cada cuánto la pantalla de Usuarios re-pide la presencia (no la página). */
 export const PRESENCE_REFRESH_MS = 45_000 as const;
 
+/**
+ * Cada cuánto la campanita del navbar re-pide los avisos. Más espaciado que
+ * la presencia: un aviso que tarda un minuto en aparecer no cambia nada, y la
+ * campanita vive en TODAS las pantallas.
+ */
+export const NOTIFICATIONS_REFRESH_MS = 60_000 as const;
+
+/**
+ * Cuánto dura en pantalla un aviso emergente antes de irse solo. Los avisos
+ * de tipo `alert` NO se van solos — son los que el admin tiene que ver sí o
+ * sí, y un emergente que se desvanece es un aviso que no se vio.
+ */
+export const NOTIFICATION_TOAST_MS = 10_000 as const;
+
+/**
+ * Cuántos emergentes se apilan a la vez. Sin tope, el primer tick tras una
+ * tanda de recordatorios taparía la pantalla entera; el resto sigue en la
+ * campanita, que es donde vive el pendiente.
+ */
+export const NOTIFICATION_TOAST_MAX = 3 as const;
+
 // ---------------------------------------------------------------------------
 // Recordatorios de tareas — "aviso el mismo día a primera hora, insistiendo"
 // ---------------------------------------------------------------------------
