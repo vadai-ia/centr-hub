@@ -6,7 +6,6 @@ import {
   DragOverlay,
   PointerSensor,
   TouchSensor,
-  AutoScrollActivator,
   closestCenter,
   pointerWithin,
   useSensor,
@@ -88,32 +87,29 @@ interface PendingLoss {
  *   - Toast solo para acciones manuales.
  */
 /**
- * Desplazamiento automático del tablero al arrastrar.
+ * Desplazamiento automático del tablero al arrastrar: **APAGADO**.
  *
- * Con los valores por defecto el tablero se iba solo hasta la última columna
- * en cuanto levantabas una tarjeta: la franja que lo dispara ocupa el 20% del
- * ancho a cada lado —más de 300 px en una pantalla normal—, así que una
- * tarjeta que simplemente vivía en una columna cercana al borde ya nacía
- * dentro de la zona de disparo, y con la aceleración por defecto recorría el
- * tablero entero en un par de segundos. Visto en video: el tablero pasaba de
- * la primera columna a la última mientras el cursor apenas se movía, y
- * después no se dejaba traer de vuelta porque para volver a la izquierda hay
- * que meter el puntero en una franja que queda pegada a la barra lateral.
+ * Con los valores por defecto de dnd-kit la franja que lo dispara ocupa el
+ * 20% del ancho a cada lado y la aceleración es 10. En Venta (11 columnas) y
+ * Post-venta (7) el tablero se iba solo de la primera a la última columna en
+ * ~0,3 s en cuanto se levantaba una tarjeta, y después no se dejaba traer de
+ * vuelta. En Outbound (3 columnas) NO pasaba, porque ahí el tablero cabe en
+ * pantalla y no hay scroll horizontal — esa asimetría es lo que señaló al
+ * desplazamiento automático como culpable.
  *
- *  - `threshold.x` chico: solo dispara pegado al borde de verdad, no a un
- *    tercio de la pantalla. En vertical se deja holgado porque ahí la
- *    columna es corta y el desplazamiento se nota menos.
- *  - `acceleration` baja: avanza despacio y se puede frenar. La velocidad
- *    por defecto es la que hacía imposible corregir el rumbo.
- *  - `activator: Pointer`: manda dónde está el cursor, no dónde quedó el
- *    rectángulo de la tarjeta — que es lo que la metía en la zona de disparo
- *    sin que nadie la llevara ahí.
+ * Se intentó acotarlo (franja chica + aceleración baja) y el tablero siguió
+ * disparándose: la rampa medida sobre el video es ACELERADA, no lineal, lo
+ * que apunta a una realimentación entre el desplazamiento y el rectángulo
+ * medido, no a un simple umbral mal puesto. Apagarlo es la única opción que
+ * no depende de acertarle a esa física.
+ *
+ * Lo que se pierde: llevar una tarjeta a una columna que no está en pantalla
+ * ya no desplaza el tablero solo. Sigue siendo posible — con la tarjeta
+ * tomada, la rueda del ratón (o dos dedos en el trackpad) desplaza el
+ * tablero —, pero lo correcto es un "Mover a etapa" en la tarjeta, que no
+ * dependa de arrastrar a través de once columnas.
  */
-const AUTO_SCROLL = {
-  activator: AutoScrollActivator.Pointer,
-  threshold: { x: 0.05, y: 0.2 },
-  acceleration: 3,
-} as const;
+const AUTO_SCROLL = false;
 
 /**
  * Qué columna recibe la tarjeta.
