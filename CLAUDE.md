@@ -856,6 +856,26 @@ Las dos vías de creación —"Meter a Outbound" desde el contacto y "Crear lead
    ```
    **Solo toca lo que está SIN asesor** (`assigned_advisor_id IS NULL`, re-filtrado en el propio UPDATE por si alguien asignó a mano entre la lectura y la escritura): jamás pisa una asignación existente. Idempotente, con audit `outbound_opportunity_owner_backfilled`.
 
+## Teléfonos con la lada de otro país (correctivo de los ya guardados)
+
+Cambiar el país por defecto a `organizations.config.defaults.phone_country` arregló los leads NUEVOS, pero **no los ya guardados**: en Centr Colombia 70 de 159 contactos tenían un móvil colombiano normalizado con la lada de México (`300 325 4649` guardado como `+523003254649` en vez de `+573003254649`). Con ese número no se le puede escribir por WhatsApp y el cruce por teléfono no empata, así que la misma persona entraba dos veces.
+
+**Corregir un prefijo de país NO se puede decidir por validez.** `libphonenumber` da por válidos en México los 70 — su patrón para móvil mexicano acepta casi cualquier 10 dígitos. Lo que sí distingue es el **patrón de móvil REAL del país destino**: los 70 empezaban con un prefijo de operador colombiano asignado (300-305, 310-324, 350-351). La prueba definitiva fueron 4 pares con el mismo nombre creados el mismo día, uno con `+52` y otro con `+57`.
+
+`maintenance:fix-phone-country-prefix` aplica esa regla y **separa tres casos que NO se tocan**:
+
+- **Colisión** — el número corregido ya existe como otro contacto. Son dos fichas de la misma persona: renumerar crearía un duplicado exacto en vez de arreglar nada. Se listan para fusionar con `maintenance:merge-duplicate-leads`.
+- **Enlazado a Shopify o Whaapy** — cambiarle el teléfono aquí deja el externo desincronizado. El script NO propaga; se decide a mano.
+- **Sin patrón del país destino** — se reporta y no se toca.
+
+El UPDATE re-filtra por el teléfono leído: si alguien lo editó entre la lectura y la escritura, su edición manda. Audit `contact_phone_country_prefix_fixed` con el valor anterior, así que es reversible.
+
+Para agregar otro país basta una entrada en el mapa `PAIS` del script (lada + patrón de móvil).
+
+### Estado en producción
+
+Corregidos 65 en `centr-colombia`. Quedan pendientes de decisión: **4 duplicados** (fusionar) y **1 enlazado a Shopify** (propagar o no).
+
 ## Cambios al stack
 
 Cualquier modificación al stack documentado en `package.json` (agregar dependencia, subir versión mayor, cambiar provider externo) requiere aprobación explícita del operador antes de comitearse. Razón: el stack está fijado por experiencias previas (Kibah, FindMed, Hemenesy) y cualquier desviación inesperada introduce riesgo operacional.
