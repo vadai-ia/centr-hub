@@ -6,6 +6,7 @@ import {
   DragOverlay,
   PointerSensor,
   TouchSensor,
+  AutoScrollActivator,
   closestCenter,
   pointerWithin,
   useSensor,
@@ -86,6 +87,34 @@ interface PendingLoss {
  *   - Real-time selectivo + polling fallback (hook).
  *   - Toast solo para acciones manuales.
  */
+/**
+ * Desplazamiento automático del tablero al arrastrar.
+ *
+ * Con los valores por defecto el tablero se iba solo hasta la última columna
+ * en cuanto levantabas una tarjeta: la franja que lo dispara ocupa el 20% del
+ * ancho a cada lado —más de 300 px en una pantalla normal—, así que una
+ * tarjeta que simplemente vivía en una columna cercana al borde ya nacía
+ * dentro de la zona de disparo, y con la aceleración por defecto recorría el
+ * tablero entero en un par de segundos. Visto en video: el tablero pasaba de
+ * la primera columna a la última mientras el cursor apenas se movía, y
+ * después no se dejaba traer de vuelta porque para volver a la izquierda hay
+ * que meter el puntero en una franja que queda pegada a la barra lateral.
+ *
+ *  - `threshold.x` chico: solo dispara pegado al borde de verdad, no a un
+ *    tercio de la pantalla. En vertical se deja holgado porque ahí la
+ *    columna es corta y el desplazamiento se nota menos.
+ *  - `acceleration` baja: avanza despacio y se puede frenar. La velocidad
+ *    por defecto es la que hacía imposible corregir el rumbo.
+ *  - `activator: Pointer`: manda dónde está el cursor, no dónde quedó el
+ *    rectángulo de la tarjeta — que es lo que la metía en la zona de disparo
+ *    sin que nadie la llevara ahí.
+ */
+const AUTO_SCROLL = {
+  activator: AutoScrollActivator.Pointer,
+  threshold: { x: 0.05, y: 0.2 },
+  acceleration: 3,
+} as const;
+
 /**
  * Qué columna recibe la tarjeta.
  *
@@ -710,6 +739,7 @@ export function PipelineBoard({
       <DndContext
         sensors={dndSensors}
         collisionDetection={detectarColumnaDestino}
+        autoScroll={AUTO_SCROLL}
         onDragStart={onDragStart}
         onDragEnd={onDragEnd}
       >

@@ -50,6 +50,27 @@ describe("la tarjeta del tablero se queda quieta mientras se arrastra", () => {
   });
 });
 
+describe("el tablero no se va solo al arrastrar", () => {
+  it("el desplazamiento automático está acotado explícitamente", () => {
+    // Con los valores por defecto (franja del 20% del ancho, aceleración 10)
+    // el tablero pasaba de la primera columna a la última mientras el cursor
+    // apenas se movía: una tarjeta en una columna cercana al borde ya nacía
+    // dentro de la zona de disparo.
+    expect(board).toContain("autoScroll={AUTO_SCROLL}");
+    const cfg = board.slice(
+      board.indexOf("const AUTO_SCROLL"),
+      board.indexOf("} as const;", board.indexOf("const AUTO_SCROLL")),
+    );
+    expect(cfg).toContain("AutoScrollActivator.Pointer");
+    expect(cfg).toMatch(/acceleration: \d/);
+    // La franja horizontal tiene que ser MUCHO menor que el 20% por defecto,
+    // o el tablero vuelve a dispararse solo.
+    const x = Number(/threshold: \{ x: ([\d.]+)/.exec(cfg)?.[1]);
+    expect(x).toBeGreaterThan(0);
+    expect(x).toBeLessThanOrEqual(0.1);
+  });
+});
+
 describe("la columna destino la decide el PUNTERO", () => {
   it("pointerWithin manda, con closestCenter de respaldo", () => {
     // El tablero se desplaza en horizontal y las columnas son muy altas: "el
