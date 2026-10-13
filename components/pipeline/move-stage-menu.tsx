@@ -132,10 +132,16 @@ export function MoveStageMenu({
           strokeLinejoin="round"
           aria-hidden
         >
-          <path d="m8 3-5 4 5 4" />
-          <path d="M3 7h12a4 4 0 0 1 0 8h-1" />
-          <path d="m16 21 5-4-5-4" />
-          <path d="M21 17H9a4 4 0 0 1 0-8h1" />
+          {/*
+            Flecha con punta en LOS DOS extremos. Una flecha simple a la
+            derecha hace que la gente asuma que el menú solo adelanta; un
+            icono de "sincronizar" se lee bien pero ya no parece una flecha.
+            Con las dos puntas se entiende de un vistazo: mover, en cualquier
+            dirección.
+          */}
+          <path d="M3 12h18" />
+          <path d="m7 7-5 5 5 5" />
+          <path d="m17 7 5 5-5 5" />
         </svg>
         {variant === "button" && "Mover a etapa"}
       </button>

@@ -91,7 +91,10 @@ describe("mover sin arrastrar", () => {
     expect(menu).toContain("adelante o atrás");
     expect(menu).toContain("esActual");
     expect(menu).toContain("stages.map");
-    // El icono NO es una flecha simple a la derecha.
+    // El icono es una flecha con punta en LOS DOS extremos, nunca una
+    // flecha simple a la derecha: esa se lee como "solo adelanta".
+    expect(menu).toContain(String.raw`d="m7 7-5 5 5 5"`);
+    expect(menu).toContain(String.raw`d="m17 7 5 5-5 5"`);
     expect(menu).not.toContain("m12 5 7 7-7 7");
   });
 
