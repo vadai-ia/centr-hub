@@ -22,6 +22,10 @@ interface Props {
   showAdvisor: boolean;
   page: number;
   isOverlay?: boolean;
+  /** Etapas del funnel activo — alimentan el menú "Mover a" de cada tarjeta. */
+  stages?: PipelineStageRow[];
+  /** Misma decisión de movimiento que soltar la tarjeta (ver el tablero). */
+  onMoveToStage?: (opportunityId: UUID, toStageId: UUID) => void;
   /** Conteo total de opps activas en esta etapa (lote polish M6).
    *  Si no se provee, fallback al cards.length + "+" anterior. Para
    *  etapas cerradas es el conteo VISIBLE (excluye auto-ocultas). */
@@ -75,6 +79,8 @@ export function KanbanColumn({
   showAdvisor,
   page,
   isOverlay,
+  stages,
+  onMoveToStage,
   totalCount,
   totalAmount,
   hiddenClosedCount = 0,
@@ -268,6 +274,8 @@ export function KanbanColumn({
                     advisors={advisors}
                     customerSuccess={customerSuccess}
                     showAdvisor={showAdvisor}
+                    stages={stages}
+                    onMoveToStage={onMoveToStage}
                     pendingTasksCount={pendingTasksByOpp?.[opp.id]}
                     notesCount={notesByOpp?.[opp.id]}
                     canResolveCase={isProblematicStage}
@@ -287,6 +295,8 @@ export function KanbanColumn({
                 advisors={advisors}
                 customerSuccess={customerSuccess}
                 showAdvisor={showAdvisor}
+                stages={stages}
+                onMoveToStage={onMoveToStage}
                 pendingTasksCount={pendingTasksByOpp?.[opp.id]}
                 notesCount={notesByOpp?.[opp.id]}
                 canResolveCase={isProblematicStage}

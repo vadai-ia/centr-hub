@@ -539,10 +539,18 @@ export function PipelineBoard({
   }
   async function onDragEnd(e: DragEndEvent) {
     setActiveDragId(null);
-    const oppId = e.active.id as UUID;
     const toStageId = e.over?.id as UUID | undefined;
     if (!toStageId) return;
+    await moveToStage(e.active.id as UUID, toStageId);
+  }
 
+  /**
+   * Mover una tarjeta de etapa. Es la ÚNICA decisión de movimiento: la usan
+   * tanto soltar la tarjeta como el menú "Mover a" de la propia tarjeta. Si
+   * cada vía tuviera la suya, el motivo de pérdida o la entrega de Outbound
+   * acabarían aplicándose en una y no en la otra.
+   */
+  async function moveToStage(oppId: UUID, toStageId: UUID) {
     const fromStage = findStageContaining(cardsByStage, stages, oppId);
     if (!fromStage) return;
     if (toStageId === fromStage.id) return;
@@ -745,6 +753,8 @@ export function PipelineBoard({
               <KanbanColumn
                 key={stage.id}
                 stage={stage}
+                stages={stages}
+                onMoveToStage={moveToStage}
                 cards={cardsByStage[stage.id] ?? []}
                 hasMore={hasMoreByStage[stage.id] ?? false}
                 advisors={advisors}

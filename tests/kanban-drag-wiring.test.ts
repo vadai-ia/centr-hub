@@ -62,6 +62,38 @@ describe("el tablero no se va solo al arrastrar", () => {
   });
 });
 
+describe("mover sin arrastrar", () => {
+  const menu = read("app/(dashboard)/pipeline/move-stage-menu.tsx");
+
+  it("la tarjeta ofrece un menú de etapas", () => {
+    // Con el desplazamiento automático apagado, la columna de destino suele
+    // quedar fuera de pantalla: arrastrar deja de ser una vía suficiente.
+    expect(card).toContain("MoveStageMenu");
+    expect(menu).toContain("Mover a");
+  });
+
+  it("usa la MISMA decisión de movimiento que soltar la tarjeta", () => {
+    // Si el menú tuviera atajo propio, el motivo de pérdida o la entrega de
+    // Outbound se aplicarían en una vía y no en la otra.
+    expect(board).toContain("async function moveToStage(");
+    const onDragEnd = board.slice(
+      board.indexOf("async function onDragEnd"),
+      board.indexOf("async function moveToStage"),
+    );
+    expect(onDragEnd).toContain("await moveToStage(");
+    expect(board).toContain("onMoveToStage={moveToStage}");
+  });
+
+  it("abrir el menú no empieza a arrastrar la tarjeta", () => {
+    // La tarjeta entera es el asa del arrastre.
+    expect(menu).toContain("onPointerDown={(e) => e.stopPropagation()}");
+  });
+
+  it("no se ofrece en la copia flotante ni en un caso archivado", () => {
+    expect(card).toContain("!isOverlay && !opp.resolved_at && stages && onMoveToStage");
+  });
+});
+
 describe("la columna destino la decide el PUNTERO", () => {
   it("pointerWithin manda, con closestCenter de respaldo", () => {
     // El tablero se desplaza en horizontal y las columnas son muy altas: "el

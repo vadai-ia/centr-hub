@@ -1,9 +1,10 @@
 "use client";
+import { MoveStageMenu } from "./move-stage-menu";
 import { useDraggable } from "@dnd-kit/core";
 import type { KanbanOpportunity } from "@/lib/db/opportunities";
 import { primaryOpportunityReference } from "@/lib/format/opportunity-reference";
 import type { AdvisorOption } from "@/lib/types/pipeline";
-import type { UUID } from "@/lib/types/database";
+import type { PipelineStageRow, UUID } from "@/lib/types/database";
 import { OutboundBadge } from "@/components/outbound/outbound-badge";
 import { ONLINE_ORDER_SOURCE } from "@/lib/constants";
 import {
@@ -33,6 +34,10 @@ interface Props {
    * se dejaba traer de regreso.
    */
   isOverlay?: boolean;
+  /** Etapas del funnel — alimentan el menú "Mover a". */
+  stages?: PipelineStageRow[];
+  /** Mueve la oportunidad por el MISMO camino que soltarla (ver el tablero). */
+  onMoveToStage?: (opportunityId: UUID, toStageId: UUID) => void;
   /** Tareas pendientes asociadas a la opp (lote polish M6). */
   pendingTasksCount?: number;
   /** Seguimientos escritos por una persona en esta oportunidad. Responde
@@ -62,6 +67,8 @@ export function KanbanCard({
   showAdvisor,
   isDraggingDisabled,
   isOverlay,
+  stages,
+  onMoveToStage,
   pendingTasksCount,
   notesCount,
   canResolveCase,
@@ -156,6 +163,16 @@ export function KanbanCard({
           {name}
         </p>
         <div className="flex items-center gap-1 flex-shrink-0">
+          {/* Mover sin arrastrar: en Venta son once columnas y la de destino
+              suele estar fuera de pantalla. No se ofrece en la copia flotante
+              ni en un caso ya archivado. */}
+          {!isOverlay && !opp.resolved_at && stages && onMoveToStage && (
+            <MoveStageMenu
+              stages={stages}
+              currentStageId={opp.stage_id}
+              onMove={(toStageId) => onMoveToStage(opp.id, toStageId)}
+            />
+          )}
           {opp.resolved_at && <ResolvedBadge />}
           {!opp.resolved_at && opp.reopened_at && <ReopenedBadge />}
           {opp.order_source === ONLINE_ORDER_SOURCE && <OnlinePurchaseBadge />}
