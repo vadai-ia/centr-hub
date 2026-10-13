@@ -95,6 +95,17 @@ describe("mover sin arrastrar", () => {
     expect(menu).not.toContain("m12 5 7 7-7 7");
   });
 
+  it("el menú no lo recorta el scroll de la columna", () => {
+    // La lista de cada columna tiene scroll propio y recortaba el
+    // desplegable: se veían los nombres de las etapas cortados a la mitad.
+    expect(menu).toContain("createPortal");
+    expect(menu).toContain("document.body");
+    // Al ir en un portal con posición fija deja de apuntar a su botón si algo
+    // se desplaza: se cierra en vez de quedarse flotando en cualquier sitio.
+    expect(menu).toContain("scroll");
+    expect(menu).toContain("cerrar");
+  });
+
   it("abrir el menú no empieza a arrastrar la tarjeta", () => {
     // La tarjeta entera es el asa del arrastre.
     expect(menu).toContain("onPointerDown={(e) => e.stopPropagation()}");

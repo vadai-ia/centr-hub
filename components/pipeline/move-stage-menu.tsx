@@ -1,5 +1,6 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { PipelineStageRow, UUID } from "@/lib/types/database";
 
 /**
@@ -8,15 +9,29 @@ import type { PipelineStageRow, UUID } from "@/lib/types/database";
  * El tablero de Venta tiene once columnas y el de Post-venta siete, así que
  * llevar una tarjeta de la primera a la última exige cruzar media pantalla
  * con el botón apretado. Antes el tablero se desplazaba solo al acercarse al
- * borde, pero ese desplazamiento automático se desbocaba y hubo que apagarlo
- * (ver `AUTO_SCROLL` en el tablero). Este menú cubre justamente ese caso y de
- * paso lo hace mejor: un clic, sin puntería.
+ * borde, pero ese desplazamiento se desbocaba y hubo que apagarlo (ver
+ * `AUTO_SCROLL` en el tablero). Este menú cubre ese caso y de paso lo hace
+ * mejor: un clic, sin puntería.
  *
  * Dispara EXACTAMENTE el mismo camino que soltar la tarjeta — motivo de
  * pérdida, entrega de Outbound y movimiento optimista incluidos. Si tuviera
  * un atajo propio, mover por menú y mover arrastrando acabarían divergiendo
  * en las reglas.
  */
+
+/** `w-52`. Se necesita en número para encajar el menú dentro de la pantalla. */
+const ANCHO = 208;
+/** Alto estimado para decidir si abre hacia arriba. No tiene que ser exacto. */
+const ALTO_APROX = 300;
+const MARGEN = 8;
+
+interface Coords {
+  left: number;
+  /** Se ancla por arriba o por abajo según quepa. */
+  top?: number;
+  bottom?: number;
+}
+
 export function MoveStageMenu({
   stages,
   currentStageId,
@@ -34,22 +49,52 @@ export function MoveStageMenu({
    */
   variant?: "icon" | "button";
 }) {
-  const [open, setOpen] = useState(false);
-  const boxRef = useRef<HTMLDivElement>(null);
+  const [coords, setCoords] = useState<Coords | null>(null);
+  const botonRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const open = coords !== null;
+
+  const abrir = useCallback(() => {
+    const r = botonRef.current?.getBoundingClientRect();
+    if (!r) return;
+    // Alineado a la derecha del botón, pero sin salirse de la pantalla.
+    const left = Math.max(
+      MARGEN,
+      Math.min(r.right - ANCHO, window.innerWidth - ANCHO - MARGEN),
+    );
+    const cabeAbajo = r.bottom + ALTO_APROX < window.innerHeight;
+    setCoords(
+      cabeAbajo
+        ? { left, top: r.bottom + 4 }
+        : { left, bottom: window.innerHeight - r.top + 4 },
+    );
+  }, []);
 
   useEffect(() => {
     if (!open) return;
     function onDocPointerDown(e: PointerEvent) {
-      if (!boxRef.current?.contains(e.target as Node)) setOpen(false);
+      const t = e.target as Node;
+      if (botonRef.current?.contains(t) || menuRef.current?.contains(t)) return;
+      setCoords(null);
     }
     function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") setOpen(false);
+      if (e.key === "Escape") setCoords(null);
+    }
+    // El menú va en un portal con posición fija: si algo se desplaza o la
+    // ventana cambia de tamaño, dejaría de apuntar a su botón. Cerrarlo es
+    // más honesto que dejarlo flotando en un sitio que ya no significa nada.
+    function cerrar() {
+      setCoords(null);
     }
     document.addEventListener("pointerdown", onDocPointerDown);
     document.addEventListener("keydown", onKey);
+    window.addEventListener("resize", cerrar);
+    window.addEventListener("scroll", cerrar, true);
     return () => {
       document.removeEventListener("pointerdown", onDocPointerDown);
       document.removeEventListener("keydown", onKey);
+      window.removeEventListener("resize", cerrar);
+      window.removeEventListener("scroll", cerrar, true);
     };
   }, [open]);
 
@@ -57,7 +102,6 @@ export function MoveStageMenu({
 
   return (
     <div
-      ref={boxRef}
       className="relative"
       // La tarjeta entera es el asa del arrastre: sin detener el pointer
       // aquí, abrir el menú empieza a arrastrar la tarjeta.
@@ -65,8 +109,9 @@ export function MoveStageMenu({
       onClick={(e) => e.stopPropagation()}
     >
       <button
+        ref={botonRef}
         type="button"
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => (open ? setCoords(null) : abrir())}
         aria-label="Mover a otra etapa"
         aria-expanded={open}
         className={
@@ -95,45 +140,58 @@ export function MoveStageMenu({
         {variant === "button" && "Mover a etapa"}
       </button>
 
-      {open && (
-        <div className="absolute right-0 z-40 mt-1 w-52 top-full overflow-hidden rounded-lg border border-gray-200 bg-white py-1 shadow-xl dark:border-gray-700 dark:bg-gray-800">
-          <p className="px-3 py-1 text-[10px] uppercase tracking-wide text-gray-400 dark:text-gray-500">
-            Mover a — adelante o atrás
-          </p>
-          <div className="max-h-64 overflow-y-auto">
-            {stages.map((s) => {
-              const esActual = s.id === currentStageId;
-              return (
-                <button
-                  key={s.id}
-                  type="button"
-                  disabled={esActual}
-                  onClick={() => {
-                    setOpen(false);
-                    onMove(s.id);
-                  }}
-                  className={[
-                    "flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs",
-                    esActual
-                      ? "cursor-default bg-gray-50 font-medium text-gray-500 dark:bg-gray-700/40 dark:text-gray-400"
-                      : "text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-700",
-                  ].join(" ")}
-                >
-                  <span
-                    className="h-2 w-2 flex-shrink-0 rounded-full"
-                    style={{ backgroundColor: s.color }}
-                    aria-hidden
-                  />
-                  <span className="truncate">{s.name}</span>
-                  {esActual && (
-                    <span className="ml-auto text-[10px] text-gray-400">actual</span>
-                  )}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      )}
+      {/*
+        En un PORTAL a propósito: la lista de la columna tiene scroll propio,
+        y un desplegable normal se recortaba contra ese borde — se veían los
+        nombres de las etapas cortados por la mitad. Fuera del árbol de la
+        columna no hay nada que lo recorte.
+      */}
+      {open &&
+        typeof document !== "undefined" &&
+        createPortal(
+          <div
+            ref={menuRef}
+            style={{ left: coords.left, top: coords.top, bottom: coords.bottom }}
+            className="fixed z-[70] w-52 overflow-hidden rounded-lg border border-gray-200 bg-white py-1 shadow-xl dark:border-gray-700 dark:bg-gray-800"
+          >
+            <p className="px-3 py-1 text-[10px] uppercase tracking-wide text-gray-400 dark:text-gray-500">
+              Mover a — adelante o atrás
+            </p>
+            <div className="max-h-64 overflow-y-auto">
+              {stages.map((s) => {
+                const esActual = s.id === currentStageId;
+                return (
+                  <button
+                    key={s.id}
+                    type="button"
+                    disabled={esActual}
+                    onClick={() => {
+                      setCoords(null);
+                      onMove(s.id);
+                    }}
+                    className={[
+                      "flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs",
+                      esActual
+                        ? "cursor-default bg-gray-50 font-medium text-gray-500 dark:bg-gray-700/40 dark:text-gray-400"
+                        : "text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-700",
+                    ].join(" ")}
+                  >
+                    <span
+                      className="h-2 w-2 flex-shrink-0 rounded-full"
+                      style={{ backgroundColor: s.color }}
+                      aria-hidden
+                    />
+                    <span className="truncate">{s.name}</span>
+                    {esActual && (
+                      <span className="ml-auto text-[10px] text-gray-400">actual</span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }
