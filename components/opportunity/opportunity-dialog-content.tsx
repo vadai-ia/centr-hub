@@ -1,4 +1,6 @@
 "use client";
+import { MoveStageMenu } from "@/components/pipeline/move-stage-menu";
+import type { PipelineStageRow, UUID } from "@/lib/types/database";
 import Link from "next/link";
 import { useCallback } from "react";
 import type { OpportunityDialogBundle } from "@/lib/actions/opportunities-m6";
@@ -25,6 +27,10 @@ interface Props {
   onCreateInShopify?: () => void;
   onResolveCase?: () => void;
   onTasksChanged?: () => void;
+  /** Etapas del funnel. Solo llegan desde el pipeline (ver el dialog). */
+  stages?: PipelineStageRow[];
+  /** Mueve por el MISMO camino que soltar la tarjeta en el tablero. */
+  onMoveToStage?: (toStageId: UUID) => void;
 }
 
 /**
@@ -49,6 +55,8 @@ export function OpportunityDialogContent({
   onCreateInShopify,
   onResolveCase,
   onTasksChanged,
+  stages,
+  onMoveToStage,
 }: Props) {
   const { opportunity, stage, contact, lineItems, lossReason } = bundle.detail;
   // Manda el folio del PEDIDO; el del borrador se conserva aparte porque el
@@ -298,6 +306,17 @@ export function OpportunityDialogContent({
           >
             Agregar nota
           </button>
+        )}
+        {/* Primero: mover de etapa es lo que la gente viene a hacer aquí.
+            Solo aparece abierto desde el pipeline — es ahí donde existen el
+            motivo de pérdida obligatorio y la entrega de Outbound. */}
+        {stages && onMoveToStage && !opportunity.resolved_at && (
+          <MoveStageMenu
+            stages={stages}
+            currentStageId={opportunity.stage_id}
+            onMove={onMoveToStage}
+            variant="button"
+          />
         )}
         {bundle.canReassign && (
           <button

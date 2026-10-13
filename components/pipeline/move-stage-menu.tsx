@@ -21,11 +21,18 @@ export function MoveStageMenu({
   stages,
   currentStageId,
   onMove,
+  variant = "icon",
 }: {
   /** Etapas del funnel activo, en orden. */
   stages: PipelineStageRow[];
   currentStageId: UUID;
   onMove: (toStageId: UUID) => void;
+  /**
+   * `icon` en la tarjeta del tablero, donde el espacio es el que es;
+   * `button` en el detalle, donde la acción tiene que ser encontrable sin
+   * adivinar — ahí es el primer sitio donde la gente la busca.
+   */
+  variant?: "icon" | "button";
 }) {
   const [open, setOpen] = useState(false);
   const boxRef = useRef<HTMLDivElement>(null);
@@ -46,8 +53,7 @@ export function MoveStageMenu({
     };
   }, [open]);
 
-  const destinos = stages.filter((s) => s.id !== currentStageId);
-  if (destinos.length === 0) return null;
+  if (stages.length <= 1) return null;
 
   return (
     <div
@@ -63,12 +69,16 @@ export function MoveStageMenu({
         onClick={() => setOpen((o) => !o)}
         aria-label="Mover a otra etapa"
         aria-expanded={open}
-        className="flex h-5 w-5 items-center justify-center rounded text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-700 dark:hover:text-gray-200"
+        className={
+          variant === "button"
+            ? "inline-flex items-center gap-1.5 rounded-md border border-gray-200 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-700"
+            : "flex h-5 w-5 items-center justify-center rounded text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-700 dark:hover:text-gray-200"
+        }
       >
         <svg
           xmlns="http://www.w3.org/2000/svg"
-          width="13"
-          height="13"
+          width={variant === "button" ? "15" : "13"}
+          height={variant === "button" ? "15" : "13"}
           viewBox="0 0 24 24"
           fill="none"
           stroke="currentColor"
@@ -77,35 +87,50 @@ export function MoveStageMenu({
           strokeLinejoin="round"
           aria-hidden
         >
-          <path d="M5 12h14" />
-          <path d="m12 5 7 7-7 7" />
+          <path d="m8 3-5 4 5 4" />
+          <path d="M3 7h12a4 4 0 0 1 0 8h-1" />
+          <path d="m16 21 5-4-5-4" />
+          <path d="M21 17H9a4 4 0 0 1 0-8h1" />
         </svg>
+        {variant === "button" && "Mover a etapa"}
       </button>
 
       {open && (
-        <div className="absolute right-0 top-6 z-40 w-52 overflow-hidden rounded-lg border border-gray-200 bg-white py-1 shadow-xl dark:border-gray-700 dark:bg-gray-800">
+        <div className="absolute right-0 z-40 mt-1 w-52 top-full overflow-hidden rounded-lg border border-gray-200 bg-white py-1 shadow-xl dark:border-gray-700 dark:bg-gray-800">
           <p className="px-3 py-1 text-[10px] uppercase tracking-wide text-gray-400 dark:text-gray-500">
-            Mover a
+            Mover a — adelante o atrás
           </p>
           <div className="max-h-64 overflow-y-auto">
-            {destinos.map((s) => (
-              <button
-                key={s.id}
-                type="button"
-                onClick={() => {
-                  setOpen(false);
-                  onMove(s.id);
-                }}
-                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-700"
-              >
-                <span
-                  className="h-2 w-2 flex-shrink-0 rounded-full"
-                  style={{ backgroundColor: s.color }}
-                  aria-hidden
-                />
-                <span className="truncate">{s.name}</span>
-              </button>
-            ))}
+            {stages.map((s) => {
+              const esActual = s.id === currentStageId;
+              return (
+                <button
+                  key={s.id}
+                  type="button"
+                  disabled={esActual}
+                  onClick={() => {
+                    setOpen(false);
+                    onMove(s.id);
+                  }}
+                  className={[
+                    "flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs",
+                    esActual
+                      ? "cursor-default bg-gray-50 font-medium text-gray-500 dark:bg-gray-700/40 dark:text-gray-400"
+                      : "text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-700",
+                  ].join(" ")}
+                >
+                  <span
+                    className="h-2 w-2 flex-shrink-0 rounded-full"
+                    style={{ backgroundColor: s.color }}
+                    aria-hidden
+                  />
+                  <span className="truncate">{s.name}</span>
+                  {esActual && (
+                    <span className="ml-auto text-[10px] text-gray-400">actual</span>
+                  )}
+                </button>
+              );
+            })}
           </div>
         </div>
       )}

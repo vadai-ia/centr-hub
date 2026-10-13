@@ -63,7 +63,7 @@ describe("el tablero no se va solo al arrastrar", () => {
 });
 
 describe("mover sin arrastrar", () => {
-  const menu = read("app/(dashboard)/pipeline/move-stage-menu.tsx");
+  const menu = read("components/pipeline/move-stage-menu.tsx");
 
   it("la tarjeta ofrece un menú de etapas", () => {
     // Con el desplazamiento automático apagado, la columna de destino suele
@@ -84,9 +84,30 @@ describe("mover sin arrastrar", () => {
     expect(board).toContain("onMoveToStage={moveToStage}");
   });
 
+  it("sirve para REGRESAR, no solo para avanzar", () => {
+    // Con una flecha a la derecha la gente asume que solo adelanta. El menú
+    // lista TODAS las etapas en orden y marca la actual, para que las de
+    // arriba se lean como "regresar".
+    expect(menu).toContain("adelante o atrás");
+    expect(menu).toContain("esActual");
+    expect(menu).toContain("stages.map");
+    // El icono NO es una flecha simple a la derecha.
+    expect(menu).not.toContain("m12 5 7 7-7 7");
+  });
+
   it("abrir el menú no empieza a arrastrar la tarjeta", () => {
     // La tarjeta entera es el asa del arrastre.
     expect(menu).toContain("onPointerDown={(e) => e.stopPropagation()}");
+  });
+
+  it("también está en el DETALLE, que es donde se busca primero", () => {
+    // Se construyó en la tarjeta y la gente lo fue a buscar al popup: ahí es
+    // donde se espera una acción sobre la oportunidad.
+    const contenido = read("components/opportunity/opportunity-dialog-content.tsx");
+    expect(contenido).toContain("MoveStageMenu");
+    expect(contenido).toContain('variant="button"');
+    // Y sale del MISMO camino: el pipeline le pasa su propio moveToStage.
+    expect(board).toContain("<OpportunityDialog stages={stages} onMoveToStage={moveToStage} />");
   });
 
   it("no se ofrece en la copia flotante ni en un caso archivado", () => {

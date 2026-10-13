@@ -828,7 +828,7 @@ export function PipelineBoard({
         }}
       />
 
-      <OpportunityDialog />
+      <OpportunityDialog stages={stages} onMoveToStage={moveToStage} />
 
       <ResolveCaseDialog
         open={resolveCaseOppId !== null}

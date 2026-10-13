@@ -1,4 +1,5 @@
 "use client";
+import type { PipelineStageRow, UUID } from "@/lib/types/database";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import {
@@ -20,6 +21,14 @@ import { OpportunityDialogContent } from "./opportunity-dialog-content";
 interface Props {
   /** Param de URL que controla el dialog. Default `opp`. */
   paramName?: string;
+  /**
+   * Etapas del funnel + cómo mover. Solo los pasa el PIPELINE: ahí viven el
+   * motivo de pérdida obligatorio y la entrega de Outbound. Abierto desde
+   * Contactos el detalle no ofrece mover — con un atajo propio esas reglas se
+   * aplicarían en una pantalla y no en la otra.
+   */
+  stages?: PipelineStageRow[];
+  onMoveToStage?: (opportunityId: UUID, toStageId: UUID) => void;
 }
 
 /**
@@ -40,7 +49,11 @@ interface Props {
  * valida sesión + permisos (admin o asignado). Si retorna forbidden
  * o not_found, el dialog muestra un mensaje y permite cerrar.
  */
-export function OpportunityDialog({ paramName = "opp" }: Props) {
+export function OpportunityDialog({
+  paramName = "opp",
+  stages,
+  onMoveToStage,
+}: Props) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -181,6 +194,18 @@ export function OpportunityDialog({ paramName = "opp" }: Props) {
             onAssignCustomerSuccess={() => setAssignCsOpen(true)}
             onCreateInShopify={() => setShopifyDialogOpen(true)}
             onResolveCase={() => setResolveOpen(true)}
+            stages={stages}
+            onMoveToStage={
+              onMoveToStage && oppId
+                ? (toStageId) => {
+                    // Cerrar primero: el tablero mueve la tarjeta en el acto
+                    // y, si la etapa pide motivo o es una entrega de Outbound,
+                    // abre SU modal. Con el detalle encima no se vería.
+                    closeDialog();
+                    onMoveToStage(oppId as UUID, toStageId);
+                  }
+                : undefined
+            }
             onTasksChanged={() => {
               if (oppId) {
                 void loadOpportunityDetailForDialog({ opportunityId: oppId }).then((res) => {

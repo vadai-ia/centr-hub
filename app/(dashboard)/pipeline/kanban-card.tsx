@@ -1,5 +1,5 @@
 "use client";
-import { MoveStageMenu } from "./move-stage-menu";
+import { MoveStageMenu } from "@/components/pipeline/move-stage-menu";
 import { useDraggable } from "@dnd-kit/core";
 import type { KanbanOpportunity } from "@/lib/db/opportunities";
 import { primaryOpportunityReference } from "@/lib/format/opportunity-reference";
