@@ -83,6 +83,32 @@ export interface LeadTimings {
   byChannel: ChannelShare[];
 }
 
+/** Tiempo de respuesta de UN asesor (0058). */
+export interface AdvisorResponseTime {
+  /** null = respuestas en conversaciones cuyo contacto no tenía asesor. */
+  advisorMembershipId: UUID | null;
+  responses: number;
+  medianMinutes: number | null;
+  averageMinutes: number | null;
+}
+
+/**
+ * Cuánto tarda el equipo en contestar por WhatsApp (0058).
+ *
+ * NO es lo mismo que `LeadTimings`: ahí se mide el primer movimiento de la
+ * TARJETA en el CRM; aquí la respuesta real al cliente. Un asesor puede
+ * contestar en dos minutos y no tocar el CRM en dos días.
+ */
+export interface ResponseTimes {
+  /** Cuántas primeras respuestas humanas cayeron en el periodo. */
+  responses: number;
+  medianMinutes: number | null;
+  averageMinutes: number | null;
+  /** Clientes que escribieron y nadie contestó dentro de la ventana. */
+  unanswered: number;
+  byAdvisor: AdvisorResponseTime[];
+}
+
 /** KPI 11 — pérdidas agrupadas por motivo. */
 export interface LossByReason {
   reasonId: UUID | null;
@@ -132,6 +158,8 @@ export interface VentaMetrics {
   leadFunnel: LeadFunnel;
   /** Tiempos y canal de entrada de la MISMA cohorte (punto 24). */
   leadTimings: LeadTimings;
+  /** Cuánto tarda el equipo en contestar por WhatsApp (0058). */
+  responseTimes: ResponseTimes;
   lossRate: number | null; // 10
   lossesByReason: LossByReason[]; // 11
   salesCycleDays: number | null; // 12
@@ -238,6 +266,13 @@ export interface DashboardData {
    * Ver `dashboard-snapshot-window.ts`.
    */
   pipelineSnapshotSince: string | null;
+  /**
+   * Fecha del primer mensaje de WhatsApp registrado (`YYYY-MM-DD`), o null
+   * si todavía no hay ninguno. La tabla arranca VACÍA el día que se conecta
+   * el webhook y no hay forma de reconstruir hacia atrás: sin declararlo, un
+   * periodo anterior se leería como \"nadie escribió\" en vez de \"no se medía\".
+   */
+  messagesSince: string | null;
   /**
    * Moneda de la organización (ISO 4217) para los AGREGADOS — sumas del
    * dashboard, desglose y exportación, que no cuelgan de ninguna fila con

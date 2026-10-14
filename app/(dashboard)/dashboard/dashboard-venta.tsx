@@ -5,6 +5,7 @@ import { AdvisorBreakdown } from "./advisor-breakdown";
 import { InfoTooltip } from "./info-tooltip";
 import { LeadFunnelCard } from "./dashboard-funnel";
 import { LeadTimingsCard } from "./dashboard-timings";
+import { ResponseTimesCard } from "./dashboard-response-times";
 import { IconCheck, IconPipeline, IconRevenue, IconTrophy } from "./kpi-icons";
 import {
   LossesByReasonChart,
@@ -119,12 +120,15 @@ export function DashboardVenta({
   breakdown,
   currency,
   snapshotSince,
+  messagesSince,
 }: {
   m: VentaMetrics;
   breakdown: AdvisorBreakdownRow[] | null;
   /** Moneda de la organización (los agregados no la heredan de una fila). */
   currency: string;
   snapshotSince: string | null;
+  /** Desde cuándo hay mensajes de WhatsApp registrados. */
+  messagesSince: string | null;
 }) {
   const CCY = currency;
   return (
@@ -236,6 +240,15 @@ export function DashboardVenta({
         {/* Pegado al embudo porque habla de la MISMA cohorte: el embudo dice
             dónde se cae, esto cuánto tarda y por dónde entró. */}
         <LeadTimingsCard timings={m.leadTimings} />
+        {/* Justo después de los tiempos del CRM, y a propósito: son la
+            pregunta parecida con la respuesta distinta. Arriba, cuánto tarda
+            en moverse la TARJETA; aquí, cuánto tarda en contestarse al
+            CLIENTE. Separadas en el tablero se leerían como la misma. */}
+        <ResponseTimesCard
+          times={m.responseTimes}
+          breakdown={breakdown}
+          measuringSince={messagesSince}
+        />
         <RevenueByMonthChart data={m.revenueByMonth} currency={CCY} tooltip={TT.revenueByMonth} />
         <WonVsLostChart won={m.wonVsLost.won} lost={m.wonVsLost.lost} tooltip={TT.wonVsLost} />
         <LossesByReasonChart data={m.lossesByReason} currency={CCY} tooltip={TT.lossesByReason} />

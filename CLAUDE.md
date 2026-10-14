@@ -876,6 +876,52 @@ Para agregar otro país basta una entrada en el mapa `PAIS` del script (lada + p
 
 Corregidos 65 en `centr-colombia`. Quedan pendientes de decisión: **4 duplicados** (fusionar) y **1 enlazado a Shopify** (propagar o no).
 
+## Tiempo de respuesta del asesor (migración 0058)
+
+Lo que la dirección preguntó: *"¿cuánto tarda cada comercial en contestar?"*. Hasta ahora el tablero solo sabía decir cuánto tardaba en **mover la tarjeta** ("Tiempos y origen", punto 24) — un asesor puede responder por WhatsApp en dos minutos y no tocar el CRM en dos días. Ahora se mide la respuesta real: tarjeta **"Tiempo de respuesta"** en el Dashboard de Venta, pegada a la de tiempos del CRM a propósito, porque son la pregunta parecida con la respuesta distinta y separadas se vuelven a confundir.
+
+**Se mide del mensaje del cliente a la primera respuesta HUMANA.** Varios mensajes seguidos del cliente son **una sola espera** (contarlos aparte triplicaría el peso de quien escribe mucho). Un saliente sin pregunta previa no es una respuesta: el asesor inició la conversación. Mediana **y** promedio, misma razón que en los tiempos de lead: la mediana dice el caso típico, el promedio delata la cola larga.
+
+### El agente de IA de Whaapy es el detalle que hace que el número signifique algo
+
+`message.sent` se emite igual para el humano y para el bot, y el bot contesta **en segundos**. Sin distinguirlos, todos los asesores marcarían respuesta instantánea. El payload trae `sent_by_ai` y **solo un saliente con `sent_by_ai = false` cierra el turno** — el bot contestando NO salva una conversación de contar como "sin contestar".
+
+### Quién contestó: se CONGELA al ingestar
+
+`message.sent` **no identifica al humano que escribió** (lo confirma la doc de Whaapy: trae `conversation_id`, `to`, `type`, `sent_by_ai` y nada más). Lo más cercano es el `assigned_advisor_id` del contacto, y se guarda en la fila al momento del mensaje: resolverlo por join al consultar reportaría las respuestas de ayer a cargo del asesor de hoy. **Límite a comunicar:** una respuesta ANTERIOR a la asignación queda a nombre de quien tuviera la conversación en ese instante.
+
+El **entrante también guarda asesor**, y no es simetría decorativa: es de quién era el cliente que escribió. De ahí salen dos cosas — que un vendedor vea solo lo suyo, y poder decir a quién le quedó una conversación sin responder.
+
+### No se guarda el contenido del mensaje
+
+La tabla `whaapy_messages` almacena cuándo, en qué sentido, si fue el bot y de quién era el contacto. El texto es PII y la métrica no lo necesita; es la misma regla que "NO loguear payloads completos" de los webhooks. **Consecuencia:** esto NO trae la conversación a la plataforma. El día a día sigue en el iframe, y la bitácora del contacto sigue mostrando solo los mensajes que ORIGINA la plataforma.
+
+### Dos relojes, dos formatos
+
+`message.received` reenvía el objeto de Meta tal cual (epoch en **segundos**, como string) y `message.sent` usa ISO propio de Whaapy. Tratar el epoch como ISO daría fecha inválida y el mensaje aterrizaría con la hora de recepción. Además, con resolución de segundos una respuesta instantánea puede **empatar** con la pregunta: al ordenar, el entrante gana el desempate — una respuesta no puede preceder a lo que contesta, y sin eso el orden queda al azar y la respuesta inmediata se reporta como conversación sin contestar.
+
+### El margen hacia atrás, y por qué no cuela respuestas de más
+
+La lectura trae **7 días antes** del periodo: una conversación que abre un viernes y se contesta el lunes es una espera real, y sin margen esa respuesta sería "una respuesta sin pregunta" que se descarta en silencio. El recorte lo hace la decisión, no la consulta: solo cuentan las respuestas **cuya marca cae dentro del periodo**. Una respuesta anterior a la ventana no se cuenta pero **sí cierra su turno** — si no, la siguiente respuesta del hilo se mediría contra un mensaje ya atendido y daría días en vez de minutos.
+
+### Un vendedor ve solo lo suyo, y el recorte va en la decisión
+
+El emparejamiento de turnos usa **todos** los mensajes del hilo (recortar la entrada partiría turnos cuya respuesta la dio alguien más); el `scope` se aplica sobre los resultados. `ResponseScope` es un tipo APARTE del `Scope` del dashboard por eso mismo.
+
+### Empieza vacío, y la tarjeta lo dice
+
+La tabla se puebla desde que se conecta el webhook y **no hay forma de reconstruir hacia atrás**. Sin declararlo, un periodo anterior se leería como "nadie escribió" en vez de "no se medía": la tarjeta muestra desde cuándo mide (`messagesSince`).
+
+**Acoplamientos a vigilar** — los tres fallan EN SILENCIO (`tsc` contento, suite verde, simplemente no entra nada): los dos topics tienen que estar en `WHAAPY_TOPIC_TO_INNGEST` (un topic ausente se descarta con 200 + `unhandled_whaapy_event`), los workers en `allFunctions`, y la lectura **paginada** (PostgREST corta en 1000 filas sin error y la mediana saldría de una muestra arbitraria). Guards: `tests/response-times.test.ts` y `tests/whaapy-messages-wiring.test.ts`.
+
+### Pasos operativos obligatorios (NO son código del repo)
+
+1. **Aplicar la migración 0058.** Crea `whaapy_messages` con sus 4 tenant policies y **re-CREA `merge_lead_contact_into_client`** desde la VIGENTE (0054) para que la fusión de duplicados se lleve también los mensajes: la FK es `ON DELETE SET NULL`, así que sin esto no reventaría nada — los mensajes solo perderían la liga en silencio.
+
+2. **Suscribir los eventos en Whaapy, en las DOS instancias (Venta y Post-venta).** Agregar `message.received` y `message.sent` a los eventos del webhook. **Whaapy no permite editar: hay que borrar y recrear, y eso ROTA el secret HMAC.** Ejecutar el SOP de rotación de este documento en la MISMA ventana de trabajo — sin actualizar Vault, TODO el inbound de Whaapy queda mudo, no solo los mensajes. Validar con `exit_reason = 'enqueue_succeeded'` en `whaapy_raw_webhooks`.
+
+3. **No requiere scope nuevo de api_key:** `messages` ya está activado (sep-2026). La suscripción del webhook es independiente del scope.
+
 ## Avisos: campanita en el navbar y emergentes en todas las vistas
 
 La campanita está junto al nombre de usuario, así que se ve desde **cualquier** pantalla, y los avisos nuevos además **emergen** en la esquina inferior derecha como una notificación del sistema. Antes la campanita existía solo dentro de Mi Día: un aviso no aparecía hasta entrar a esa pantalla, que es justo lo contrario de para qué sirve — y los recordatorios de tareas salen a primera hora, cuando nadie está necesariamente ahí.

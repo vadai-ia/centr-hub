@@ -784,3 +784,31 @@ Toda entrada NUEVA sigue este mismo formato condensado — **solo la lección ac
 ### Un desplegable dentro de una lista con scroll sale recortado
 - **Causa raíz:** el menú "Mover a etapa" se abría como hijo de la tarjeta, y la lista de cada columna del kanban tiene scroll propio. Un contenedor con `overflow` recorta a sus descendientes en los DOS ejes, así que el desplegable aparecía cortado por la mitad — se leían los nombres de las etapas partidos.
 - **Regla:** todo desplegable que nazca dentro de un contenedor con scroll va en un **portal a `document.body`** con posición fija, calculada desde el rectángulo de su botón y acotada a la pantalla (incluido abrir hacia arriba si no cabe abajo). Como queda fuera del árbol, hay que cerrarlo al desplazar o redimensionar —si no, se queda flotando donde ya no significa nada— y el click-fuera tiene que mirar TAMBIÉN el nodo del portal, que ya no está dentro del contenedor original. Guard: `tests/kanban-drag-wiring.test.ts`.
+
+### "Tiempo de respuesta" y "tiempo al primer avance" no son la misma métrica
+- **Causa raíz:** el dashboard medía el tiempo al primer MOVIMIENTO de la tarjeta (`lead-timings`) y se leía como "cuánto tarda el asesor en contestar". Son cosas distintas: un asesor puede responder por WhatsApp en dos minutos y no tocar el CRM en dos días. La conversación vive en el iframe de Whaapy y no se descargaba, así que la respuesta real no existía como dato.
+- **Regla:** las dos tarjetas van PEGADAS en el tablero (`lead-timings` + `response-times`) y cada una declara qué mide. Separarlas las vuelve a confundir, que es el origen de la queja "la data no coincide".
+
+### Un agente de IA que contesta en segundos destruye cualquier métrica de respuesta
+- **Causa raíz:** Whaapy emite `message.sent` tanto para el humano como para su agente de IA, que responde en segundos. Contar el primer saliente como "la respuesta" daría a TODOS los asesores respuesta instantánea — un número con forma de métrica y sin información.
+- **Regla:** el turno lo cierra solo un saliente con `sent_by_ai = false` (`computeResponseTimes`). Al agregar cualquier medición sobre mensajes salientes, excluir primero al bot. Guard: `tests/response-times.test.ts`.
+
+### `message.sent` de Whaapy NO identifica al humano que escribió
+- **Causa raíz:** el payload trae `conversation_id`, `to` y `sent_by_ai`, pero ningún id de agente. Sin eso no hay atribución directa.
+- **Regla:** se congela `advisor_membership_id` AL INGESTAR, tomándolo del `assigned_advisor_id` del contacto (0058). Resolverlo por join al consultar reportaría las respuestas de ayer a cargo del asesor de hoy. Límite conocido a comunicar: una respuesta ANTERIOR a la asignación queda a nombre de quien tuviera la conversación en ese instante.
+
+### Un periodo sin datos no es lo mismo que un periodo sin actividad
+- **Causa raíz:** una tabla que empieza a poblarse el día del despliegue muestra cero para todo periodo anterior, y ese cero se lee como "nadie escribió" en vez de "no se medía".
+- **Regla:** la lectura expone desde cuándo hay datos (`getFirstMessageAt` → `messagesSince`) y la tarjeta lo declara en pantalla. Aplica a toda métrica nueva que no se pueda reconstruir hacia atrás (también `user_activity_sessions`, 0057).
+
+### Una métrica nueva alcanzable por vendedor necesita su scope EN LA DECISIÓN, no en la UI
+- **Causa raíz:** `computeResponseTimes` nació sin `scope` porque el desglose por asesor "ya venía separado". Un vendedor habría visto los tiempos de toda la organización.
+- **Regla:** el emparejamiento de turnos usa TODOS los mensajes del hilo —recortar la entrada partiría turnos cuya respuesta la dio alguien más— y el `scope` se aplica sobre los resultados: respuestas por quien contestó, conversaciones sin contestar por de quién era el cliente. Por eso el inbound también guarda asesor.
+
+### Una tabla nueva con FK a `contacts` obliga a tocar la fusión de duplicados
+- **Causa raíz:** `whaapy_messages` referencia `contacts`. Al fusionar un lead duplicado en su cliente, el RPC `merge_lead_contact_into_client` borra el lead; con `ON DELETE SET NULL` la fila no revienta, solo pierde la liga **en silencio** y los mensajes de esa persona desaparecen del reporte.
+- **Regla:** toda migración que agregue `references public.contacts` re-CREA el RPC de fusión incluyendo su `update ... set contact_id = v_client.id`. Lo detecta `tests/contact-lead-merge-sql-contract.test.ts`, que descubre las tablas leyendo las migraciones — hacerle caso en vez de excluir la tabla del guard.
+
+### Dos relojes distintos fechando los dos lados de una conversación
+- **Causa raíz:** `message.received` reenvía el objeto de Meta (epoch en SEGUNDOS, como string) y `message.sent` usa ISO propio de Whaapy. Tratar el epoch como ISO da fecha inválida y el mensaje aterriza con la hora de recepción, falseando el tiempo. Y con resolución de segundos una respuesta instantánea puede EMPATAR con la pregunta.
+- **Regla:** normalizar los dos formatos al ingestar (`resolveOccurredAt`) y, al ordenar, desempatar a favor del ENTRANTE — una respuesta no puede preceder a lo que contesta. Sin el desempate, el orden queda al azar y una respuesta inmediata se reporta como "conversación sin contestar".

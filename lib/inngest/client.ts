@@ -287,6 +287,10 @@ export const WHAAPY_TOPIC_TO_INNGEST: Record<string, string> = {
   "conversation.assigned":   "whaapy/conversation.assigned",
   "conversation.unassigned": "whaapy/conversation.unassigned",
   "conversation.closed":     "whaapy/conversation.closed",
+  // 0058 — tiempo de respuesta del asesor. Solo metadata: la plataforma
+  // NO guarda el contenido de los mensajes.
+  "message.received":        "whaapy/message.received",
+  "message.sent":            "whaapy/message.sent",
 };
 
 /** Topics que el endpoint público acepta + script de setup registra. */

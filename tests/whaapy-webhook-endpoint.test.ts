@@ -221,9 +221,12 @@ describe("POST /api/webhooks/whaapy", () => {
     expect(sendMock).toHaveBeenCalledTimes(1);
   });
 
-  it("topic desconocido (message.received) → 200 + audit + no encolado", async () => {
+  // `message.received` era el ejemplo de topic desconocido hasta 0058, que
+  // lo empezó a soportar. El caso que se prueba aquí es el genérico: Whaapy
+  // agrega eventos a su contrato y el endpoint no debe romperse.
+  it("topic desconocido → 200 + audit + no encolado", async () => {
     const req = buildRequest({
-      body: { event: "message.received", businessId: BUSINESS_ID, data: {} },
+      body: { event: "inventado.que.no.existe", businessId: BUSINESS_ID, data: {} },
       deliveryId: "whd_unknown",
     });
     const res = await POST(req as unknown as Parameters<typeof POST>[0]);

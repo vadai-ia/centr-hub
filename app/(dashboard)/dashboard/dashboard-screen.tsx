@@ -151,6 +151,7 @@ export function DashboardScreen({
         breakdown={data.ventaBreakdown}
         currency={data.currency}
         snapshotSince={data.pipelineSnapshotSince}
+        messagesSince={data.messagesSince}
       />
       <DashboardPostventa
         m={data.postventa}

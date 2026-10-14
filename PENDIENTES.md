@@ -102,7 +102,12 @@
 
 - **M4-DT-02 se desbloquea parcialmente:** los vendedores YA están dados de alta como agentes en Whaapy (confirmado jul-2026), así que el bloqueo operativo de M4-DT-02 ahora es solo poblar `whaapy_agent_id` (lo cubre Track 2).
 
-## Tiempo de respuesta del asesor (pedido por Gina, oct-2026)
+## Tiempo de respuesta del asesor (pedido por Gina, oct-2026) — ENTREGADO (0058)
+
+> Cerrado. El detalle vive en CLAUDE.md ("Tiempo de respuesta del asesor").
+> Queda SOLO el paso operativo: suscribir `message.received` y `message.sent`
+> en las dos instancias de Whaapy, que obliga a recrear el webhook y rotar el
+> secret HMAC. Lo de abajo se conserva como registro del análisis previo.
 
 - **Qué se pidió:** "¿cuánto tarda cada comercial en contestar?". Hoy NO se puede: la plataforma mide el tiempo al primer **movimiento de la tarjeta** en el CRM (`lib/services/lead-timings.ts`), no el tiempo a la **respuesta real**. Si el asesor contestó por WhatsApp y no tocó la tarjeta, no se ve. La conversación vive en el iframe de Whaapy y la plataforma no la descarga — la misma frontera que ya documenta la bitácora (CLAUDE.md, punto 24).
 

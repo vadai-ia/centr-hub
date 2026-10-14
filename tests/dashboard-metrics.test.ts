@@ -114,6 +114,7 @@ function ventaRaw(): VentaRaw {
     absorbedLeadEntries: [],
     leadFunnelHistory: [],
     leadEntryChannels: new Map(),
+    messageEvents: [],
     // Leads que compraron: o1 (lead de A, contacto c-o1) pagó un pedido;
     // o2 (lead de B) no.
     leadPurchases: [
@@ -321,6 +322,7 @@ describe("computeVentaMetrics — corte por canal (F4)", () => {
       absorbedLeadEntries: [],
       leadFunnelHistory: [],
       leadEntryChannels: new Map(),
+      messageEvents: [],
       maxNonLostPos: new Map(),
     };
   }

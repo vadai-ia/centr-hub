@@ -28,6 +28,12 @@ import { readOrganizationTimezone } from "@/lib/services/organization-timezone";
 import { resolvePipelineSnapshotWindow } from "@/lib/services/dashboard-snapshot-window";
 import { computeLeadFunnel } from "@/lib/services/lead-funnel";
 import { computeLeadTimings } from "@/lib/services/lead-timings";
+import { computeResponseTimes } from "@/lib/services/response-times";
+import {
+  listMessageEventsInWindow,
+  getFirstMessageAt,
+} from "@/lib/db/whaapy-messages";
+import type { MessageEvent } from "@/lib/services/response-times";
 import type { EntryChannel } from "@/lib/services/contact-journey";
 import {
   resolvePostventaStages,
@@ -77,6 +83,13 @@ import type {
  * suma de las filas del drilldown puede ser menor que el total org — la
  * diferencia es la contribución del usuario sistema Histórico.
  */
+
+/**
+ * Margen hacia atrás al leer mensajes (0058). Siete días: una conversación
+ * que abre un viernes y se contesta el lunes siguiente es una espera real
+ * que debe contarse, no un turno roto por el corte del periodo.
+ */
+const RESPONSE_WINDOW_LOOKBACK_DAYS = 7;
 
 export type Scope = UUID | null | "all";
 
@@ -222,6 +235,12 @@ export interface VentaRaw {
   }>;
   /** Canal de entrada por persona, leído de la bitácora (punto 24). */
   leadEntryChannels: Map<UUID, EntryChannel>;
+  /**
+   * Mensajes de WhatsApp de la ventana AMPLIADA (0058). Trae un margen
+   * hacia atrás del periodo para no partir turnos que abrieron justo antes:
+   * el recorte al periodo real lo hace `computeResponseTimes`.
+   */
+  messageEvents: MessageEvent[];
   /** oppId → posición máxima NO-perdida alcanzada (para avance KPI9). */
   maxNonLostPos: Map<UUID, number>;
   boundaries: VentaStageBoundaries;
@@ -336,11 +355,20 @@ async function fetchVentaRaw(
   // compras (KPI "leads que compraron") y su historial de etapas (embudo).
   // `leadContactIds` viene SIN scope — el scope se aplica al computar, igual
   // que con el resto del bundle.
-  const [leadPurchases, leadFunnelHistory, leadEntryEvents] = await Promise.all([
-    listPaidOrdersForContactsSince(leadContactIds, period.startUtc),
-    listVentaStageHistoryForContacts(leadContactIds),
-    listLeadEntryEventsForContacts(leadContactIds),
-  ]);
+  // Margen hacia atrás para los mensajes: un cliente que escribió el día 31
+  // y recibió respuesta el día 1 aparecería, sin él, como una respuesta sin
+  // pregunta. `computeResponseTimes` recorta al periodo real.
+  const messageWindowStart = new Date(
+    new Date(period.startUtc).getTime() -
+      RESPONSE_WINDOW_LOOKBACK_DAYS * 24 * 60 * 60 * 1000,
+  ).toISOString() as ISODateString;
+  const [leadPurchases, leadFunnelHistory, leadEntryEvents, messageEvents] =
+    await Promise.all([
+      listPaidOrdersForContactsSince(leadContactIds, period.startUtc),
+      listVentaStageHistoryForContacts(leadContactIds),
+      listLeadEntryEventsForContacts(leadContactIds),
+      listMessageEventsInWindow(messageWindowStart, period.endUtc as ISODateString),
+    ]);
   // Los eventos vienen del más viejo al más nuevo: el PRIMERO de cada
   // persona es su entrada real (quien entró por formulario y meses después
   // vuelve por WhatsApp sigue habiendo entrado por formulario).
@@ -362,6 +390,7 @@ async function fetchVentaRaw(
     absorbedLeadEntries,
     leadFunnelHistory,
     leadEntryChannels,
+    messageEvents,
     maxNonLostPos,
     boundaries,
     lossReasonNames,
@@ -597,6 +626,19 @@ export function computeVentaMetrics(
     zone: raw.timezone ?? TIMEZONE,
   });
 
+  // Tiempo de respuesta (0058). NO es lo mismo que `leadTimings`: ahí se
+  // mide el primer movimiento de la TARJETA, aquí la respuesta real al
+  // cliente. Un asesor puede contestar en dos minutos y no tocar el CRM en
+  // dos días. El `scope` se aplica DENTRO: el emparejamiento de turnos usa
+  // todos los mensajes del hilo —recortar la entrada partiría turnos cuya
+  // respuesta la dio alguien más— y el recorte cae sobre los resultados.
+  const responseTimes = computeResponseTimes({
+    messages: raw.messageEvents,
+    scope,
+    periodStart: raw.period.startUtc as ISODateString,
+    periodEnd: raw.period.endUtc as ISODateString,
+  });
+
   return {
     revenue,
     quotesSent,
@@ -613,6 +655,7 @@ export function computeVentaMetrics(
     winRateByStage,
     leadFunnel,
     leadTimings,
+    responseTimes,
     lossRate,
     lossesByReason,
     salesCycleDays,
@@ -809,6 +852,10 @@ export async function computeDashboardData(input: ComputeDashboardInput): Promis
     inbound: computePostventaMetrics(postventaRaw, scope, "inbound"),
   };
 
+  // Desde cuándo se miden los mensajes. Sin declararlo, un periodo anterior
+  // al despliegue se leería como "nadie escribió" en vez de "no se medía".
+  const firstMessageAt = await getFirstMessageAt();
+
   let ventaBreakdown: AdvisorBreakdownRow[] | null = null;
   let postventaBreakdown: AdvisorBreakdownRow[] | null = null;
   if (wantBreakdown) {
@@ -832,6 +879,7 @@ export async function computeDashboardData(input: ComputeDashboardInput): Promis
     ventaBreakdown,
     postventaBreakdown,
     pipelineSnapshotSince: snapshotWindow.sinceDate,
+    messagesSince: firstMessageAt ? firstMessageAt.slice(0, 10) : null,
     // Los agregados no heredan moneda de ninguna fila: viaja la de la org.
     currency: readOrganizationCurrency(org?.config ?? null),
   };

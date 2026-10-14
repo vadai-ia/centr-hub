@@ -20,6 +20,7 @@ import { goalSnapshotFunctions } from "./goal-snapshot";
 import { leadWebhookFunctions } from "./lead-webhook";
 import { whaapyInboundHealthFunctions } from "./whaapy-inbound-health";
 import { taskReminderFunctions } from "./task-reminder-cron";
+import { whaapyMessageFunctions } from "./whaapy-messages";
 
 /**
  * Registro completo de funciones Inngest para servir desde
@@ -50,4 +51,5 @@ export const allFunctions = [
   ...leadWebhookFunctions,
   ...whaapyInboundHealthFunctions,
   ...taskReminderFunctions,
+  ...whaapyMessageFunctions,
 ];

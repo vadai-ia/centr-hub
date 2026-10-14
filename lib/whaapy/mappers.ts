@@ -132,6 +132,70 @@ export const WhaapyContactDeletedPayloadSchema = z
   .passthrough();
 
 // ============================================================
+// message.* — received / sent  (0058, tiempo de respuesta)
+// ============================================================
+//
+// Confirmado contra la doc de Whaapy (/api-reference/webhooks/payloads):
+//
+//  - `message.received` usa estructura HÍBRIDA: el objeto `message` viene
+//    tal cual lo manda Meta (de ahí `message.timestamp` en SEGUNDOS epoch,
+//    como string), más ids propios de Whaapy al nivel de `data`.
+//  - `message.sent` es plano y trae `sent_by_ai`. Ese booleano es la pieza
+//    central: el agente de IA contesta en segundos y sin distinguirlo todos
+//    los asesores marcarían respuesta instantánea.
+//  - `message.sent` NO identifica al humano que escribió. La atribución sale
+//    del asesor asignado al contacto, que el worker resuelve al ingestar.
+//
+// Los dos `.passthrough()` + `.nullish()` como el resto: el contrato de
+// Whaapy crece y no queremos re-romper el ingreso por un campo nuevo.
+
+export const WhaapyMessageReceivedPayloadSchema = z
+  .object({
+    event: z.literal("message.received").optional(),
+    businessId: z.string(),
+    timestamp: z.string().nullish(),
+    data: z
+      .object({
+        whaapy_message_id: z.string(),
+        conversation_id: z.string(),
+        contact_id: z.string().nullish(),
+        contact_name: z.string().nullish(),
+        message: z
+          .object({
+            from: z.string().nullish(),
+            id: z.string().nullish(),
+            // Epoch en SEGUNDOS y como string — formato de Meta.
+            timestamp: z.string().nullish(),
+            type: z.string().nullish(),
+          })
+          .passthrough()
+          .nullish(),
+      })
+      .passthrough(),
+  })
+  .passthrough();
+
+export const WhaapyMessageSentPayloadSchema = z
+  .object({
+    event: z.literal("message.sent").optional(),
+    businessId: z.string(),
+    timestamp: z.string().nullish(),
+    data: z
+      .object({
+        message_id: z.string(),
+        conversation_id: z.string(),
+        to: z.string().nullish(),
+        contact_name: z.string().nullish(),
+        type: z.string().nullish(),
+        // Sin esto la métrica es ruido: el bot responde en segundos.
+        sent_by_ai: z.boolean().nullish(),
+        timestamp: z.string().nullish(),
+      })
+      .passthrough(),
+  })
+  .passthrough();
+
+// ============================================================
 // conversation.* — created / assigned / unassigned / closed
 // ============================================================
 //
