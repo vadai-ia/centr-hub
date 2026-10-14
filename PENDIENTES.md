@@ -101,3 +101,26 @@
 - **Adaptador nativo de Meta Lead Ads (futuro, decidido con el operador).** El webhook de leads v1 acepta un contrato JSON genérico (formularios web/landings/Zapier/Make). Meta Lead Ads usa otro flujo (handshake `hub.verify_token` + fetch a Graph API para traer el lead) → construir un adaptador dedicado cuando se requiera; desemboca en el mismo `createLead`.
 
 - **M4-DT-02 se desbloquea parcialmente:** los vendedores YA están dados de alta como agentes en Whaapy (confirmado jul-2026), así que el bloqueo operativo de M4-DT-02 ahora es solo poblar `whaapy_agent_id` (lo cubre Track 2).
+
+## Tiempo de respuesta del asesor (pedido por Gina, oct-2026)
+
+- **Qué se pidió:** "¿cuánto tarda cada comercial en contestar?". Hoy NO se puede: la plataforma mide el tiempo al primer **movimiento de la tarjeta** en el CRM (`lib/services/lead-timings.ts`), no el tiempo a la **respuesta real**. Si el asesor contestó por WhatsApp y no tocó la tarjeta, no se ve. La conversación vive en el iframe de Whaapy y la plataforma no la descarga — la misma frontera que ya documenta la bitácora (CLAUDE.md, punto 24).
+
+- **Lo que confirmó la doc de Whaapy** (`/api-reference/webhooks/events` y `/payloads`):
+  - `message.received` — el cliente escribió. Trae `conversation_id`, `contact_id`, `whaapy_message_id` y el mensaje en formato Meta.
+  - `message.sent` — el negocio escribió, **con `sent_by_ai: boolean`**. Sin ese campo la métrica sería inservible: el agente de IA de Whaapy contesta en segundos y todos los asesores marcarían "respuesta instantánea".
+  - `message.sent` **NO trae el id del agente humano**. La atribución tiene que salir del asesor asignado a la conversación en ese momento (ya tenemos el mapeo `memberships.whaapy_agent_id` ↔ agente de Whaapy desde `conversation.assigned`). Caveat a comunicar: una respuesta ANTERIOR a la asignación se le atribuye a quien tenga la conversación en ese instante.
+
+- **Alcance propuesto:**
+  1. Suscribir `message.received` y `message.sent` en el webhook de Whaapy (Venta y Post-venta).
+  2. Tabla nueva (`whaapy_messages`) **sin contenido del mensaje**: org, contacto, conversación, dirección, `sent_by_ai`, `occurred_at`, `whaapy_message_id` (dedup). El texto es PII y la métrica no lo necesita — alineado con "NO loguear payloads completos".
+  3. Módulo PURO de decisión: primera respuesta = primer `message.sent` con `sent_by_ai = false` posterior a un `message.received` que abre turno. Mediana **y** promedio (mismo criterio que `lead-timings`: el promedio solo delata la cola larga).
+  4. Vista por asesor y por mes, pegada al bloque de tiempos del Dashboard.
+
+- **Paso operativo OBLIGATORIO:** Whaapy no permite editar el webhook — hay que **borrar y recrear**, lo que **rota el secret HMAC**. Ejecutar el SOP de rotación de CLAUDE.md en la misma ventana de trabajo (actualizar Vault + validar `exit_reason = 'enqueue_succeeded'` en `whaapy_raw_webhooks`). Sin eso, TODO el inbound de Whaapy queda mudo, no solo los mensajes.
+
+- **Lo que desbloquea de paso:** "cuántos mensajes escribió el cliente" (lo que describió Alex en la junta) y el hueco conocido de la bitácora, que hoy solo muestra los mensajes que ORIGINA la plataforma.
+
+- **Scope de api_key:** `messages` ya está activado en las dos instancias (sep-2026) — no hay que regenerar la api_key. Lo que falta es la **suscripción del webhook**, que es independiente del scope.
+
+- Estimar 2 días.
