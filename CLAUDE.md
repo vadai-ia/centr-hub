@@ -116,9 +116,10 @@ Documentado tras el cierre M4 inbound (22-may-2026) — ver entrada `ERRORES.md`
 
 4. **Disparar webhook test y validar exit_reason.** Desde el dashboard de Whaapy → Test webhook (o re-crear un contacto manualmente). Validar en Supabase:
    ```sql
-   SELECT endpoint, exit_reason, created_at
+   -- La columna de fecha es `received_at` (0015), NO `created_at`.
+   SELECT endpoint, exit_reason, received_at
    FROM whaapy_raw_webhooks
-   ORDER BY created_at DESC
+   ORDER BY received_at DESC
    LIMIT 5;
    ```
    Esperar `exit_reason = 'enqueue_succeeded'` en el último insert. Si aparece `invalid_hmac`, el secret en Vault NO matchea con el del webhook activo — repetir paso 3.
