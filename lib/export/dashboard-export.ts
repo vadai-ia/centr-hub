@@ -167,10 +167,11 @@ export function buildExportModel(
       heading: "Venta · Desglose por vendedor",
       // Mismas columnas y nombres que el desglose en pantalla: un reporte que
       // dice otra cosa que el tablero confunde justo a quien lo presenta.
-      columns: ["Vendedor", "Venta cobrada", "Cotiz.", "% cierre", "Ganadas", "Perdidas", "Tasa de éxito", "Cartera en proceso hoy"],
+      columns: ["Vendedor", "Venta cobrada", "Leads", "Cotiz.", "% cierre", "Ganadas", "Perdidas", "Tasa de éxito", "Cartera en proceso hoy"],
       rows: data.ventaBreakdown.map((r) => [
         r.name,
         formatAmount(r.revenue, CCY) ?? DASH,
+        formatCount(r.leads),
         formatCount(r.quotesSent),
         formatPercent(r.closeRate),
         formatCount(r.wonCount),

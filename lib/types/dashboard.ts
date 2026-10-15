@@ -189,6 +189,8 @@ export interface AdvisorBreakdownRow {
   isUnassigned: boolean;
   // Venta
   revenue: number;
+  /** Leads que entraron en el periodo y están a su nombre (tope del embudo). */
+  leads: number;
   quotesSent: number;
   /** % de cierre de cotizaciones (0–1, cohorte del periodo). null sin cotizaciones. */
   closeRate: number | null;

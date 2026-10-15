@@ -53,6 +53,12 @@ export function AdvisorBreakdown({
               {isVenta ? (
                 <>
                   <th className="py-2 px-3 font-medium text-right">Venta cobrada</th>
+                  <th
+                    className="py-2 px-3 font-medium text-right"
+                    title="Leads que entraron en el periodo y están a su nombre. No cuadra con el embudo de arriba: aquel cuenta PERSONAS y este tarjetas."
+                  >
+                    Leads
+                  </th>
                   <th className="py-2 px-3 font-medium text-right">Cotiz.</th>
                   <th
                     className="py-2 px-3 font-medium text-right"
@@ -101,6 +107,7 @@ export function AdvisorBreakdown({
                 {isVenta ? (
                   <>
                     <td className="py-2 px-3 text-right tabular-nums">{formatAmount(r.revenue, CCY) ?? DASH}</td>
+                    <td className="py-2 px-3 text-right tabular-nums">{formatCount(r.leads)}</td>
                     <td className="py-2 px-3 text-right tabular-nums">{formatCount(r.quotesSent)}</td>
                     <td className="py-2 px-3 text-right tabular-nums">{formatPercent(r.closeRate)}</td>
                     <td className="py-2 px-3 text-right tabular-nums">{formatCount(r.wonCount)}</td>

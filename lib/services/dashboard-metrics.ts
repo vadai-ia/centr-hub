@@ -918,6 +918,9 @@ function breakdownRow(
     color: s.color,
     isUnassigned: s.membershipId === null,
     revenue: v?.revenue ?? 0,
+    // Mismo conteo que el KPI "Leads" de arriba, pero recortado a este
+    // asesor: entradas a la etapa inicial dentro del periodo.
+    leads: v?.leads ?? 0,
     quotesSent: v?.quotesSent ?? 0,
     // % de cierre de cotizaciones del periodo (cohorte): en la revisión semanal
     // responde "de lo que cotizó, cuánto cerró".
