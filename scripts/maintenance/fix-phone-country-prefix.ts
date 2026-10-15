@@ -16,10 +16,23 @@
  *     organización. Un número que no case con el patrón se reporta y no se
  *     toca: `libphonenumber` acepta como "válido en México" casi cualquier
  *     10 dígitos, así que la validez por sí sola no distingue nada.
- *   - **Las colisiones se SALTAN.** Si el número corregido ya existe como
- *     otro contacto, son dos fichas de la misma persona: re-escribir el
- *     teléfono crearía un duplicado exacto en vez de arreglar nada. Se
- *     listan para fusionarlas (`maintenance:merge-duplicate-leads`).
+ *   - **Las colisiones se SALTAN por defecto.** Si el número corregido ya
+ *     existe como otro contacto, son dos fichas de la misma persona:
+ *     re-escribir el teléfono crearía un duplicado exacto en vez de
+ *     arreglar nada.
+ *
+ *     Con `--merge-collisions` se resuelven de una: renumerar y fusionar
+ *     EN EL ACTO. Van juntos a propósito — la fusión exige que los dos
+ *     teléfonos empaten, y renumerar sin fusionar deja el duplicado exacto
+ *     que este script existe para no crear. Antes de tocar nada se consulta
+ *     la MISMA decisión que usa la fusión automática
+ *     (`decideLeadClientMerge`): si ese par no se fusionaría —dos leads sin
+ *     Shopify, nombres incompatibles, tres fichas con el número— se deja
+ *     intacto y se dice por qué.
+ *
+ *     Si la renumeración saliera bien y la fusión fallara, quedan dos fichas
+ *     con el mismo teléfono: exactamente el caso que
+ *     `maintenance:merge-duplicate-leads` resuelve. Nada queda irrecuperable.
  *   - **No propaga a Shopify ni a Whaapy.** Los contactos enlazados se
  *     reportan aparte: cambiarles el teléfono aquí deja el externo
  *     desincronizado y eso se decide a mano.
@@ -27,6 +40,8 @@
  * Uso:
  *   npm run maintenance:fix-phone-country-prefix -- --org-slug centr-colombia
  *   npm run maintenance:fix-phone-country-prefix -- --org-slug centr-colombia --apply
+ *   npm run maintenance:fix-phone-country-prefix -- --org-slug centr-colombia --merge-collisions
+ *   npm run maintenance:fix-phone-country-prefix -- --org-slug centr-colombia --merge-collisions --apply
  */
 import { config as loadDotenv } from "dotenv";
 import { resolve } from "node:path";
@@ -35,6 +50,12 @@ import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 import { getOrganizationBySlug } from "@/lib/db/organizations";
 import { recordAuditEvent } from "@/lib/db/operational";
 import { readOrganizationPhoneCountry } from "@/lib/services/organization-phone-country";
+import { getContactById } from "@/lib/db/contacts";
+import {
+  decideLeadClientMerge,
+  mergeDuplicateLeadIntoClient,
+} from "@/lib/services/contact-lead-merge";
+import type { ContactRow, UUID } from "@/lib/types/database";
 
 loadDotenv({ path: resolve(process.cwd(), ".env.local") });
 
@@ -57,6 +78,7 @@ function arg(name: string): string | null {
 async function main() {
   const slug = arg("org-slug");
   const apply = process.argv.includes("--apply");
+  const mergeCollisions = process.argv.includes("--merge-collisions");
   if (!slug) {
     console.error("Falta --org-slug");
     process.exit(1);
@@ -129,8 +151,54 @@ async function main() {
   for (const { c, nuevo } of corregir.slice(0, 8)) {
     console.log(`    ${c.phone} → ${nuevo}   ${c.full_name ?? "(sin nombre)"}`);
   }
+  // Para cada colisión se consulta por adelantado si la fusión la tomaría.
+  // Decirlo aquí evita que `--merge-collisions` parezca no hacer nada: un par
+  // de dos leads sin Shopify NO se fusiona, y eso hay que saberlo antes.
+  const planFusion = new Map<string, { clienteId: UUID; motivo: string | null }>();
+  if (colisiones.length > 0) {
+    await withTenantContext(
+      org.id,
+      async () => {
+        for (const { c, nuevo } of colisiones) {
+          const pareja = rows.filter((r) => r.phone === nuevo || r.id === c.id);
+          if (pareja.length !== 2) {
+            planFusion.set(c.id, { clienteId: c.id as UUID, motivo: "ambiguous_phone" });
+            continue;
+          }
+          // El "cliente" de la fusión es el que tiene identidad Shopify.
+          const cliente = pareja.find((r) => r.shopify_customer_id);
+          if (!cliente) {
+            planFusion.set(c.id, { clienteId: c.id as UUID, motivo: "not_a_client" });
+            continue;
+          }
+          const otro = pareja.find((r) => r.id !== cliente.id)!;
+          // Se simula el estado POSTERIOR a renumerar: los dos con el
+          // teléfono corregido. Es lo que la fusión vería.
+          const full = await getContactById(cliente.id as UUID);
+          const fullOtro = await getContactById(otro.id as UUID);
+          if (!full || !fullOtro) {
+            planFusion.set(c.id, { clienteId: c.id as UUID, motivo: "contact_not_found" });
+            continue;
+          }
+          const d = decideLeadClientMerge(
+            { ...full, phone: nuevo } as ContactRow,
+            [{ ...full, phone: nuevo } as ContactRow, { ...fullOtro, phone: nuevo } as ContactRow],
+          );
+          planFusion.set(c.id, {
+            clienteId: cliente.id as UUID,
+            motivo: d.action === "merge" ? null : d.reason,
+          });
+        }
+      },
+      { source: "worker" },
+    );
+  }
   for (const { c, nuevo } of colisiones) {
-    console.log(`    DUPLICADO ${c.phone} ↔ ${nuevo}   ${c.full_name ?? "(sin nombre)"}`);
+    const plan = planFusion.get(c.id);
+    const veredicto = plan?.motivo ? `NO fusionable: ${plan.motivo}` : "se fusionaría";
+    console.log(
+      `    DUPLICADO ${c.phone} ↔ ${nuevo}   ${c.full_name ?? "(sin nombre)"}  → ${veredicto}`,
+    );
   }
   for (const { c, nuevo } of conExterno) {
     console.log(`    EXTERNO   ${c.phone} → ${nuevo}   ${c.full_name ?? "(sin nombre)"}`);
@@ -143,7 +211,6 @@ async function main() {
     console.log("\n(dry-run — no se tocó nada). Repite con --apply.");
     return;
   }
-  if (corregir.length === 0) return;
 
   let hechos = 0;
   await withTenantContext(
@@ -182,6 +249,71 @@ async function main() {
     { source: "worker" },
   );
   console.log(`\nListo: ${hechos} teléfonos corregidos a ${destino.lada}.`);
+
+  if (!mergeCollisions || colisiones.length === 0) return;
+
+  // Renumerar + fusionar, en ese orden y seguidos. Si se quedara a medias
+  // habría dos fichas con el mismo teléfono — justo el caso que
+  // `maintenance:merge-duplicate-leads` resuelve, así que nada se pierde.
+  let fusionados = 0;
+  let saltados = 0;
+  await withTenantContext(
+    org.id,
+    async () => {
+      for (const { c, nuevo } of colisiones) {
+        const plan = planFusion.get(c.id);
+        if (!plan || plan.motivo) {
+          saltados += 1;
+          console.log(
+            `  SALTADO   ${c.full_name ?? "(sin nombre)"} — ${plan?.motivo ?? "sin plan"}`,
+          );
+          continue;
+        }
+        const ts = new Date().toISOString();
+        const { error: updErr } = await sb
+          .from("contacts")
+          .update({
+            phone: nuevo,
+            missing_phone: false,
+            last_modified_at: ts,
+            last_modified_source: "platform",
+          })
+          .eq("id", c.id)
+          .eq("organization_id", org.id)
+          .eq("phone", c.phone);
+        if (updErr) throw updErr;
+        try {
+          await recordAuditEvent({
+            actorUserId: null,
+            eventType: "contact_phone_country_prefix_fixed",
+            entityType: "contact",
+            entityId: c.id,
+            payload: { from: c.phone, to: nuevo, country: pais, before_merge: true },
+          });
+        } catch {
+          // best-effort: la corrección ya quedó.
+        }
+        const r = await mergeDuplicateLeadIntoClient(plan.clienteId, {
+          dryRun: false,
+          trigger: "corrective_script",
+        });
+        if (r.status === "merged") {
+          fusionados += 1;
+          console.log(`  FUSIONADO ${c.full_name ?? "(sin nombre)"}`);
+        } else {
+          saltados += 1;
+          console.log(
+            `  RENUMERADO pero NO fusionado: ${c.full_name ?? "(sin nombre)"} — ${r.reason}.` +
+              `  Quedan dos fichas con el mismo teléfono: corre` +
+              ` maintenance:merge-duplicate-leads.`,
+          );
+        }
+      }
+    },
+    { source: "worker" },
+  );
+  console.log(`
+Colisiones: ${fusionados} fusionadas, ${saltados} sin tocar.`);
 }
 
 main().catch((e) => {
