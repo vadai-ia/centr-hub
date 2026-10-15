@@ -77,6 +77,16 @@ describe("las decisiones que hacen que el número signifique algo", () => {
     expect(puro).toContain("if (m.sentByAi) continue;");
   });
 
+  it("un message.sent SIN autoría no se guarda", () => {
+    // Capturado en producción: Whaapy emite `message.sent` DOS veces con el
+    // MISMO message_id — el payload completo y una actualización de estado
+    // sin `sent_by_ai`. El índice único deduplica y gana el primero; si
+    // ganara el de estado, el mensaje quedaría como HUMANO por defecto y un
+    // mensaje del bot contaría como respuesta del asesor.
+    expect(worker).toContain("status_update_without_authorship");
+    expect(worker).toMatch(/data.sent_by_ai === null || data.sent_by_ai === undefined/);
+  });
+
   it("el asesor se CONGELA al ingestar, no se resuelve al consultar", () => {
     // La asignación del contacto cambia de dueño; resolverla por join al
     // leer reportaría las respuestas de ayer a cargo del asesor de hoy.

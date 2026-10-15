@@ -142,6 +142,20 @@ export const whaapyMessageSent = inngest.createFunction(
     return runWhaapyWebhookWorker(envelope, "message.sent", async (env) => {
       const parsed = WhaapyMessageSentPayloadSchema.parse(env.payload);
       const data = parsed.data;
+
+      // Whaapy emite `message.sent` DOS veces por mensaje con el MISMO
+      // message_id: el payload completo y, un segundo después, una
+      // actualización de estado que NO trae `sent_by_ai`. El índice único
+      // deduplica y gana el que llegue primero — y el orden entre dos
+      // requests HTTP con sus workers en paralelo no está garantizado.
+      //
+      // Si ganara el de estado, el mensaje se guardaría como HUMANO por
+      // defecto. Un mensaje del bot contando como respuesta del asesor es
+      // exactamente lo que esta métrica existe para evitar: daría respuesta
+      // instantánea a todo el mundo. Sin autoría no se guarda.
+      if (data.sent_by_ai === null || data.sent_by_ai === undefined) {
+        return { skipped: true, reason: "status_update_without_authorship" };
+      }
       const sentByAi = data.sent_by_ai === true;
 
       // El contacto solo se busca para los mensajes HUMANOS: es la única vía

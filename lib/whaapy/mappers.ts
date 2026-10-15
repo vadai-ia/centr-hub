@@ -188,7 +188,13 @@ export const WhaapyMessageSentPayloadSchema = z
         contact_name: z.string().nullish(),
         type: z.string().nullish(),
         // Sin esto la métrica es ruido: el bot responde en segundos.
+        // AUSENTE en la segunda emisión del evento (ver `status`).
         sent_by_ai: z.boolean().nullish(),
+        // Whaapy emite `message.sent` DOS veces por mensaje con el MISMO
+        // message_id: primero el payload completo y después una
+        // actualización de estado (`status: "sent"`) que NO trae `to`,
+        // `content` ni `sent_by_ai`. Capturado en producción.
+        status: z.string().nullish(),
         timestamp: z.string().nullish(),
       })
       .passthrough(),
