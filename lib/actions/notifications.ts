@@ -44,6 +44,7 @@ export async function loadMyNotificationsAction(): Promise<MyNotificationsResult
         createdAt: n.created_at,
         opportunityId: n.opportunity_id,
         contactId: n.contact_id,
+        originReference: n.origin_reference ?? null,
         status: n.status,
       }))
       .sort((a, b) => (a.createdAt > b.createdAt ? -1 : 1));

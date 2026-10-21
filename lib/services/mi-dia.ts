@@ -27,6 +27,7 @@ import type {
   NotificationOrigin,
   TaskRow,
   UUID,
+  Json,
 } from "@/lib/types/database";
 
 /**
@@ -81,6 +82,11 @@ export interface MiDiaBellItem {
   createdAt: string;
   opportunityId: UUID | null;
   contactId: UUID | null;
+  /**
+   * Referencia de origen tal cual. La necesita `notificationTarget` para
+   * los recordatorios de tarea, cuyo id viaja aquí y no en una columna.
+   */
+  originReference: Json | null;
   status: string;
 }
 
@@ -243,6 +249,7 @@ export async function loadMiDiaForUser(input: {
       createdAt: n.created_at,
       opportunityId: n.opportunity_id,
       contactId: n.contact_id,
+      originReference: n.origin_reference ?? null,
       status: n.status,
     }))
     .sort((a, b) => (a.createdAt > b.createdAt ? -1 : 1));

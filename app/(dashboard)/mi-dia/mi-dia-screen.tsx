@@ -7,6 +7,7 @@ import { toggleTaskCompletedAction, createTaskForOpportunityAction } from "@/lib
 import { MiDiaHeader } from "./mi-dia-header";
 import { MiDiaCardItem } from "./mi-dia-card";
 import { MiDiaSidebar } from "./mi-dia-sidebar";
+import { MiDiaNotifications } from "./mi-dia-notifications";
 import { useMiDiaRealtime } from "./use-mi-dia-realtime";
 import { MiDiaUnassigned } from "./mi-dia-unassigned";
 import { MiDiaAdminTeam } from "./mi-dia-admin-team";
@@ -266,7 +267,10 @@ export function MiDiaScreen({
           )}
         </main>
 
-        <aside className="min-w-0">
+        <aside className="min-w-0 space-y-4">
+          {/* Arriba del resto del lateral a propósito: es lo único de esta
+              columna que pide una acción hoy. */}
+          <MiDiaNotifications items={data.bell} onChange={refresh} />
           <MiDiaSidebar
             silentClients={data.silentClients}
             week={data.week}

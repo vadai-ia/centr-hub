@@ -1,4 +1,5 @@
 "use client";
+import { notificationTarget } from "@/lib/services/notification-target";
 import type { MiDiaBellItem } from "@/lib/services/mi-dia";
 
 /**
@@ -21,7 +22,9 @@ export function NotificationToasts({
 }: {
   items: MiDiaBellItem[];
   onClose: (id: string) => void;
-  onView: (opportunityId: string) => void;
+  /** Abre el aviso. Recibe el aviso entero: el destino lo decide
+   *  `notificationTarget`, no quien lo pinta. */
+  onView: (item: MiDiaBellItem) => void;
 }) {
   if (items.length === 0) return null;
 
@@ -63,13 +66,13 @@ export function NotificationToasts({
               <p className="mt-0.5 line-clamp-3 text-xs text-gray-600 dark:text-gray-400">
                 {it.message}
               </p>
-              {it.opportunityId && (
+              {notificationTarget(it) && (
                 <button
                   type="button"
-                  onClick={() => onView(it.opportunityId!)}
+                  onClick={() => onView(it)}
                   className="mt-1.5 text-xs font-medium text-indigo-600 hover:text-indigo-700 dark:text-indigo-400"
                 >
-                  Ver oportunidad
+                  {notificationTarget(it)!.label} →
                 </button>
               )}
             </div>

@@ -5,7 +5,9 @@ import {
   recordStageChange,
 } from "@/lib/db/opportunities";
 import { getStageById } from "@/lib/db/pipeline";
-import { recordAuditEvent } from "@/lib/db/operational";
+import { recordAuditEvent,
+  closeRuleAlertsForOpportunity,
+} from "@/lib/db/operational";
 import { getTenantScopedClient } from "@/lib/db/client";
 import { dispatchPostventaPushForMove } from "@/lib/whaapy-postventa/dispatch";
 import type {
@@ -265,6 +267,17 @@ export async function moveOpportunityStage(
     opportunityId: updated.id,
     targetStage,
   });
+
+  // La tarjeta se movió: los avisos del motor que decían que estaba parada
+  // ya no son ciertos. Apagarlos en el acto —y no esperar al barrido de la
+  // hora— es la diferencia entre una campanita que informa y una que miente.
+  // Best-effort: un aviso que no se apagó no puede tumbar el movimiento, que
+  // ya está persistido.
+  try {
+    await closeRuleAlertsForOpportunity(updated.id);
+  } catch {
+    // El barrido horario lo recoge.
+  }
 
   return { ok: true, opportunity: updated };
 }

@@ -3,7 +3,9 @@ import { getInngestClient } from "@/lib/inngest/client";
 import { withTenantContext } from "@/lib/tenant/context";
 import { listAllOrganizationIds } from "@/lib/db/organizations";
 import { tickHourly } from "@/lib/services/rules-engine";
-import { recordAuditEvent } from "@/lib/db/operational";
+import { recordAuditEvent,
+  closeObsoleteRuleAlerts,
+} from "@/lib/db/operational";
 
 /**
  * Cron horario del motor de reglas (M1v2 — Bloque A2).
@@ -33,12 +35,22 @@ export const ruleEvaluationCron = inngest.createFunction(
     let actionsTotal = 0;
     let reactivatedTotal = 0;
     let disabledTotal = 0;
+    let alertasCerradas = 0;
 
     for (const orgId of orgIds) {
       try {
         const summary = await withTenantContext(orgId, () => tickHourly(), {
           source: "worker",
         });
+        // Red de seguridad del cierre inmediato de `moveOpportunityStage`:
+        // recoge lo que no pasa por un movimiento (canceladas, resueltas) y
+        // los cierres que fallaron. Un aviso que sobrevive a su causa es lo
+        // que enseña a la gente a ignorar la campanita.
+        alertasCerradas += await withTenantContext(
+          orgId,
+          () => closeObsoleteRuleAlerts(),
+          { source: "worker" },
+        );
         actionsTotal += summary.actionsApplied;
         reactivatedTotal += summary.reactivatedTasks + summary.reactivatedNotifications;
         disabledTotal += summary.rulesDisabled;
@@ -80,6 +92,7 @@ export const ruleEvaluationCron = inngest.createFunction(
       actionsTotal,
       reactivatedTotal,
       disabledTotal,
+      alertasCerradas,
     };
   },
 );

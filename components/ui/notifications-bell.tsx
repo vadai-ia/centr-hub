@@ -9,6 +9,7 @@ import {
   NOTIFICATION_TOAST_MS,
 } from "@/lib/constants";
 import { NotificationToasts } from "./notification-toasts";
+import { notificationTarget } from "@/lib/services/notification-target";
 import type { MiDiaBellItem } from "@/lib/services/mi-dia";
 
 /**
@@ -105,10 +106,18 @@ export function NotificationsBell() {
     return () => window.clearTimeout(timer);
   }, [toasts]);
 
-  function verOportunidad(oppId: string) {
+  /**
+   * Abrir el aviso lleva a lo que anuncia. El destino lo decide
+   * `notificationTarget`, compartido con los emergentes y con el panel de
+   * Mi Día: si cada sitio lo resolviera por su cuenta, el mismo aviso
+   * llevaría a sitios distintos según dónde se tocara.
+   */
+  function abrir(item: MiDiaBellItem) {
+    const destino = notificationTarget(item);
+    if (!destino) return;
     setOpen(false);
     setToasts([]);
-    router.push(`/pipeline?opp=${oppId}`);
+    router.push(destino.href);
   }
 
   const count = items.length;
@@ -122,7 +131,7 @@ export function NotificationsBell() {
       <NotificationToasts
         items={toasts}
         onClose={(id) => setToasts((prev) => prev.filter((t) => t.id !== id))}
-        onView={verOportunidad}
+        onView={abrir}
       />
       <button
         type="button"
@@ -172,43 +181,65 @@ export function NotificationsBell() {
                   Sin avisos.
                 </p>
               ) : (
-                items.map((it) => (
-                  <div
-                    key={it.id}
-                    className={[
-                      "flex gap-2.5 border-b border-gray-50 px-4 py-3 last:border-0 dark:border-gray-700/50",
-                      it.isAlert
-                        ? "border-l-[3px] border-l-rose-400 bg-rose-50/30 dark:bg-rose-950/10"
-                        : "",
-                    ].join(" ")}
-                  >
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm font-medium text-gray-800 dark:text-gray-100">
-                        {it.title}
-                      </p>
-                      <p className="mt-0.5 line-clamp-2 text-xs text-gray-500 dark:text-gray-400">
-                        {it.message}
-                      </p>
-                      {it.opportunityId && (
-                        <button
-                          type="button"
-                          onClick={() => verOportunidad(it.opportunityId!)}
-                          className="mt-1 text-xs font-medium text-indigo-600 hover:text-indigo-700 dark:text-indigo-400"
-                        >
-                          Ver oportunidad
-                        </button>
-                      )}
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => dismiss(it.id)}
-                      aria-label="Descartar"
-                      className="h-5 shrink-0 text-gray-300 hover:text-gray-500"
+                items.map((it) => {
+                  const destino = notificationTarget(it);
+                  return (
+                    <div
+                      key={it.id}
+                      // La FILA entera abre el aviso: un enlace pequeño al pie
+                      // obliga a apuntar, y el gesto natural es tocar el aviso.
+                      onClick={destino ? () => abrir(it) : undefined}
+                      role={destino ? "button" : undefined}
+                      tabIndex={destino ? 0 : undefined}
+                      onKeyDown={
+                        destino
+                          ? (e) => {
+                              if (e.key === "Enter" || e.key === " ") {
+                                e.preventDefault();
+                                abrir(it);
+                              }
+                            }
+                          : undefined
+                      }
+                      className={[
+                        "flex gap-2.5 border-b border-gray-50 px-4 py-3 last:border-0 dark:border-gray-700/50",
+                        destino
+                          ? "cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/40"
+                          : "",
+                        it.isAlert
+                          ? "border-l-[3px] border-l-rose-400 bg-rose-50/30 dark:bg-rose-950/10"
+                          : "",
+                      ].join(" ")}
                     >
-                      ✕
-                    </button>
-                  </div>
-                ))
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium text-gray-800 dark:text-gray-100">
+                          {it.title}
+                        </p>
+                        <p className="mt-0.5 line-clamp-2 text-xs text-gray-500 dark:text-gray-400">
+                          {it.message}
+                        </p>
+                        {destino && (
+                          <span className="mt-1 inline-block text-xs font-medium text-indigo-600 dark:text-indigo-400">
+                            {destino.label} →
+                          </span>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        // Descartar NO debe abrir el aviso: el clic de la ✕
+                        // viaja hacia arriba hasta la fila si no se detiene.
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          dismiss(it.id);
+                        }}
+                        aria-label="Descartar"
+                        className="h-5 shrink-0 text-gray-300 hover:text-gray-500"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  );
+                })
               )}
             </div>
           </div>

@@ -443,3 +443,114 @@ export async function listAuditEvents(opts: {
   if (error) throw error;
   return data ?? [];
 }
+
+/**
+ * Cierra los avisos del motor de reglas sobre una oportunidad que YA se
+ * movió.
+ *
+ * Por qué existe: "Oportunidad estancada 72h" se creaba y no se apagaba
+ * nunca. Medido en producción: de 751 alertas pendientes, 409 hablaban de
+ * oportunidades ya ganadas, perdidas, canceladas o que simplemente habían
+ * avanzado. Un aviso que sigue puesto cuando el problema se resolvió entrena
+ * a la gente a ignorar la campanita — y ahí viven los recordatorios de
+ * tareas, que sí hay que atender.
+ *
+ * Solo toca avisos de origen `rule`: un aviso puesto a mano o por el sistema
+ * no se apaga porque la tarjeta se mueva.
+ */
+export async function closeRuleAlertsForOpportunity(
+  opportunityId: UUID,
+): Promise<number> {
+  const { supabase, organizationId } = getTenantScopedClient();
+  const { data, error } = await supabase
+    .from("notifications")
+    .update({ status: "completed", completed_at: new Date().toISOString() })
+    .eq("organization_id", organizationId)
+    .eq("opportunity_id", opportunityId)
+    .eq("origin", "rule")
+    .eq("status", "pending")
+    .select("id");
+  if (error) throw error;
+  return (data ?? []).length;
+}
+
+/**
+ * Barrido: apaga los avisos del motor cuyo asunto ya se resolvió.
+ *
+ * Red de seguridad del cierre inmediato de `moveOpportunityStage`. Cubre lo
+ * que no pasa por un movimiento de etapa: una oportunidad cancelada, un caso
+ * resuelto, o un movimiento cuyo cierre falló. Sin esto el aviso se queda
+ * puesto para siempre.
+ *
+ * Cierra el aviso cuando su oportunidad está cancelada, en etapa
+ * ganada/perdida, o se movió DESPUÉS de que el aviso se creó.
+ */
+export async function closeObsoleteRuleAlerts(): Promise<number> {
+  const { supabase, organizationId } = getTenantScopedClient();
+  const { data: avisos, error } = await supabase
+    .from("notifications")
+    .select("id, opportunity_id, created_at")
+    .eq("organization_id", organizationId)
+    .eq("origin", "rule")
+    .eq("status", "pending")
+    .not("opportunity_id", "is", null);
+  if (error) throw error;
+  const filas = (avisos ?? []) as Array<{
+    id: UUID; opportunity_id: UUID; created_at: string;
+  }>;
+  if (filas.length === 0) return 0;
+
+  const { data: stages } = await supabase
+    .from("pipeline_stages")
+    .select("id, is_won, is_lost")
+    .eq("organization_id", organizationId);
+  const terminal = new Set(
+    ((stages ?? []) as Array<{ id: UUID; is_won: boolean; is_lost: boolean }>)
+      .filter((s) => s.is_won || s.is_lost)
+      .map((s) => s.id),
+  );
+
+  const ids = Array.from(new Set(filas.map((f) => f.opportunity_id)));
+  const estado = new Map<UUID, { stage_id: UUID; updated_at: string; cancelled_at: string | null }>();
+  const CHUNK = 300;
+  for (let i = 0; i < ids.length; i += CHUNK) {
+    const { data } = await supabase
+      .from("opportunities")
+      .select("id, stage_id, updated_at, cancelled_at")
+      .eq("organization_id", organizationId)
+      .in("id", ids.slice(i, i + CHUNK));
+    for (const o of (data ?? []) as Array<{
+      id: UUID; stage_id: UUID; updated_at: string; cancelled_at: string | null;
+    }>) {
+      estado.set(o.id, o);
+    }
+  }
+
+  const obsoletos = filas
+    .filter((f) => {
+      const o = estado.get(f.opportunity_id);
+      // La oportunidad ya no existe: el aviso tampoco tiene sentido.
+      if (!o) return true;
+      if (o.cancelled_at) return true;
+      if (terminal.has(o.stage_id)) return true;
+      return o.updated_at > f.created_at;
+    })
+    .map((f) => f.id);
+  if (obsoletos.length === 0) return 0;
+
+  let cerrados = 0;
+  const LOTE = 200;
+  for (let i = 0; i < obsoletos.length; i += LOTE) {
+    const { data, error: updErr } = await supabase
+      .from("notifications")
+      .update({ status: "completed", completed_at: new Date().toISOString() })
+      .in("id", obsoletos.slice(i, i + LOTE))
+      // Re-filtra: si alguien lo atendió entre la lectura y la escritura, su
+      // acción manda.
+      .eq("status", "pending")
+      .select("id");
+    if (updErr) throw updErr;
+    cerrados += (data ?? []).length;
+  }
+  return cerrados;
+}

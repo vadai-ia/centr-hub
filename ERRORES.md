@@ -844,3 +844,11 @@ Toda entrada NUEVA sigue este mismo formato condensado — **solo la lección ac
 ### Suscribir un webhook a eventos que se ignoran a propósito dispara alertas de "evento no soportado"
 - **Causa raíz:** el endpoint de Whaapy avisa al admin cuando un topic no está en el mapa, partiendo de que Whaapy agregó algo nuevo que hay que revisar. Al suscribir `message.*` para medir el tiempo de respuesta llegaron también `message.delivered` / `read` / `failed`, que no se procesan: 112 avisos por algo que nadie tiene que atender.
 - **Regla:** los topics ignorados A PROPÓSITO van en `WHAAPY_IGNORED_TOPICS` y salen con `exit_reason: "ignored_topic"` SIN notificar. La lista es de ignorados explícitos, no un silenciador: un topic desconocido sigue avisando.
+
+### Un aviso que no se apaga cuando su causa se resuelve enseña a ignorar la campanita
+- **Causa raíz:** el motor de reglas creaba "Oportunidad estancada 72h" y nada lo cerraba. Medido en producción: de 751 alertas pendientes, 409 hablaban de oportunidades ya ganadas, perdidas, canceladas o que simplemente habían avanzado.
+- **Regla:** todo aviso automático necesita su camino de APAGADO, y por dos vías: inmediato en la acción que resuelve la causa (`closeRuleAlertsForOpportunity` dentro de `moveOpportunityStage`) y un barrido periódico como red de seguridad (`closeObsoleteRuleAlerts` en el cron horario) para lo que no pasa por esa acción — canceladas, resueltas, cierres fallidos. Mismo patrón que los recordatorios de tareas.
+
+### Un aviso que no se puede abrir obliga a buscar a mano lo que anuncia
+- **Causa raíz:** la campanita solo ofrecía "Ver oportunidad", y como enlace pequeño al pie. Los avisos ligados solo a un contacto, y los recordatorios de tarea (cuyo id viaja en `origin_reference`, no en una columna), no llevaban a ninguna parte.
+- **Regla:** el destino lo decide `notificationTarget` (módulo PURO) y lo consumen los TRES sitios que pintan avisos — campanita, emergentes y el panel de Mi Día. Resolver la ruta en cada componente es el camino por el que el mismo aviso acaba llevando a sitios distintos. En una fila clicable, el botón de descartar necesita `stopPropagation`: si no, la ✕ abre lo que acaba de cerrar. Guard: `tests/notification-target.test.ts`.
