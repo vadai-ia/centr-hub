@@ -1,5 +1,7 @@
 "use client";
-import { useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
+import { filterCardsByName } from "@/lib/services/card-search";
+import { MiDiaSearch } from "./mi-dia-search";
 import type { MiDiaAdminExtras, MiDiaUnassignedCard } from "@/lib/services/mi-dia-admin";
 import { assignOpportunityAction } from "@/lib/actions/mi-dia-admin";
 
@@ -20,6 +22,8 @@ export function MiDiaUnassigned({
   onAssigned: () => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [q, setQ] = useState("");
+  const visibles = useMemo(() => filterCardsByName(cards, q), [cards, q]);
   if (cards.length === 0) return null;
 
   return (
@@ -35,8 +39,22 @@ export function MiDiaUnassigned({
         </span>
       </button>
       {open && (
-        <div className="mt-3 space-y-2">
-          {cards.map((card) => (
+        <div className="mt-3">
+          <MiDiaSearch
+            value={q}
+            onChange={setQ}
+            resultCount={visibles.length}
+            total={cards.length}
+          />
+          {visibles.length === 0 ? (
+            <p className="py-3 text-center text-xs text-slate-400">
+              Ninguna coincide con esa búsqueda.
+            </p>
+          ) : (
+          /* Alto fijo con scroll propio: con doscientas sin asignar la
+             sección medía varias pantallas y enterraba el resto de Mi Día. */
+          <div className="max-h-[32rem] space-y-2 overflow-y-auto pr-1 centr-scrollbar">
+          {visibles.map((card) => (
             <UnassignedRow
               key={card.opportunityId}
               card={card}
@@ -45,6 +63,8 @@ export function MiDiaUnassigned({
               onAssigned={onAssigned}
             />
           ))}
+          </div>
+          )}
         </div>
       )}
     </section>

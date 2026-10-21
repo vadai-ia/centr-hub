@@ -8,6 +8,8 @@ import { MiDiaHeader } from "./mi-dia-header";
 import { MiDiaCardItem } from "./mi-dia-card";
 import { MiDiaSidebar } from "./mi-dia-sidebar";
 import { MiDiaNotifications } from "./mi-dia-notifications";
+import { MiDiaSearch } from "./mi-dia-search";
+import { filterCardsByName } from "@/lib/services/card-search";
 import { useMiDiaRealtime } from "./use-mi-dia-realtime";
 import { MiDiaUnassigned } from "./mi-dia-unassigned";
 import { MiDiaAdminTeam } from "./mi-dia-admin-team";
@@ -44,6 +46,7 @@ export function MiDiaScreen({
   const [exiting, setExiting] = useState<Set<string>>(new Set());
   const [restOpen, setRestOpen] = useState(false);
   const [restVisible, setRestVisible] = useState(REST_PAGE);
+  const [restQuery, setRestQuery] = useState("");
   const [, startTransition] = useTransition();
 
   const refresh = useCallback(() => {
@@ -125,8 +128,11 @@ export function MiDiaScreen({
   ];
   const top = prioritized.slice(0, 3);
   const rest = prioritized.slice(3);
+  // Filtrado ANTES de paginar: buscar sobre las 5 visibles no encontraría
+  // nada de las 200 de abajo, que es justo para lo que se busca.
+  const restFiltrado = filterCardsByName(rest, restQuery);
   const overdueTotal = data.groups.overdue.length;
-  const restShown = Math.min(restVisible, rest.length);
+  const restShown = Math.min(restVisible, restFiltrado.length);
 
   return (
     <div className="mx-auto max-w-7xl p-4 sm:p-6">
@@ -228,8 +234,20 @@ export function MiDiaScreen({
                     </span>
                   </button>
                   {restOpen && (
-                    <div className="mt-3 space-y-2">
-                      {rest.slice(0, restShown).map((card) => (
+                    <div className="mt-3">
+                      <MiDiaSearch
+                        value={restQuery}
+                        onChange={setRestQuery}
+                        resultCount={restFiltrado.length}
+                        total={rest.length}
+                      />
+                      {restFiltrado.length === 0 ? (
+                        <p className="py-3 text-center text-xs text-slate-400">
+                          Ninguna coincide con esa búsqueda.
+                        </p>
+                      ) : (
+                      <div className="max-h-[32rem] space-y-2 overflow-y-auto pr-1 centr-scrollbar">
+                      {restFiltrado.slice(0, restShown).map((card) => (
                         <MiDiaCardItem
                           key={card.opportunityId}
                           card={card}
@@ -241,13 +259,15 @@ export function MiDiaScreen({
                           onCreateTask={onCreateTask}
                         />
                       ))}
-                      {restShown < rest.length && (
+                      {restShown < restFiltrado.length && (
                         <button
                           onClick={() => setRestVisible((v) => v + REST_PAGE)}
                           className="mt-1 w-full rounded-lg border border-dashed border-slate-200 py-2 text-sm text-slate-500 hover:bg-slate-50 dark:border-slate-700 dark:hover:bg-slate-800"
                         >
-                          Ver más ({rest.length - restShown})
+                          Ver más ({restFiltrado.length - restShown})
                         </button>
+                      )}
+                      </div>
                       )}
                     </div>
                   )}
