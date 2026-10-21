@@ -852,3 +852,11 @@ Toda entrada NUEVA sigue este mismo formato condensado — **solo la lección ac
 ### Un aviso que no se puede abrir obliga a buscar a mano lo que anuncia
 - **Causa raíz:** la campanita solo ofrecía "Ver oportunidad", y como enlace pequeño al pie. Los avisos ligados solo a un contacto, y los recordatorios de tarea (cuyo id viaja en `origin_reference`, no en una columna), no llevaban a ninguna parte.
 - **Regla:** el destino lo decide `notificationTarget` (módulo PURO) y lo consumen los TRES sitios que pintan avisos — campanita, emergentes y el panel de Mi Día. Resolver la ruta en cada componente es el camino por el que el mismo aviso acaba llevando a sitios distintos. En una fila clicable, el botón de descartar necesita `stopPropagation`: si no, la ✕ abre lo que acaba de cerrar. Guard: `tests/notification-target.test.ts`.
+
+### Un volcado de Postgres en un aviso solo enseña a cerrar avisos
+- **Causa raíz:** el DLQ pintaba el error crudo: `{"code":"23505","details":"Key (organization_id, whaapy_contact_id)=… already exists"}` + `Revisar logs Inngest`. Quien lee el aviso NO es quien lo arregla: no le dice qué dejó de pasar, ni si tiene que hacer algo, ni a quién avisar.
+- **Regla:** lo que se PINTA pasa por `describeSystemFailure` (módulo PURO) — qué dejó de pasar, si hay algo que hacer y quién, sin códigos ni nombres de tabla/función. El detalle técnico sigue ENTERO en `origin_reference` y en `audit_log`, que es donde se diagnostica. Al agregar un fallo nuevo que notifique, traducirlo ahí. Guard: `tests/failure-message.test.ts`.
+
+### Un filtro que esconde pendientes por viejos pierde trabajo
+- **Causa raíz:** tentación al acotar una lista larga de avisos: filtrar por defecto a los recientes. Un pendiente es trabajo sin hacer; que la pantalla lo oculte sola es como se pierde una tarea.
+- **Regla:** el default del filtro es "Todos" y, con filtro activo, la cabecera muestra `N de M` — un panel vacío sin esa referencia se lee como "ya no tengo nada pendiente". Una fecha ilegible NO se oculta. "Hoy" es el día civil de quien mira la pantalla, no las últimas 24 h; al probarlo, construir las fechas en hora LOCAL o la prueba pasa o falla según la zona de la máquina.

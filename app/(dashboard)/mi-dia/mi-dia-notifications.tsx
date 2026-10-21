@@ -1,8 +1,14 @@
 "use client";
-import { useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { dismissNotificationAction } from "@/lib/actions/mi-dia";
 import { notificationTarget } from "@/lib/services/notification-target";
+import {
+  filterByAge,
+  NOTIFICATION_AGE_DEFAULT,
+  NOTIFICATION_AGE_OPTIONS,
+  type NotificationAge,
+} from "@/lib/services/notification-filter";
 import type { MiDiaBellItem } from "@/lib/services/mi-dia";
 
 /**
@@ -27,6 +33,8 @@ export function MiDiaNotifications({
 }) {
   const router = useRouter();
   const [, startTransition] = useTransition();
+  const [edad, setEdad] = useState<NotificationAge>(NOTIFICATION_AGE_DEFAULT);
+  const visibles = useMemo(() => filterByAge(items, edad), [items, edad]);
 
   function descartar(id: string) {
     startTransition(async () => {
@@ -41,15 +49,40 @@ export function MiDiaNotifications({
         <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-400">
           Avisos
         </h3>
-        {items.length > 0 && (
-          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-500 dark:bg-slate-700 dark:text-slate-300">
-            {items.length}
-          </span>
-        )}
+        <div className="flex items-center gap-1.5">
+          {items.length > 0 && (
+            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-500 dark:bg-slate-700 dark:text-slate-300">
+              {/* Cuando hay filtro se muestran los dos números: si solo
+                  saliera el filtrado, un panel vacío se leería como "ya no
+                  tengo nada pendiente". */}
+              {edad === "all"
+                ? items.length
+                : `${visibles.length} de ${items.length}`}
+            </span>
+          )}
+          {items.length > 0 && (
+            <select
+              value={edad}
+              onChange={(e) => setEdad(e.target.value as NotificationAge)}
+              aria-label="Filtrar avisos por antigüedad"
+              className="rounded border border-slate-200 bg-white px-1.5 py-0.5 text-[11px] text-slate-600 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300"
+            >
+              {NOTIFICATION_AGE_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          )}
+        </div>
       </div>
 
-      {items.length === 0 ? (
-        <p className="text-xs text-slate-400">Sin avisos pendientes.</p>
+      {visibles.length === 0 ? (
+        <p className="text-xs text-slate-400">
+          {items.length === 0
+            ? "Sin avisos pendientes."
+            : "Ninguno en ese periodo. Cambia el filtro para ver el resto."}
+        </p>
       ) : (
         /*
          * Altura FIJA con scroll propio, como las columnas del pipeline.
@@ -64,7 +97,7 @@ export function MiDiaNotifications({
          * en la cabecera, así que se sabe cuántos quedan más abajo.
          */
         <ul className="max-h-[26rem] space-y-2 overflow-y-auto pr-1 centr-scrollbar">
-          {items.map((it) => {
+          {visibles.map((it) => {
             const destino = notificationTarget(it);
             return (
               <li

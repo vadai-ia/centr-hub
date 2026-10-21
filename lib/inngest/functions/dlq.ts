@@ -3,6 +3,7 @@ import { getInngestClient } from "@/lib/inngest/client";
 import { withTenantContext } from "@/lib/tenant/context";
 import { recordAuditEvent, createNotification } from "@/lib/db/operational";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
+import { describeSystemFailure } from "@/lib/services/failure-message";
 import type { UUID } from "@/lib/types/database";
 
 /**
@@ -100,6 +101,8 @@ export const dlqHandler = inngest.createFunction(
           .eq("organization_id", orgId)
           .eq("role", "admin")
           .eq("is_active", true);
+        const copy = describeSystemFailure({ functionId, errorMessage });
+
         if (admins && admins.length > 0) {
           for (const adm of admins) {
             // ¿Ya tiene abierto el aviso de ESTA función? Entonces no se
@@ -126,8 +129,11 @@ export const dlqHandler = inngest.createFunction(
               },
               opportunity_id: null,
               contact_id: null,
-              title: "Sincronización falló tras reintentos",
-              message: `${functionId} no pudo completar (${errorMessage}). Revisar logs Inngest.`,
+              // Traducido: quien lee el aviso no es quien lo arregla. El
+              // detalle técnico va completo en `origin_reference` y en el
+              // audit, que es donde se diagnostica.
+              title: copy.title,
+              message: copy.message,
               amount_at_stake: null,
               due_at: null,
               status: "pending",
