@@ -466,8 +466,14 @@ async function handleUnhandledEvent(
               origin_reference: { topic, count },
               opportunity_id: null,
               contact_id: null,
-              title: "Webhook Whaapy no soportado recurrente",
-              message: `Whaapy envía topic "${topic}" repetido (${count} veces / ${UNHANDLED_EVENT_WINDOW_HOURS}h). Revisar.`,
+              // En castellano: lo lee el admin de la tienda, no quien lo
+              // arregla. El topic crudo va en `origin_reference`.
+              title: "WhatsApp envía algo que no entendemos",
+              message:
+                `WhatsApp está mandando un tipo de aviso que la plataforma ` +
+                `todavía no sabe procesar (${count} veces en las últimas ` +
+                `${UNHANDLED_EVENT_WINDOW_HOURS} horas). No se pierde ninguna ` +
+                `conversación; avísanos para añadirlo.`,
               amount_at_stake: null,
               due_at: null,
               status: "pending",

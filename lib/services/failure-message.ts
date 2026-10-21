@@ -66,6 +66,20 @@ export function describeSystemFailure(input: SystemFailureInput): SystemFailureC
     };
   }
 
+  // Pedido sin cliente en Shopify. Es una situación REAL del negocio, no una
+  // avería: alguien creó el pedido sin asignarle cliente. Y la resuelve
+  // justamente quien lee el aviso.
+  if (err.includes("sin customer asociado")) {
+    const folio = err.match(/order (\d+)/)?.[1];
+    return {
+      title: "Un pedido no tiene cliente",
+      message:
+        `El pedido ${folio ? `#${folio} ` : ""}de Shopify no tiene un cliente ` +
+        `asignado, así que no se pudo registrar ni atribuir a nadie. Ábrelo en ` +
+        `Shopify y asígnale el cliente: entra solo en cuanto lo tenga.`,
+    };
+  }
+
   // Duplicado: el dato ya existía. No se perdió nada y no hay nada que hacer.
   if (err.includes("23505") || err.includes("duplicate key")) {
     return {

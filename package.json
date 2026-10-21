@@ -42,6 +42,7 @@
     "maintenance:diagnose-users-and-advisors": "tsx --tsconfig scripts/tsconfig.json scripts/maintenance/diagnose-users-and-advisors.ts",
     "maintenance:swap-user-email-domain": "tsx --tsconfig scripts/tsconfig.json scripts/maintenance/swap-user-email-domain.ts",
     "maintenance:inspect-duplicate-contacts": "tsx --tsconfig scripts/tsconfig.json scripts/maintenance/inspect-duplicate-contacts.ts",
+    "maintenance:rewrite-failure-notifications": "tsx --tsconfig scripts/tsconfig.json scripts/maintenance/rewrite-failure-notifications.ts",
     "maintenance:prune-system-notifications": "tsx --tsconfig scripts/tsconfig.json scripts/maintenance/prune-system-notifications.ts",
     "maintenance:export-stage": "tsx --tsconfig scripts/tsconfig.json scripts/maintenance/export-stage.ts",
     "maintenance:assign-unassigned-opps": "tsx --tsconfig scripts/tsconfig.json scripts/maintenance/assign-unassigned-opportunities.ts",

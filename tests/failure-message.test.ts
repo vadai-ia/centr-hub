@@ -37,12 +37,24 @@ const CASOS = [
     errorMessage: "ETIMEDOUT",
   },
   {
+    nombre: "pedido sin cliente en Shopify",
+    functionId: "centr-hub-shopify-orders-updated",
+    errorMessage:
+      "orders_worker: order 7250094129428 sin customer asociado — no se puede atribuir",
+  },
+  {
     nombre: "error desconocido",
     functionId: "centr-hub-venta-delivery-message-push",
     errorMessage: "TypeError: Cannot read properties of undefined (reading 'id')",
   },
 ];
 
+/** Por nombre y no por índice: un índice se rompe al reordenar los casos. */
+const caso = (nombre: string) => {
+  const c = CASOS.find((x) => x.nombre === nombre);
+  if (!c) throw new Error(`falta el caso "${nombre}"`);
+  return c;
+};
 describe("ningún aviso muestra jerga técnica", () => {
   for (const c of CASOS) {
     it(c.nombre, () => {
@@ -74,19 +86,29 @@ describe("ningún aviso muestra jerga técnica", () => {
 
   it("el duplicado dice que no hay nada que hacer", () => {
     // Es el caso más común y el más inofensivo: el dato ya estaba.
-    const { message } = describeSystemFailure(CASOS[0]!);
+    const { message } = describeSystemFailure(caso("duplicado de Postgres"));
     expect(message).toContain("no hay nada que hacer");
   });
 
   it("la credencial ausente dice DÓNDE se arregla", () => {
     // Este sí lo resuelve quien lee, y en un sitio concreto.
-    const { message } = describeSystemFailure(CASOS[1]!);
+    const { message } = describeSystemFailure(caso("credencial ausente"));
     expect(message).toContain("Integraciones");
   });
 
+  it("el pedido sin cliente dice QUÉ hacer y con cuál pedido", () => {
+    // Lo resuelve justamente quien lee el aviso, en Shopify.
+    const { title, message } = describeSystemFailure(caso("pedido sin cliente en Shopify"));
+    expect(title).toContain("pedido");
+    expect(message).toContain("#7250094129428");
+    expect(message).toContain("Shopify");
+    // Pero sin el nombre interno del worker.
+    expect(message).not.toContain("orders_worker");
+  });
+
   it("nombra el sistema en palabras del negocio", () => {
-    expect(describeSystemFailure(CASOS[1]!).title).toContain("WhatsApp");
-    expect(describeSystemFailure(CASOS[2]!).title).toContain("Shopify");
+    expect(describeSystemFailure(caso("credencial ausente")).title).toContain("WhatsApp");
+    expect(describeSystemFailure(caso("sin permiso")).title).toContain("Shopify");
   });
 });
 

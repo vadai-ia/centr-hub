@@ -860,3 +860,7 @@ Toda entrada NUEVA sigue este mismo formato condensado — **solo la lección ac
 ### Un filtro que esconde pendientes por viejos pierde trabajo
 - **Causa raíz:** tentación al acotar una lista larga de avisos: filtrar por defecto a los recientes. Un pendiente es trabajo sin hacer; que la pantalla lo oculte sola es como se pierde una tarea.
 - **Regla:** el default del filtro es "Todos" y, con filtro activo, la cabecera muestra `N de M` — un panel vacío sin esa referencia se lee como "ya no tengo nada pendiente". Una fecha ilegible NO se oculta. "Hoy" es el día civil de quien mira la pantalla, no las últimas 24 h; al probarlo, construir las fechas en hora LOCAL o la prueba pasa o falla según la zona de la máquina.
+
+### Traducir un mensaje solo arregla los avisos FUTUROS
+- **Causa raíz:** el texto del aviso se guarda en la fila de `notifications` al crearla, no se compone al pintarla. Cambiar la traducción deja intactos los cientos de avisos que ya existen — que son justo los que el usuario está viendo.
+- **Regla:** todo cambio de copy de un aviso lleva su correctivo que re-escribe lo ya guardado con la MISMA función (`maintenance:rewrite-failure-notifications`), leyendo el error crudo de `origin_reference`. Es idempotente, así que se puede correr tras cada cambio de traducción.
