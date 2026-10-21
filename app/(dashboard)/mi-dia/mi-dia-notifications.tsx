@@ -51,7 +51,19 @@ export function MiDiaNotifications({
       {items.length === 0 ? (
         <p className="text-xs text-slate-400">Sin avisos pendientes.</p>
       ) : (
-        <ul className="space-y-2">
+        /*
+         * Altura FIJA con scroll propio, como las columnas del pipeline.
+         * Pintarlos todos estiraba la página: con cien avisos pendientes el
+         * lateral medía varias pantallas y el resto de Mi Día quedaba
+         * enterrado debajo.
+         *
+         * Alto fijo y no proporcional a la pantalla porque este panel tiene
+         * hermanos en la misma columna (racha, clientes silenciosos, la
+         * semana): uno que creciera con el viewport los empujaría fuera de
+         * vista, que es el mismo problema por la otra punta. El total sigue
+         * en la cabecera, así que se sabe cuántos quedan más abajo.
+         */
+        <ul className="max-h-[26rem] space-y-2 overflow-y-auto pr-1 centr-scrollbar">
           {items.map((it) => {
             const destino = notificationTarget(it);
             return (
