@@ -6,6 +6,7 @@ import {
   searchShopifyOrderIdsForQuery,
   type LinkedOrderInfo,
 } from "@/lib/db/orders";
+import { fetchAllPaged, type RangeableQuery } from "@/lib/db/paginate";
 import { PIPELINE_FLOOR_AUTOMATED_SOURCES } from "@/lib/constants";
 import { channelOutboundValue, type Channel } from "@/lib/types/dashboard";
 import type {
@@ -1397,4 +1398,52 @@ export async function listStageHistory(
     .order("changed_at", { ascending: true });
   if (error) throw error;
   return data ?? [];
+}
+
+/**
+ * Cuándo entró cada oportunidad a la etapa en la que está HOY.
+ *
+ * Es lo que convierte una lista exportada en algo accionable: en una columna
+ * como "Cold" la pregunta no es cuándo nació la tarjeta sino cuánto lleva
+ * parada ahí. Se resuelve en lote y en chunks — una consulta por tarjeta
+ * sobre un funnel entero son cientos de viajes a la base.
+ *
+ * Devuelve el instante MÁS RECIENTE en que entró a su etapa actual: una
+ * tarjeta que salió y volvió lleva parada desde que volvió, no desde la
+ * primera vez.
+ */
+export async function listCurrentStageEntryAt(
+  opportunities: Array<{ id: UUID; stage_id: UUID }>,
+): Promise<Map<UUID, string>> {
+  const out = new Map<UUID, string>();
+  if (opportunities.length === 0) return out;
+  const { supabase, organizationId } = getTenantScopedClient();
+  const stageOf = new Map(opportunities.map((o) => [o.id, o.stage_id]));
+  const ids = opportunities.map((o) => o.id);
+  const CHUNK = 300;
+  for (let i = 0; i < ids.length; i += CHUNK) {
+    const chunk = ids.slice(i, i + CHUNK);
+    const rows = await fetchAllPaged<{
+      opportunity_id: UUID;
+      to_stage_id: UUID;
+      effective_event_at: string | null;
+      changed_at: string;
+    }>(() =>
+      supabase
+        .from("opportunity_stage_history")
+        .select("opportunity_id, to_stage_id, effective_event_at, changed_at")
+        .eq("organization_id", organizationId)
+        .in("opportunity_id", chunk) as unknown as RangeableQuery,
+    );
+    for (const r of rows) {
+      // Solo las entradas a la etapa en la que está AHORA.
+      if (stageOf.get(r.opportunity_id) !== r.to_stage_id) continue;
+      // `effective_event_at` es el eje temporal real (fecha del evento de
+      // Shopify cuando la hay); `changed_at` es cuándo lo registramos.
+      const cuando = r.effective_event_at ?? r.changed_at;
+      const prev = out.get(r.opportunity_id);
+      if (prev === undefined || cuando > prev) out.set(r.opportunity_id, cuando);
+    }
+  }
+  return out;
 }

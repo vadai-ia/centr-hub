@@ -820,3 +820,15 @@ Toda entrada NUEVA sigue este mismo formato condensado — **solo la lección ac
 ### Varias cuentas de Whaapy pueden apuntar al mismo endpoint
 - **Causa raíz:** el endpoint resuelve el tenant por `whaapy_business_id`. En producción llegan eventos de un `businessId` que no corresponde a ninguna organización (una segunda instancia cuyo id nunca se capturó), y se descartan con `organization_not_found` + 200. Es comportamiento correcto, pero al diagnosticar se confunde con "mi webhook no funciona" — y lleva a tocar un webhook que estaba bien.
 - **Regla:** antes de concluir nada sobre el ingreso, agrupar por `businessId` (no solo por `exit_reason`): `npm run whaapy:check-inbound-health -- --org-slug <slug>`. Un `organization_not_found` NO implica que el webhook propio esté mal configurado.
+
+### Excel rechaza nombres de hoja que el admin puede crear sin tocar código
+- **Causa raíz:** el nombre de hoja se limita a 31 caracteres, prohíbe `:  / ? * [ ]` y no admite duplicados. Los nombres de etapa los edita el admin desde M7, así que los tres casos aparecen solos — el Outbound de Centr ya tiene DOS etapas llamadas "Lead Nurturing". exceljs no da un error legible: revienta al escribir el libro y el usuario solo ve que "el botón no hace nada".
+- **Regla:** todo nombre de hoja pasa por `sheetName(nombre, usados)` (`lib/export/pipeline-export.ts`), que recorta, limpia y desambigua contra el set de nombres ya usados — sembrado con la hoja de portada. Guard: `tests/pipeline-export.test.ts`.
+
+### Una exportación que no aplica la visibilidad del tablero alimenta la queja "la data no coincide"
+- **Causa raíz:** el kanban oculta las cerradas por antigüedad (`closedFilterForStage`) y aplica un piso de visibilidad (`minEffectiveIso`). Una exportación que los ignore trae cientos de filas que la pantalla no muestra; una que los aplique deja la hoja "Ganada" VACÍA y se lee como un fallo del archivo.
+- **Regla:** la exportación aplica las MISMAS reglas que el tablero, y además declara en la portada cuántas quedaron fuera por antigüedad (`hiddenClosed`, de `countKanbanOpportunitiesByStage`). Vale para cualquier exportación de una vista: igualar el criterio y decir lo que falta, en el archivo.
+
+### El teléfono exportado a Excel tiene que ser TEXTO
+- **Causa raíz:** Excel interpreta `+5255…` como número, se come el `+` y los ceros a la izquierda. La lista queda inservible justo para lo único que se va a usar: llamar.
+- **Regla:** `numFmt = "@"` en la columna de teléfono en toda exportación.

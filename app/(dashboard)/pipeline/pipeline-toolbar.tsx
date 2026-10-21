@@ -5,6 +5,8 @@ import {
   setUnassignedFilterPreference,
 } from "@/lib/actions/pipeline";
 import { HIDE_CLOSED_DAYS_MAX, HIDE_CLOSED_DAYS_MIN } from "@/lib/constants";
+import { ExportPipelineButton } from "@/components/pipeline/export-pipeline-button";
+import type { ExportPipelineInput } from "@/lib/actions/pipeline-export";
 import type { Funnel } from "@/lib/types/database";
 
 interface Props {
@@ -21,6 +23,8 @@ interface Props {
   /** Vista "Casos resueltos" (solo Post-venta). */
   resolvedView: boolean;
   onResolvedViewToggle: (enabled: boolean) => void;
+  /** Filtros vigentes, para que el Excel coincida con lo que se ve. */
+  exportInput: ExportPipelineInput;
 }
 
 /**
@@ -44,6 +48,7 @@ export function PipelineToolbar({
   onHideClosedDaysChange,
   resolvedView,
   onResolvedViewToggle,
+  exportInput,
 }: Props) {
   const [isPending, startTransition] = useTransition();
   const isAdmin = canSeeAll;
@@ -146,6 +151,8 @@ export function PipelineToolbar({
       )}
 
       <div className="flex-1" />
+
+      <ExportPipelineButton input={exportInput} />
 
       {isAdmin && (
         <label

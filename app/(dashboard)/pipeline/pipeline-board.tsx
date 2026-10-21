@@ -718,6 +718,18 @@ export function PipelineBoard({
         onHideClosedDaysChange={changeHideClosedDays}
         resolvedView={resolvedView}
         onResolvedViewToggle={changeResolvedView}
+        exportInput={{
+          funnel,
+          // Los mismos filtros que pinta el tablero. El servidor vuelve a
+          // aplicar el recorte por rol: esto es para que el archivo
+          // coincida con lo que se ve, no la barrera de permisos.
+          advisorId: filters.advisorId ?? undefined,
+          unassignedOnly: isAdmin && unassignedFilter,
+          query: filters.query.trim().length > 0 ? filters.query.trim() : undefined,
+          channel: filters.channel !== "all" ? filters.channel : undefined,
+          customerSuccessId: filters.customerSuccessId ?? undefined,
+          resolvedScope: resolvedView ? "resolved" : "active",
+        }}
       />
 
       {/* Alta manual de lead en Outbound (solo funnel Outbound, que ya
