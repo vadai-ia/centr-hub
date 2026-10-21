@@ -44,7 +44,10 @@ export function MiDiaScreen({
   const [extras, setExtras] = useState<MiDiaAdminExtras | null>(initialAdminExtras);
   const [view, setView] = useState<"mine" | "team">("mine");
   const [exiting, setExiting] = useState<Set<string>>(new Set());
-  const [restOpen, setRestOpen] = useState(false);
+  // Abierta por defecto: cerrada escondía trabajo pendiente detrás de un
+  // clic. Puede estarlo porque ya no estira la página — tiene alto fijo con
+  // scroll propio y su buscador.
+  const [restOpen, setRestOpen] = useState(true);
   const [restVisible, setRestVisible] = useState(REST_PAGE);
   const [restQuery, setRestQuery] = useState("");
   const [, startTransition] = useTransition();

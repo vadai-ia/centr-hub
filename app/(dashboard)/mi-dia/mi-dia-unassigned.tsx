@@ -21,7 +21,10 @@ export function MiDiaUnassigned({
   onView: (oppId: string) => void;
   onAssigned: () => void;
 }) {
-  const [open, setOpen] = useState(false);
+  // Abierta por defecto: son oportunidades que nadie está trabajando, el
+  // dato más accionable de la pantalla. Puede estarlo porque ya no estira la
+  // página — tiene alto fijo con scroll propio y su buscador.
+  const [open, setOpen] = useState(true);
   const [q, setQ] = useState("");
   const visibles = useMemo(() => filterCardsByName(cards, q), [cards, q]);
   if (cards.length === 0) return null;
