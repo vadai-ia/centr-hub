@@ -17,6 +17,7 @@ import {
 } from "@/lib/db/contacts";
 import { recordAuditEvent } from "@/lib/db/operational";
 import { getOrganizationById } from "@/lib/db/organizations";
+import { hasWhaapyApiKey } from "@/lib/vault";
 import { markOutboundWrite } from "@/lib/services/sync-loop-defense";
 import { PLATFORM_ORIGIN_MARKER } from "@/lib/constants";
 import { getTenantScopedClient } from "@/lib/db/client";
@@ -109,6 +110,26 @@ export const whaapyOutboundContactSync = inngest.createFunction(
             payload: { reason: envelope.reason },
           });
           return { discarded: true, reason: "backfill_in_progress" };
+        }
+
+        // 1.b Organización SIN Whaapy conectado: se salta, no se falla.
+        //
+        // Hay organizaciones que usan Shopify y no Whaapy; "sin configurar"
+        // es una decisión, no una avería. Dejar que reviente aquí mandaba el
+        // evento a reintentos y de ahí a una alerta al admin — por algo que
+        // ningún reintento puede arreglar. En Centr Colombia eso acumuló
+        // cientos de avisos idénticos, y una campanita con cientos de avisos
+        // es una campanita que nadie abre: se lleva por delante los
+        // recordatorios de tareas, que sí hay que atender.
+        if (!(await hasWhaapyApiKey(envelope.organizationId))) {
+          await recordAuditEvent({
+            actorUserId: null,
+            eventType: "whaapy_outbound_skipped_not_connected",
+            entityType: "contact",
+            entityId: envelope.contactId,
+            payload: { reason: envelope.reason },
+          });
+          return { discarded: true, reason: "whaapy_not_connected" };
         }
 
         // 2. Pre-condiciones del snapshot.

@@ -6,6 +6,7 @@ import { getWhaapyWebhookSecret } from "@/lib/vault";
 import {
   getInngestClient,
   WHAAPY_TOPIC_TO_INNGEST,
+  WHAAPY_IGNORED_TOPICS,
   type WhaapyWebhookEnvelope,
 } from "@/lib/inngest/client";
 import { withTenantContext } from "@/lib/tenant/context";
@@ -213,6 +214,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // 7. Topic → evento Inngest. Topic no soportado = audit + 200.
   const inngestEvent = WHAAPY_TOPIC_TO_INNGEST[topic];
   if (!inngestEvent) {
+    // Ignorado A PROPÓSITO (acuses de entrega del webhook de mensajes): no
+    // se avisa al admin. `handleUnhandledEvent` existe para los eventos que
+    // Whaapy agregue y haya que revisar; usarlo aquí llenaría la campanita
+    // de algo que nadie tiene que atender.
+    if (WHAAPY_IGNORED_TOPICS.has(topic)) {
+      await tagExitReason(rawId, "ignored_topic");
+      return new NextResponse("ok", { status: 200 });
+    }
     await handleUnhandledEvent(org.id, topic, deliveryId);
     await tagExitReason(rawId, "unhandled_topic");
     return new NextResponse("ok", { status: 200 });

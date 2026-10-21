@@ -275,6 +275,21 @@ export async function getWhaapyApiKey(organizationId: UUID): Promise<string> {
   return fromVault;
 }
 
+/**
+ * ¿Esta organización tiene Whaapy conectado? NO lanza.
+ *
+ * "Sin configurar" es un estado deliberado, no una falla: hay
+ * organizaciones que usan Shopify y no Whaapy. Quien solo quiere SABER si
+ * puede llamar a Whaapy no debe tener que atrapar una excepción — y menos
+ * dejar que esa excepción viaje hasta la cola de reintentos, donde se
+ * convierte en una alerta al admin por algo que nadie va a arreglar
+ * reintentando.
+ */
+export async function hasWhaapyApiKey(organizationId: UUID): Promise<boolean> {
+  const bag = await readVaultKeys(organizationId);
+  return !!bag.whaapy?.api_key;
+}
+
 export async function storeWhaapyApiKey(
   organizationId: UUID,
   apiKey: string,

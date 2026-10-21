@@ -18,6 +18,14 @@ import type { UUID } from "@/lib/types/database";
  *
  * UI dedicada para gestionar DLQ es V2 — por ahora notificación
  * + audit son suficientes para que el operador tome acción manual.
+ *
+ * **Como máximo UN aviso abierto por función y organización.** El audit
+ * registra SIEMPRE cada fallo —ahí vive la cuenta real—, pero la campanita
+ * recibe uno solo: un error que se repite cada vez que entra un contacto
+ * genera cientos de avisos idénticos, y una campanita con cientos de avisos
+ * es una campanita que nadie abre. Se lleva por delante los recordatorios de
+ * tareas, que sí hay que atender. Mismo criterio que los recordatorios:
+ * insistir no es repetir.
  */
 
 const inngest = getInngestClient();
@@ -94,6 +102,18 @@ export const dlqHandler = inngest.createFunction(
           .eq("is_active", true);
         if (admins && admins.length > 0) {
           for (const adm of admins) {
+            // ¿Ya tiene abierto el aviso de ESTA función? Entonces no se
+            // duplica: el fallo ya está anunciado y sin atender.
+            const { data: abierto } = await supabase
+              .from("notifications")
+              .select("id")
+              .eq("organization_id", orgId)
+              .eq("user_id", (adm as { user_id: UUID }).user_id)
+              .eq("notification_type", "system_failure_dlq")
+              .eq("status", "pending")
+              .eq("origin_reference->>function_id", functionId)
+              .limit(1);
+            if (abierto && abierto.length > 0) continue;
             await createNotification({
               user_id: (adm as { user_id: UUID }).user_id,
               notification_type: "system_failure_dlq",

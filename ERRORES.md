@@ -832,3 +832,15 @@ Toda entrada NUEVA sigue este mismo formato condensado — **solo la lección ac
 ### El teléfono exportado a Excel tiene que ser TEXTO
 - **Causa raíz:** Excel interpreta `+5255…` como número, se come el `+` y los ceros a la izquierda. La lista queda inservible justo para lo único que se va a usar: llamar.
 - **Regla:** `numFmt = "@"` en la columna de teléfono en toda exportación.
+
+### "Sin configurar" no es "falló": una organización sin Whaapy generaba cientos de alertas
+- **Causa raíz:** el worker outbound de Whaapy pedía la credencial y dejaba que `VaultMissingCredentialError` reventara. El evento iba a reintentos y de ahí al DLQ, que alerta al admin — por un estado DELIBERADO (Centr Colombia usa Shopify y no Whaapy). Ningún reintento puede traer una credencial que nadie capturó. Medido: 678 avisos idénticos en dos meses.
+- **Regla:** antes de llamar a un proveedor externo, comprobar si la organización lo tiene conectado con un lector que NO lanza (`hasWhaapyApiKey`) y SALTAR con audit (`whaapy_outbound_skipped_not_connected`). Reservar el throw para fallos recuperables por reintento. Guard: `tests/whaapy-messages-wiring.test.ts`.
+
+### Un aviso por cada ocurrencia del MISMO fallo sepulta la campanita
+- **Causa raíz:** el DLQ creaba una notificación por cada fallo. Un error que se repite con cada contacto que entra produce cientos de avisos idénticos, y la campanita es donde viven los recordatorios de tareas: llenarla de ruido entrena a la gente a no abrirla. Medido: 911 avisos de sistema pendientes, 39 problemas distintos.
+- **Regla:** como máximo UN aviso abierto por (función, organización, persona) — el audit registra SIEMPRE cada ocurrencia, que es donde vive la cuenta real. Mismo criterio que los recordatorios de tareas: insistir no es repetir. Correctivo de lo acumulado: `maintenance:prune-system-notifications`.
+
+### Suscribir un webhook a eventos que se ignoran a propósito dispara alertas de "evento no soportado"
+- **Causa raíz:** el endpoint de Whaapy avisa al admin cuando un topic no está en el mapa, partiendo de que Whaapy agregó algo nuevo que hay que revisar. Al suscribir `message.*` para medir el tiempo de respuesta llegaron también `message.delivered` / `read` / `failed`, que no se procesan: 112 avisos por algo que nadie tiene que atender.
+- **Regla:** los topics ignorados A PROPÓSITO van en `WHAAPY_IGNORED_TOPICS` y salen con `exit_reason: "ignored_topic"` SIN notificar. La lista es de ignorados explícitos, no un silenciador: un topic desconocido sigue avisando.

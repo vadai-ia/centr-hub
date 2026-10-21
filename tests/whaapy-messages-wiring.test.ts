@@ -129,3 +129,72 @@ describe("las decisiones que hacen que el número signifique algo", () => {
     expect(card).toContain("measuringSince");
   });
 });
+
+describe("los acuses de entrega no llenan la campanita", () => {
+  const endpoint = read("app/api/webhooks/whaapy/route.ts");
+  const client = read("lib/inngest/client.ts");
+
+  it("message.delivered / read / failed se ignoran SIN avisar al admin", () => {
+    // Llegan por el mismo webhook que suscribimos para medir el tiempo de
+    // respuesta. Tratarlos como "evento nuevo de Whaapy que hay que revisar"
+    // generaba dos avisos por cada mensaje enviado — medido: 112 avisos.
+    for (const t of ["message.delivered", "message.read", "message.failed"]) {
+      expect(client).toContain(`"${t}"`);
+    }
+    expect(endpoint).toContain("WHAAPY_IGNORED_TOPICS.has(topic)");
+    const bloque = endpoint.slice(
+      endpoint.indexOf("if (WHAAPY_IGNORED_TOPICS.has(topic))"),
+      endpoint.indexOf("await handleUnhandledEvent"),
+    );
+    // El camino de ignorados NO puede pasar por el notificador.
+    expect(bloque).not.toContain("handleUnhandledEvent");
+    expect(bloque).toContain("ignored_topic");
+  });
+
+  it("un topic DESCONOCIDO sigue avisando", () => {
+    // La lista es de ignorados explícitos, no un silenciador general: si
+    // Whaapy agrega un evento nuevo, hay que enterarse.
+    expect(endpoint).toContain("await handleUnhandledEvent(org.id, topic, deliveryId);");
+  });
+});
+
+describe("una organización sin Whaapy no genera alertas", () => {
+  const outbound = read("lib/inngest/functions/whaapy-outbound.ts");
+
+  it("el envío saliente se SALTA en vez de fallar", () => {
+    // "Sin configurar" es una decisión, no una avería: hay organizaciones
+    // que usan Shopify y no Whaapy. Dejar que reviente lo mandaba a
+    // reintentos y de ahí a una alerta por algo que ningún reintento
+    // arregla — medido: 678 avisos idénticos en Centr Colombia.
+    expect(outbound).toContain("hasWhaapyApiKey");
+    expect(outbound).toContain("whaapy_outbound_skipped_not_connected");
+    expect(outbound).toContain('reason: "whaapy_not_connected"');
+  });
+
+  it("el chequeo NO lanza", () => {
+    const vault = read("lib/vault/index.ts");
+    const fn = vault.slice(
+      vault.indexOf("export async function hasWhaapyApiKey"),
+      vault.indexOf("export async function storeWhaapyApiKey"),
+    );
+    expect(fn).not.toContain("throw");
+  });
+});
+
+describe("un mismo fallo no se anuncia dos veces", () => {
+  const dlq = read("lib/inngest/functions/dlq.ts");
+
+  it("como máximo UN aviso abierto por función y organización", () => {
+    // El audit registra SIEMPRE cada fallo; la campanita recibe uno solo.
+    // Cientos de avisos idénticos sepultan los recordatorios de tareas.
+    expect(dlq).toContain('.eq("origin_reference->>function_id", functionId)');
+    expect(dlq).toContain('.eq("status", "pending")');
+    expect(dlq).toContain("if (abierto && abierto.length > 0) continue;");
+  });
+
+  it("el audit se escribe SIEMPRE, antes de decidir si notifica", () => {
+    expect(dlq.indexOf('eventType: "inngest_dlq"')).toBeLessThan(
+      dlq.indexOf("if (abierto && abierto.length > 0) continue;"),
+    );
+  });
+});

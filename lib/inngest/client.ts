@@ -293,5 +293,20 @@ export const WHAAPY_TOPIC_TO_INNGEST: Record<string, string> = {
   "message.sent":            "whaapy/message.sent",
 };
 
+/**
+ * Topics que llegan y se IGNORAN a propósito.
+ *
+ * No son "eventos nuevos que Whaapy agregó y habría que revisar" —que es lo
+ * que el endpoint avisa al admin—, son acuses de entrega del mismo webhook
+ * que suscribimos para medir el tiempo de respuesta. Sin esta lista, cada
+ * mensaje enviado genera dos avisos de "evento no soportado" y la campanita
+ * se llena de algo que no hay que atender.
+ */
+export const WHAAPY_IGNORED_TOPICS = new Set([
+  "message.delivered",
+  "message.read",
+  "message.failed",
+]);
+
 /** Topics que el endpoint público acepta + script de setup registra. */
 export const WHAAPY_SUBSCRIBED_TOPICS = Object.keys(WHAAPY_TOPIC_TO_INNGEST);
