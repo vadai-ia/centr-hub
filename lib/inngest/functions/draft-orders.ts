@@ -28,6 +28,7 @@ import {
 import { absorbInitialStageOpportunities } from "@/lib/services/opportunity-absorption";
 import { fireF1ToF2Trigger } from "@/lib/services/f1-to-f2-trigger";
 import { recordAuditEvent } from "@/lib/db/operational";
+import { DRAFT_CONTACT_REBOUND_EVENT } from "@/lib/constants";
 import type {
   ContactRow,
   Json,
@@ -410,10 +411,51 @@ export const draftOrdersUpdate = inngest.createFunction(
       const tagAssignment = await resolveTagAssignment(normalized);
       const patch = buildOpportunityPatchFromDraftOrder(normalized, effectiveUpdatedAt);
       if (tagAssignment) patch.assigned_advisor_id = tagAssignment;
+
+      // El CLIENTE del borrador puede cambiar en Shopify: el vendedor duplica
+      // una cotización y le pone otra persona. Sin re-apuntar el contacto, la
+      // tarjeta se queda con el cliente ANTERIOR y la cotización aparece a
+      // nombre de quien ya no es — mientras Shopify muestra al correcto.
+      // El contacto se resuelve igual que en el path de creación (lo crea si
+      // todavía no existe); si el payload llega sin customer, no se toca nada:
+      // un borrador sin cliente no es razón para dejar la tarjeta huérfana.
+      const incomingContact = await resolveOrCreateContactForDraftOrder(
+        normalized,
+        effectiveUpdatedAt,
+      );
+      const reboundContact =
+        incomingContact !== null && incomingContact.id !== existing.contact_id
+          ? incomingContact
+          : null;
+      if (reboundContact) patch.contact_id = reboundContact.id;
+
       await updateOpportunity(existing.id, patch);
       await replaceLineItems(existing.id, normalized.lineItems.map(mapLineItemForOpportunity));
+
+      if (reboundContact) {
+        await recordAuditEvent({
+          actorUserId: null,
+          eventType: DRAFT_CONTACT_REBOUND_EVENT,
+          entityType: "opportunity",
+          entityId: existing.id,
+          payload: {
+            shopify_draft_order_id: normalized.shopifyDraftOrderId,
+            previous_contact_id: existing.contact_id,
+            new_contact_id: reboundContact.id,
+            shopify_customer_id: normalized.shopifyCustomerId,
+          },
+        });
+        // La cotización aterriza en una persona que puede traer su propio
+        // "Lead nuevo" abierto: se archiva igual que cuando nace la cotización.
+        await absorbInitialStageOpportunities({
+          contactId: reboundContact.id,
+          absorbingOpportunityId: existing.id,
+          trigger: "draft_order_contact_rebound",
+        });
+      }
+
       await maybeFireF1ToF2(existing.id, normalized, env.eventId);
-      return { opportunityId: existing.id, created: false };
+      return { opportunityId: existing.id, created: false, reboundContact: reboundContact !== null };
     });
   },
 );

@@ -826,6 +826,29 @@ La dirección pidió que en ganado quedara "algo que nos permita medir que era L
 
 `contact_has_paid_order` sigue existiendo pero **ya NO decide el badge**; solo alimenta esta marca.
 
+## Si al borrador le cambian el CLIENTE en Shopify, la tarjeta lo sigue
+
+El vendedor duplica una cotización y le pone otra persona. **Shopify SÍ manda `draft_orders/update` con el cliente nuevo** (verificado en los webhooks crudos: `draft_orders/create` con una persona y, dos minutos después, `update` con otra), pero el worker solo parcheaba montos, nota, dirección y referencia. `buildOpportunityPatchFromDraftOrder` **nunca incluyó `contact_id`**, así que la tarjeta se quedaba con el cliente ANTERIOR mientras Shopify mostraba al correcto — y la misma cotización aparecía a nombre de quien ya no era. Medido en Centr: 4 cotizaciones activas con el cliente equivocado.
+
+**El path de `orders/*` NO tenía el bug** (su patch siempre incluyó `contact_id`): era exclusivo de los borradores.
+
+Al re-apuntar, el worker **absorbe el "Lead nuevo" del contacto que RECIBE la cotización**, igual que cuando la cotización nace: esa persona puede traer su propio lead abierto. El canal (`is_outbound`) NO se re-estampa — es birth-stamp (0040).
+
+**Lo que deliberadamente NO se toca:**
+- **Oportunidades con pedido ligado:** ahí manda la orden, cuyo worker ya re-apunta el contacto; mover la cotización rompería esa cadena.
+- **Cuando el cliente nuevo todavía no existe en el CRM:** crearlo desde el correctivo lo dejaría a medias (sin teléfono ni identidades). Eso es trabajo del webhook de `customers/*`; el script lo reporta y sigue.
+
+**Acoplamiento a vigilar:** el evento `DRAFT_CONTACT_REBOUND_EVENT` vive en [lib/constants](lib/constants/index.ts) y lo emiten los DOS caminos (worker en vivo y correctivo), para que en la bitácora queden indistinguibles. El patch es un `Record<string, unknown>`, así que quitar `contact_id` de ahí es invisible para `tsc` y para la suite mockeada: lo cubre `tests/draft-contact-rebind.test.ts`.
+
+### Paso operativo (NO es código del repo)
+
+Correctivo de las que ya quedaron mal, dry-run primero:
+```
+npm run maintenance:rebind-draft-contacts -- --org-slug centr
+npm run maintenance:rebind-draft-contacts -- --org-slug centr --apply
+```
+Pregunta a Shopify el cliente ACTUAL de cada borrador (read-only, en lotes de 25) y re-apunta solo las que no coinciden. Idempotente: al segundo run ya no hay nada que mover.
+
 ## El pipeline de Outbound nacía sin dueño
 
 Las dos vías de creación —"Meter a Outbound" desde el contacto y "Crear lead en Outbound" desde el formulario— pasaban `advisorId: null` **cableado**. Medido en producción: **85 de 90 oportunidades de Outbound activas sin asesor**. Una tarjeta sin dueño no la trabaja nadie y no se mide contra nadie.

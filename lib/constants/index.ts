@@ -262,6 +262,17 @@ export const ONLINE_ORDER_SOURCE = "web";
  */
 export const ABSORPTION_CANCELLATION_SOURCE = "absorbed_by_advanced_opportunity" as const;
 
+/**
+ * Audit de "al borrador le cambiaron el CLIENTE en Shopify y la tarjeta lo
+ * siguió". El vendedor duplica una cotización y le pone otra persona; sin
+ * re-apuntar el contacto, la tarjeta se queda con el cliente anterior.
+ *
+ * Compartida entre el worker de `draft_orders/update` (en vivo) y el
+ * correctivo `maintenance:rebind-draft-contacts`: los dos caminos tienen que
+ * quedar indistinguibles en la bitácora.
+ */
+export const DRAFT_CONTACT_REBOUND_EVENT = "opportunity_contact_rebound_from_draft" as const;
+
 // ---------------------------------------------------------------------------
 // Presencia de usuarios (0057) — "¿está conectado ahora?" + historial corto
 // ---------------------------------------------------------------------------

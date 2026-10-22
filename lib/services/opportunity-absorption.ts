@@ -81,7 +81,10 @@ export interface AbsorbInput {
     | "corrective_backfill"
     // Fusión de un lead duplicado dentro de su cliente (0054): el "Lead nuevo"
     // del lead pasa a convivir con la cotización del cliente.
-    | "contact_merge";
+    | "contact_merge"
+    // El vendedor le cambió el CLIENTE al borrador en Shopify: la cotización
+    // llega a una persona que ya podía tener su propio "Lead nuevo" abierto.
+    | "draft_order_contact_rebound";
 }
 
 export interface AbsorbResult {
