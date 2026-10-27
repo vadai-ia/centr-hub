@@ -64,9 +64,17 @@ export function TaggedRevenueCard({
                         </span>
                       </div>
                       <div className="mt-0.5 h-2 w-full overflow-hidden rounded-full bg-gray-100 dark:bg-gray-700/60">
+                        {/* Un mes en CERO va sin relleno: el mínimo visual de
+                            las otras barras aquí se lee como "casi nada"
+                            cuando en realidad no se vendió nada. */}
                         <div
                           className="h-full rounded-full bg-violet-500/80 dark:bg-violet-400/70"
-                          style={{ width: `${top > 0 ? Math.max((m.value / top) * 100, 1.5) : 0}%` }}
+                          style={{
+                            width:
+                              m.value > 0 && top > 0
+                                ? `${Math.max((m.value / top) * 100, 1.5)}%`
+                                : "0%",
+                          }}
                         />
                       </div>
                     </li>
