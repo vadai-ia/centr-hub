@@ -151,6 +151,16 @@ function Body({ state, row }: { state: State; row: MetaHistoryRow }) {
                     {r.note}
                   </span>
                 )}
+                {/* Etiqueta destacada (Evento, …): identifica, dentro de la
+                    venta de ESTE vendedor, qué parte vino de esa etiqueta. */}
+                {r.highlightTags.map((t) => (
+                  <span
+                    key={t}
+                    className="ml-1.5 rounded-full bg-violet-100 px-1.5 py-0.5 font-sans text-[10px] font-medium text-violet-700 dark:bg-violet-950/50 dark:text-violet-300"
+                  >
+                    {t}
+                  </span>
+                ))}
               </td>
               <td className="whitespace-nowrap py-2 pr-3 text-slate-500 dark:text-slate-400">
                 {r.paidAt

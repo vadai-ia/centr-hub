@@ -1,7 +1,7 @@
 import { InfoTooltip } from "./info-tooltip";
 import { formatCount } from "@/lib/format/dashboard";
 import { formatAmount } from "@/lib/format/money";
-import type { TaggedRevenueSeries } from "@/lib/types/dashboard";
+import type { AdvisorBreakdownRow, TaggedRevenueSeries } from "@/lib/types/dashboard";
 
 const TOOLTIP =
   "Cuánto se vendió con cada etiqueta de Shopify en el periodo, mes por mes. " +
@@ -21,11 +21,19 @@ const TOOLTIP =
 export function TaggedRevenueCard({
   series,
   currency,
+  breakdown,
 }: {
   series: TaggedRevenueSeries[];
   currency: string;
+  /** Para poner nombre a cada asesor del desglose. null = vista de vendedor,
+   *  que no recibe el desglose de toda la organización. */
+  breakdown?: AdvisorBreakdownRow[] | null;
 }) {
   if (series.length === 0) return null;
+
+  const advisorName = new Map(
+    (breakdown ?? []).map((r) => [r.membershipId, r.name] as const),
+  );
 
   return (
     <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4 shadow-sm">
@@ -80,6 +88,34 @@ export function TaggedRevenueCard({
                     </li>
                   ))}
                 </ul>
+              )}
+
+              {/* Quién la vendió. Lo pidió la dirección para poder
+                  identificarlo vendedor por vendedor; solo aparecen quienes
+                  vendieron algo con la etiqueta. */}
+              {s.byAdvisor.length > 0 && (
+                <>
+                  <p className="mt-3 mb-1 text-[11px] font-medium text-gray-600 dark:text-gray-300">
+                    Quién la vendió
+                  </p>
+                  <ul className="space-y-0.5">
+                    {s.byAdvisor.map((a) => (
+                      <li
+                        key={a.membershipId ?? "sin-asignar"}
+                        className="flex items-baseline justify-between gap-2 text-xs"
+                      >
+                        <span className="truncate text-gray-600 dark:text-gray-300">
+                          {a.membershipId === null
+                            ? "Sin asignar"
+                            : (advisorName.get(a.membershipId) ?? "Vendedor")}
+                        </span>
+                        <span className="shrink-0 tabular-nums font-medium text-gray-800 dark:text-gray-100">
+                          {formatAmount(a.amount, currency)}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </>
               )}
             </div>
           );

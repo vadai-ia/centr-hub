@@ -861,7 +861,9 @@ Tarjeta en el Dashboard de Venta, pegada a "Venta por mes": cuánto se vendió c
 
 **Una etiqueta sin ventas sale en CERO, no desaparece**: el cero dice "este mes no se vendió"; una fila que falta se lee como que la tarjeta está rota.
 
-La decisión es un módulo PURO: [lib/services/tagged-revenue.ts](lib/services/tagged-revenue.ts). Guard: `tests/tagged-revenue.test.ts`.
+**Se identifica vendedor por vendedor, en los DOS lugares donde la dirección lo busca:** la tarjeta del Dashboard abre un renglón por vendedor con su monto (solo quienes vendieron con la etiqueta — una lista de ceros alarga la tarjeta sin decir nada), y en **Admin → Metas → "Ver pedidos"** cada pedido con etiqueta destacada sale marcado con su distintivo. Ahí se contesta "¿cuánto de la meta de Gina fue de Evento?" sin salir de Metas. **Solo se marcan las DESTACADAS**: meter todas llenaría la tabla con las de facturación y proceso.
+
+La decisión es un módulo PURO: [lib/services/tagged-revenue.ts](lib/services/tagged-revenue.ts). Guards: `tests/tagged-revenue.test.ts` y `tests/goal-amount-breakdown.test.ts`.
 
 ### Paso operativo (NO es código del repo)
 

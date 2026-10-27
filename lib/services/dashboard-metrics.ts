@@ -451,6 +451,10 @@ export function computeVentaMetrics(
       label: monthLabel(monthKey),
       value,
     })),
+    byAdvisor: t.byAdvisor.map(({ membershipId, amount }) => ({
+      membershipId: membershipId as UUID | null,
+      amount,
+    })),
   }));
 
   // Pipeline $ EN EL PERIODO (bruto) — opps vivas CREADAS en el periodo

@@ -127,6 +127,55 @@ describe("computeTaggedRevenue", () => {
     ]);
   });
 
+  it("dice QUIÉN la vendió, de mayor a menor", () => {
+    // Lo pidió la dirección: identificar la venta de la etiqueta vendedor
+    // por vendedor, no solo el total.
+    const [evento] = computeTaggedRevenue({
+      entries: [
+        entry({ subtotal: "1000", assigned_advisor_id: "gina" }),
+        entry({ subtotal: "500", assigned_advisor_id: "pepe" }),
+        entry({ subtotal: "2000", assigned_advisor_id: "gina" }),
+        entry({ subtotal: "300", assigned_advisor_id: null }),
+      ],
+      tags: ["Evento"],
+      monthKeys: MESES,
+      monthKeyOf,
+    });
+    expect(evento.byAdvisor).toEqual([
+      { membershipId: "gina", amount: 3000 },
+      { membershipId: "pepe", amount: 500 },
+      { membershipId: null, amount: 300 },
+    ]);
+  });
+
+  it("quien no vendió con la etiqueta no aparece en el desglose", () => {
+    // Una lista con todos los vendedores en cero no dice nada y alarga la
+    // tarjeta: el que no sale es porque no vendió.
+    const [evento] = computeTaggedRevenue({
+      entries: [
+        entry({ subtotal: "1000", assigned_advisor_id: "gina" }),
+        entry({ tags: ["Factura"], subtotal: "9999", assigned_advisor_id: "pepe" }),
+      ],
+      tags: ["Evento"],
+      monthKeys: MESES,
+      monthKeyOf,
+    });
+    expect(evento.byAdvisor).toEqual([{ membershipId: "gina", amount: 1000 }]);
+  });
+
+  it("el desglose por vendedor suma el total", () => {
+    const [evento] = computeTaggedRevenue({
+      entries: [
+        entry({ subtotal: "1000", assigned_advisor_id: "gina" }),
+        entry({ subtotal: "500", assigned_advisor_id: "pepe" }),
+      ],
+      tags: ["Evento"],
+      monthKeys: MESES,
+      monthKeyOf,
+    });
+    expect(evento.byAdvisor.reduce((s, a) => s + a.amount, 0)).toBe(evento.total);
+  });
+
   it("una porción fuera de los meses del periodo suma al total pero no rompe la serie", () => {
     const [evento] = computeTaggedRevenue({
       entries: [entry({ subtotal: "700", paid_at: "2026-01-04T18:00:00.000Z" })],

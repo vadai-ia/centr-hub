@@ -5,6 +5,9 @@ import {
   advancePercentFromTags,
   recognitionSlicesInPeriod,
 } from "@/lib/services/revenue-recognition";
+import { normalizeTag, readHighlightTags } from "@/lib/services/tagged-revenue";
+import { getOrganizationById } from "@/lib/db/organizations";
+import { requireTenantContext } from "@/lib/tenant/context";
 import { resolveMonthPeriod } from "@/lib/time/period";
 
 /**
@@ -30,6 +33,14 @@ export interface AmountBreakdownRow {
   total: number;
   /** "anticipo 50%" / "liquidación 50%" cuando el pedido se reconoce partido. */
   note: string | null;
+  /**
+   * Etiquetas DESTACADAS que trae el pedido (`config.dashboard.highlight_tags`,
+   * p. ej. "Evento"). Sirve para identificar en Metas, vendedor por vendedor,
+   * qué parte de su venta vino de esa etiqueta — que es la pregunta de la
+   * dirección. Solo las destacadas: el resto son etiquetas de facturación y
+   * de proceso que llenarían la tabla de ruido.
+   */
+  highlightTags: string[];
 }
 
 export interface AmountBreakdown {
@@ -47,7 +58,9 @@ export interface AmountBreakdown {
 export function summarizeAmountBreakdown(
   orders: PaidOrderDetailRow[],
   period: { startUtc: string; endUtc: string },
+  highlightTags: readonly string[] = [],
 ): AmountBreakdown {
+  const highlight = highlightTags.map(normalizeTag);
   const totals = { products: 0, discount: 0, subtotal: 0, shipping: 0, total: 0 };
   const rows: AmountBreakdownRow[] = [];
   for (const o of orders) {
@@ -75,6 +88,9 @@ export function summarizeAmountBreakdown(
       shipping: Number(o.shipping_amount),
       total: Number(o.total_amount),
       note,
+      highlightTags: (o.shopify_tags ?? []).filter((t) =>
+        highlight.includes(normalizeTag(t)),
+      ),
     };
     totals.products += row.products;
     totals.discount += row.discount;
@@ -92,9 +108,16 @@ export async function loadGoalAmountBreakdown(
 ): Promise<AmountBreakdown | null> {
   const period = resolveMonthPeriod(monthKey);
   if (!period) return null;
-  const orders = await listPaidOrderDetailsInPeriod(period.startUtc, period.endUtc);
+  // Las etiquetas destacadas de la organización (Evento, …): se marcan en la
+  // tabla para poder identificar, vendedor por vendedor, qué parte de su
+  // venta vino de ahí.
+  const [org, orders] = await Promise.all([
+    getOrganizationById(requireTenantContext().organizationId),
+    listPaidOrderDetailsInPeriod(period.startUtc, period.endUtc),
+  ]);
   return summarizeAmountBreakdown(
     orders.filter((o) => paidOrderInGoalScope(o, scope)),
     period,
+    readHighlightTags(org?.config ?? null),
   );
 }

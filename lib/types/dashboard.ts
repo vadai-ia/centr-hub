@@ -128,6 +128,8 @@ export interface TaggedRevenueSeries {
   /** Porciones de venta con esa etiqueta (un pedido con anticipo aporta dos). */
   count: number;
   byMonth: MonthValue[];
+  /** Quién la vendió, de mayor a menor. null = pedido sin asesor atribuido. */
+  byAdvisor: Array<{ membershipId: UUID | null; amount: number }>;
 }
 
 /** KPIs del Funnel Venta. */

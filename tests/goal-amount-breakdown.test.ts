@@ -88,6 +88,25 @@ describe("desglose de la meta de monto", () => {
     expect(b.totals.subtotal).toBe(500);
   });
 
+  it("marca los pedidos con etiqueta destacada, y solo esos", () => {
+    // Es como la dirección identifica, vendedor por vendedor, qué parte de su
+    // venta vino de la etiqueta. Las de facturación/proceso NO entran: la
+    // tabla se llenaría de ruido.
+    const conEvento = order({
+      shopify_name: "#8",
+      shopify_tags: ["Evento", "FACTURADA", "GinaJiménez"],
+    });
+    const sinEvento = order({ shopify_name: "#9", shopify_tags: ["FACTURADA"] });
+    const b = summarizeAmountBreakdown([conEvento, sinEvento], PERIOD, ["Evento"]);
+    expect(b.rows[0].highlightTags).toEqual(["Evento"]);
+    expect(b.rows[1].highlightTags).toEqual([]);
+  });
+
+  it("sin etiquetas destacadas configuradas no marca nada", () => {
+    const b = summarizeAmountBreakdown([order({ shopify_tags: ["Evento"] })], PERIOD);
+    expect(b.rows[0].highlightTags).toEqual([]);
+  });
+
   it("un pedido cancelado no aparece en el desglose", () => {
     const cancelado = order({ shopify_name: "#7", subtotal: "500", cancelled_at: "2026-09-20T00:00:00.000Z" });
     expect(summarizeAmountBreakdown([cancelado], PERIOD).rows).toEqual([]);

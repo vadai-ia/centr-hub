@@ -22,6 +22,8 @@ import type { Json } from "@/lib/types/database";
 export interface TaggedRevenueEntry {
   /** Etiquetas crudas del pedido en Shopify. */
   tags?: string[];
+  /** Asesor atribuido, para el desglose por vendedor. null = sin asignar. */
+  assigned_advisor_id?: string | null;
   /** Monto RECONOCIDO de la porción (ver revenue-recognition). */
   subtotal: string;
   /** Fecha con la que la porción cae en su mes. */
@@ -36,6 +38,12 @@ export interface TaggedRevenue {
   /** Cuántas porciones de venta la llevan — útil para "1 pedido, $4,165". */
   count: number;
   byMonth: Array<{ monthKey: string; value: number }>;
+  /**
+   * Quién vendió con esa etiqueta, de mayor a menor. Solo quienes vendieron
+   * algo: una lista con todos los vendedores en cero no dice nada y alarga la
+   * tarjeta. `membershipId` null = pedido sin asesor atribuido.
+   */
+  byAdvisor: Array<{ membershipId: string | null; amount: number }>;
 }
 
 /** Mismo criterio que el parser de tags: sin espacios y sin mayúsculas. */
@@ -95,6 +103,7 @@ export function computeTaggedRevenue(input: {
   return tags.map((tag) => {
     const needle = normalizeTag(tag);
     const months = new Map<string, number>(monthKeys.map((k) => [k, 0]));
+    const advisors = new Map<string | null, number>();
     let total = 0;
     let count = 0;
 
@@ -104,6 +113,8 @@ export function computeTaggedRevenue(input: {
       if (!Number.isFinite(amount)) continue;
       total += amount;
       count += 1;
+      const advisor = entry.assigned_advisor_id ?? null;
+      advisors.set(advisor, (advisors.get(advisor) ?? 0) + amount);
       if (!entry.paid_at) continue;
       const key = monthKeyOf(entry.paid_at);
       if (months.has(key)) months.set(key, months.get(key)! + amount);
@@ -114,6 +125,10 @@ export function computeTaggedRevenue(input: {
       total,
       count,
       byMonth: Array.from(months.entries()).map(([monthKey, value]) => ({ monthKey, value })),
+      byAdvisor: Array.from(advisors.entries())
+        .filter(([, amount]) => amount > 0)
+        .map(([membershipId, amount]) => ({ membershipId, amount }))
+        .sort((a, b) => b.amount - a.amount),
     };
   });
 }

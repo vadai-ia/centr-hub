@@ -253,7 +253,7 @@ export function DashboardVenta({
         <RevenueByMonthChart data={m.revenueByMonth} currency={CCY} tooltip={TT.revenueByMonth} />
         {/* Pegada a la venta por mes: es la misma pregunta acotada a una
             etiqueta, y leerlas juntas evita que se interprete como venta extra. */}
-        <TaggedRevenueCard series={m.taggedRevenue} currency={CCY} />
+        <TaggedRevenueCard series={m.taggedRevenue} currency={CCY} breakdown={breakdown} />
         <WonVsLostChart won={m.wonVsLost.won} lost={m.wonVsLost.lost} tooltip={TT.wonVsLost} />
         <LossesByReasonChart data={m.lossesByReason} currency={CCY} tooltip={TT.lossesByReason} />
         <StageWinRateTable m={m} />
