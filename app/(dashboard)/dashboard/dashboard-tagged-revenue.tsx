@@ -35,11 +35,19 @@ export function TaggedRevenueCard({
     (breakdown ?? []).map((r) => [r.membershipId, r.name] as const),
   );
 
+  // El título nombra la etiqueta: "Venta por etiqueta" a secas no dice CUÁL,
+  // y la dirección necesita leerlo de un vistazo. Con muchas etiquetas la
+  // lista haría el título ilegible — ahí cada una ya se nombra en su bloque.
+  const title =
+    series.length <= 3
+      ? `Venta por etiqueta (${series.map((s) => s.tag).join(", ")})`
+      : "Venta por etiqueta";
+
   return (
     <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4 shadow-sm">
       <div className="mb-3 flex items-center gap-1 text-sm font-medium text-gray-700 dark:text-gray-200">
-        Venta por etiqueta
-        <InfoTooltip label="Venta por etiqueta" content={TOOLTIP} />
+        {title}
+        <InfoTooltip label={title} content={TOOLTIP} />
       </div>
 
       <div className="space-y-5">
