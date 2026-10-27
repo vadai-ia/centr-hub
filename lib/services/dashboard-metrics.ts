@@ -25,6 +25,7 @@ import { listRealVendorsForMapping } from "@/lib/db/users";
 import { getOrganizationById } from "@/lib/db/organizations";
 import { readOrganizationCurrency } from "@/lib/services/organization-currency";
 import { readOrganizationTimezone } from "@/lib/services/organization-timezone";
+import { computeTaggedRevenue, readHighlightTags } from "@/lib/services/tagged-revenue";
 import { resolvePipelineSnapshotWindow } from "@/lib/services/dashboard-snapshot-window";
 import { computeLeadFunnel } from "@/lib/services/lead-funnel";
 import { computeLeadTimings } from "@/lib/services/lead-timings";
@@ -205,6 +206,9 @@ async function loadRevenueEntries(period: ResolvedPeriod): Promise<PaidOrderRow[
       subtotal: String(slice.amount),
       paid_at: slice.at,
       source: order.source,
+      // Viajan con la porción para la venta por etiqueta: si un pedido con
+      // anticipo se parte en dos meses, cada mitad lleva sus etiquetas.
+      tags: order.shopify_tags ?? [],
     })),
   );
 }
@@ -249,6 +253,9 @@ export interface VentaRaw {
   /** Zona de la organización para bucketizar por mes. Opcional: sin ella
    *  se usa el default de México, igual que antes del multi-huso. */
   timezone?: string;
+  /** Etiquetas de Shopify que la organización quiere ver desglosadas
+   *  (`config.dashboard.highlight_tags`). Vacío = sin tarjeta. */
+  highlightTags?: string[];
 }
 
 export interface PostventaRaw {
@@ -422,6 +429,29 @@ export function computeVentaMetrics(
       }
     }
   }
+
+  // Venta por ETIQUETA de Shopify (Evento, …). Vista TRANSVERSAL sobre las
+  // MISMAS porciones ya reconocidas, con el mismo scope y canal que el KPI:
+  // no es un canal aparte, así que NO se suma a lo demás — esa venta ya está
+  // contada en Venta cobrada y en la meta de quien la hizo.
+  const scopedEntries = raw.paidOrders.filter(
+    (o) => matchScope(o.assigned_advisor_id, scope) && matchChannel(o.is_outbound, channel),
+  );
+  const taggedRevenue = computeTaggedRevenue({
+    entries: scopedEntries,
+    tags: raw.highlightTags ?? [],
+    monthKeys: Array.from(monthRevenue.keys()),
+    monthKeyOf: (iso) => monthKeyInTz(iso, raw.timezone),
+  }).map((t) => ({
+    tag: t.tag,
+    total: t.total,
+    count: t.count,
+    byMonth: t.byMonth.map(({ monthKey, value }) => ({
+      monthKey,
+      label: monthLabel(monthKey),
+      value,
+    })),
+  }));
 
   // Pipeline $ EN EL PERIODO (bruto) — opps vivas CREADAS en el periodo
   // (responde al filtro de fecha).
@@ -661,6 +691,7 @@ export function computeVentaMetrics(
     salesCycleDays,
     revenueByMonth: monthsToSeries(monthRevenue),
     wonVsLost: { won: wonCount, lost: lostCount },
+    taggedRevenue,
   };
 }
 
@@ -829,12 +860,15 @@ export async function computeDashboardData(input: ComputeDashboardInput): Promis
   // del día 1. Con la de México, una venta de Bogotá a las 00:30 se iría al
   // mes anterior.
   const timezone = readOrganizationTimezone(org?.config ?? null);
+  // Etiquetas que la dirección quiere ver desglosadas (Evento, …). Es
+  // configuración, no código: inventan etiquetas nuevas sin avisar.
+  const highlightTags = readHighlightTags(org?.config ?? null);
 
   const [ventaRawBase, postventaRawBase] = await Promise.all([
     fetchVentaRaw(input.period, snapshotWindow.sinceUtc),
     fetchPostventaRaw(input.period),
   ]);
-  const ventaRaw = { ...ventaRawBase, timezone };
+  const ventaRaw = { ...ventaRawBase, timezone, highlightTags };
   const postventaRaw = { ...postventaRawBase, timezone };
 
   const venta = computeVentaMetrics(ventaRaw, scope, channel);

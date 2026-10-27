@@ -849,6 +849,30 @@ npm run maintenance:rebind-draft-contacts -- --org-slug centr --apply
 ```
 Pregunta a Shopify el cliente ACTUAL de cada borrador (read-only, en lotes de 25) y re-apunta solo las que no coinciden. Idempotente: al segundo run ya no hay nada que mover.
 
+## Venta por etiqueta de Shopify (Evento)
+
+Tarjeta en el Dashboard de Venta, pegada a "Venta por mes": cuánto se vendió con una etiqueta concreta, mes por mes, y el total del periodo. Lo pidió la dirección para la etiqueta **Evento**.
+
+**Es un DESGLOSE transversal, no un canal.** Esa venta YA está contada en "Venta cobrada" y en la meta de quien la hizo — sumarla encima sería contarla dos veces. La tarjeta lo dice en una línea fija al pie, por la misma razón que el embudo: dos números correctos puestos uno sobre otro se leen como que la data no cuadra. **No quitar esa línea.**
+
+**Qué etiquetas se muestran es CONFIGURACIÓN, no código** (`config.dashboard.highlight_tags`): la dirección inventa etiquetas nuevas sin avisar y cada una no puede costar un deploy. Lista vacía = la tarjeta no se renderiza (una tarjeta en ceros para algo que nadie usa es ruido). El lector tolera basura —ignora lo que no sea texto, deduplica sin importar mayúsculas y corta en 6— porque un config mal escrito no debe tumbar el Dashboard entero.
+
+**Se mide con el mismo criterio que todo lo demás**: subtotal, sin cancelados, con el reparto de anticipos (`recognitionSlices`) y respetando el filtro de periodo, de vendedor y de canal. Las etiquetas viajan en la PORCIÓN reconocida, así que un pedido con anticipo aporta a los dos meses. El empate de etiqueta es case-insensitive, igual que el parser de tags.
+
+**Una etiqueta sin ventas sale en CERO, no desaparece**: el cero dice "este mes no se vendió"; una fila que falta se lee como que la tarjeta está rota.
+
+La decisión es un módulo PURO: [lib/services/tagged-revenue.ts](lib/services/tagged-revenue.ts). Guard: `tests/tagged-revenue.test.ts`.
+
+### Paso operativo (NO es código del repo)
+
+Activar o cambiar las etiquetas es un UPDATE, no un deploy:
+```sql
+UPDATE organizations
+SET config = jsonb_set(config, '{dashboard,highlight_tags}', '["Evento"]'::jsonb, true)
+WHERE slug = 'centr';
+```
+En Centr ya está puesta `Evento`. **No requiere migración.**
+
 ## El pipeline de Outbound nacía sin dueño
 
 Las dos vías de creación —"Meter a Outbound" desde el contacto y "Crear lead en Outbound" desde el formulario— pasaban `advisorId: null` **cableado**. Medido en producción: **85 de 90 oportunidades de Outbound activas sin asesor**. Una tarjeta sin dueño no la trabaja nadie y no se mide contra nadie.

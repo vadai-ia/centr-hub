@@ -6,6 +6,7 @@ import { InfoTooltip } from "./info-tooltip";
 import { LeadFunnelCard } from "./dashboard-funnel";
 import { LeadTimingsCard } from "./dashboard-timings";
 import { ResponseTimesCard } from "./dashboard-response-times";
+import { TaggedRevenueCard } from "./dashboard-tagged-revenue";
 import { IconCheck, IconPipeline, IconRevenue, IconTrophy } from "./kpi-icons";
 import {
   LossesByReasonChart,
@@ -250,6 +251,9 @@ export function DashboardVenta({
           measuringSince={messagesSince}
         />
         <RevenueByMonthChart data={m.revenueByMonth} currency={CCY} tooltip={TT.revenueByMonth} />
+        {/* Pegada a la venta por mes: es la misma pregunta acotada a una
+            etiqueta, y leerlas juntas evita que se interprete como venta extra. */}
+        <TaggedRevenueCard series={m.taggedRevenue} currency={CCY} />
         <WonVsLostChart won={m.wonVsLost.won} lost={m.wonVsLost.lost} tooltip={TT.wonVsLost} />
         <LossesByReasonChart data={m.lossesByReason} currency={CCY} tooltip={TT.lossesByReason} />
         <StageWinRateTable m={m} />

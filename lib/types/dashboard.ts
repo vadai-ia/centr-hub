@@ -117,6 +117,19 @@ export interface LossByReason {
   amount: number;
 }
 
+/**
+ * Venta de una ETIQUETA de Shopify en el periodo (Evento, …). Vista
+ * TRANSVERSAL: esa venta YA está contada en "Venta cobrada" y en la meta de
+ * quien la hizo — sumar esta tarjeta con las demás sería contar dos veces.
+ */
+export interface TaggedRevenueSeries {
+  tag: string;
+  total: number;
+  /** Porciones de venta con esa etiqueta (un pedido con anticipo aporta dos). */
+  count: number;
+  byMonth: MonthValue[];
+}
+
 /** KPIs del Funnel Venta. */
 export interface VentaMetrics {
   revenue: number; // 1
@@ -166,6 +179,8 @@ export interface VentaMetrics {
   // Series para gráficas
   revenueByMonth: MonthValue[];
   wonVsLost: { won: number; lost: number };
+  /** Venta por etiqueta destacada (`config.dashboard.highlight_tags`). */
+  taggedRevenue: TaggedRevenueSeries[];
 }
 
 /** KPIs del Funnel Post-venta. */

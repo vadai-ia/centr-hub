@@ -68,6 +68,12 @@ export interface PaidOrderRow {
    *  (cotización de un vendedor) | 'pos' | null. Distingue la venta ORGÁNICA
    *  (0051) — que NO es lo mismo que "sin asesor asignado". */
   source: string | null;
+  /**
+   * Etiquetas del pedido en Shopify, para la venta por etiqueta del Dashboard
+   * (`tagged-revenue`). Opcional: los fixtures y los callers que solo suman
+   * monto no las necesitan.
+   */
+  tags?: string[];
 }
 export interface CreatedOrderRow {
   assigned_advisor_id: UUID | null;
