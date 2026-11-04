@@ -7,6 +7,7 @@ import {
   type MetaGoalView,
   type MetaHistoryRow,
   type MetaMonthOption,
+  type MetaVendorView,
 } from "@/lib/actions/admin-metas";
 import {
   EDITABLE_GOAL_METRICS,
@@ -194,6 +195,7 @@ export function MetasScreen({ initialData }: Props) {
         months={initialData.months}
         currentCloseRates={initialData.currentCloseRates}
         thresholds={thresholds}
+        vendors={initialData.vendors}
       />
 
       {modal && (
@@ -364,7 +366,9 @@ function HistorySection({
   months,
   currentCloseRates,
   thresholds,
+  vendors,
 }: {
+  vendors: MetaVendorView[];
   history: MetaHistoryRow[];
   /** Meses a ofrecer (más reciente primero), aunque no tengan metas: el % de cierre siempre existe. */
   months: MetaMonthOption[];
@@ -431,6 +435,7 @@ function HistorySection({
                 rows={byMonth.get(m.key) ?? []}
                 closeRates={m.key === currentCloseRates.monthKey ? currentCloseRates.rows : null}
                 thresholds={thresholds}
+                vendors={vendors}
               />
             ))}
         </div>
@@ -482,10 +487,13 @@ function MonthHistory({
   rows,
   closeRates,
   thresholds,
+  vendors,
 }: {
   monthKey: string;
   label: string;
   live: boolean;
+  /** Para nombrar a quien vendió sin tener meta. */
+  vendors: MetaVendorView[];
   rows: MetaHistoryRow[];
   /** Ya calculado (mes en curso) o null para pedirlo al abrir. */
   closeRates: MetaCloseRateRows | null;
@@ -493,16 +501,12 @@ function MonthHistory({
 }) {
   // Renglón de monto cuyo desglose de pedidos está abierto.
   const [breakdownRow, setBreakdownRow] = useState<MetaHistoryRow | null>(null);
-  // Solo las métricas con datos en el mes, en el orden canónico.
-  const metrics = EDITABLE_GOAL_METRICS.filter((m) => rows.some((r) => r.metric === m));
-
   // Un mes CERRADO se recalcula de los pedidos en vez de leer la foto
   // congelada del día 1: para entonces hay ventas del mes que todavía no
   // terminaron de pagarse, y el snapshot las deja fuera. Sin esto la barra
   // contradecía a su propio "Ver pedidos", que siempre recalculó.
   const [fresh, setFresh] = useState<Record<string, number> | null>(null);
   useEffect(() => {
-    if (live) return; // el mes en curso ya viene en vivo
     let cancelled = false;
     setFresh(null);
     loadMonthAchievementsAction(monthKey)
@@ -515,7 +519,55 @@ function MonthHistory({
     return () => {
       cancelled = true;
     };
-  }, [live, monthKey]);
+  }, [monthKey]);
+
+  /**
+   * Sujetos que VENDIERON pero no tienen meta (la dirección, un vendedor sin
+   * objetivo capturado). Sin esto no aparecen en ningún lado de esta pantalla
+   * —las filas salen de las metas— y su venta se vuelve invisible aunque sí
+   * sume al equipo. Van sin barra ni porcentaje: no hay objetivo contra el
+   * cual medir, y pintar una barra al 0% sería mentir.
+   */
+  const sinMeta = useMemo<MetaHistoryRow[]>(() => {
+    if (!fresh) return [];
+    const yaTienenFila = new Set(
+      rows
+        .filter((r) => r.metric === "amount")
+        .map((r) => monthAchievementKey(r.subject, r.advisorMembershipId, "amount")),
+    );
+    const out: MetaHistoryRow[] = [];
+    const agregar = (subject: GoalSubject, advisorMembershipId: UUID | null, name: string) => {
+      const key = monthAchievementKey(subject, advisorMembershipId, "amount");
+      if (yaTienenFila.has(key)) return;
+      const achieved = fresh[key] ?? 0;
+      if (achieved <= 0) return;
+      out.push({
+        id: `sin-meta-${key}`,
+        periodMonth: `${monthKey}-01`,
+        monthKey,
+        monthLabel: label,
+        subject,
+        advisorMembershipId,
+        advisorName: name,
+        live,
+        metric: "amount",
+        target: 0,
+        achieved,
+        pct: 0,
+      });
+    };
+    agregar("team", null, "Equipo");
+    agregar("organic", null, "Venta orgánica");
+    for (const v of vendors) agregar("advisor", v.membershipId, v.name);
+    return out;
+  }, [fresh, rows, vendors, monthKey, label, live]);
+
+  // Solo las métricas con datos en el mes, en el orden canónico.
+  // "Monto vendido" se muestra aunque nadie tenga meta ese mes: puede haber
+  // venta que enseñar (la dirección, un vendedor sin objetivo capturado).
+  const metrics = EDITABLE_GOAL_METRICS.filter(
+    (m) => rows.some((r) => r.metric === m) || (m === "amount" && sinMeta.length > 0),
+  );
 
   /** Fila con el logrado de hoy cuando ya llegó el recálculo. */
   const withFreshAchieved = (r: MetaHistoryRow): MetaHistoryRow => {
@@ -545,6 +597,7 @@ function MonthHistory({
           const subjectRows = rows
             .filter((r) => r.metric === m)
             .map(withFreshAchieved)
+            .concat(m === "amount" ? sinMeta : [])
             .sort(sortSubjects);
           return (
             <div key={m}>
@@ -554,14 +607,31 @@ function MonthHistory({
               <div className="grid gap-x-8 gap-y-4 sm:grid-cols-2">
                 {subjectRows.map((r) => (
                   <div key={r.id} className="space-y-1">
-                    <GoalProgressBar
-                      pct={r.pct}
-                      thresholds={thresholds}
-                      title={r.advisorName}
-                      valueLabel={`${formatGoalValue(m, r.achieved)} / ${formatGoalValue(m, r.target)}`}
-                      size="sm"
-                      showStatus={false}
-                    />
+                    {r.target > 0 ? (
+                      <GoalProgressBar
+                        pct={r.pct}
+                        thresholds={thresholds}
+                        title={r.advisorName}
+                        valueLabel={`${formatGoalValue(m, r.achieved)} / ${formatGoalValue(m, r.target)}`}
+                        size="sm"
+                        showStatus={false}
+                      />
+                    ) : (
+                      // Vendió, pero no hay objetivo contra el cual medir.
+                      <div className="space-y-0.5">
+                        <div className="flex items-baseline justify-between gap-2">
+                          <span className="truncate text-sm font-medium text-slate-700 dark:text-slate-200">
+                            {r.advisorName}
+                          </span>
+                          <span className="shrink-0 text-sm font-semibold tabular-nums text-slate-900 dark:text-slate-50">
+                            {formatGoalValue(m, r.achieved)}
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-400 dark:text-slate-500">
+                          Sin meta asignada
+                        </p>
+                      </div>
+                    )}
                     {m === "amount" && (
                       <button
                         type="button"
