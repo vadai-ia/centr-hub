@@ -1,6 +1,8 @@
 "use client";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
+  loadMonthAchievementsAction,
+  monthAchievementKey,
   saveThresholdsAction,
   type AdminMetasData,
   type MetaGoalView,
@@ -15,7 +17,7 @@ import {
   formatGoalValue,
   type GoalMetric,
 } from "@/lib/metas/schema";
-import type { GoalThresholds } from "@/lib/metas/semaphore";
+import { computeGoalPct, type GoalThresholds } from "@/lib/metas/semaphore";
 import type { UUID } from "@/lib/types/database";
 import { GoalProgressBar } from "@/components/metas/goal-progress-bar";
 import { GoalEditModal } from "./goal-edit-modal";
@@ -492,7 +494,36 @@ function MonthHistory({
   // Renglón de monto cuyo desglose de pedidos está abierto.
   const [breakdownRow, setBreakdownRow] = useState<MetaHistoryRow | null>(null);
   // Solo las métricas con datos en el mes, en el orden canónico.
-  const metrics =EDITABLE_GOAL_METRICS.filter((m) => rows.some((r) => r.metric === m));
+  const metrics = EDITABLE_GOAL_METRICS.filter((m) => rows.some((r) => r.metric === m));
+
+  // Un mes CERRADO se recalcula de los pedidos en vez de leer la foto
+  // congelada del día 1: para entonces hay ventas del mes que todavía no
+  // terminaron de pagarse, y el snapshot las deja fuera. Sin esto la barra
+  // contradecía a su propio "Ver pedidos", que siempre recalculó.
+  const [fresh, setFresh] = useState<Record<string, number> | null>(null);
+  useEffect(() => {
+    if (live) return; // el mes en curso ya viene en vivo
+    let cancelled = false;
+    setFresh(null);
+    loadMonthAchievementsAction(monthKey)
+      .then((res) => {
+        if (!cancelled && res.ok) setFresh(res.achieved);
+      })
+      .catch(() => {
+        // Si falla, se queda lo congelado: es preferible a vaciar la barra.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [live, monthKey]);
+
+  /** Fila con el logrado de hoy cuando ya llegó el recálculo. */
+  const withFreshAchieved = (r: MetaHistoryRow): MetaHistoryRow => {
+    const value = fresh?.[monthAchievementKey(r.subject, r.advisorMembershipId, r.metric)];
+    if (value === undefined || value === r.achieved) return r;
+    // La META no se recalcula: es el objetivo que estaba puesto al cerrar.
+    return { ...r, achieved: value, pct: computeGoalPct(value, r.target) ?? 0 };
+  };
   return (
     <div>
       <h3 className="mb-1 text-sm font-semibold capitalize text-slate-700 dark:text-slate-200">
@@ -500,15 +531,21 @@ function MonthHistory({
       </h3>
       {live ? (
         <p className="mb-3 text-xs text-slate-400 dark:text-slate-500">
-          Avance en tiempo real del mes en curso. Al cerrar el mes se congela en el histórico.
+          Avance en tiempo real del mes en curso.
         </p>
       ) : (
-        <div className="mb-2" />
+        <p className="mb-3 text-xs text-slate-400 dark:text-slate-500">
+          Recalculado con los pedidos de hoy: una venta de este mes que terminó de pagarse después
+          sí cuenta aquí. La meta es la que estaba puesta al cerrar.
+        </p>
       )}
       <div className="space-y-5">
         <MonthCloseRate monthKey={monthKey} initialRows={closeRates} />
         {metrics.map((m) => {
-          const subjectRows = rows.filter((r) => r.metric === m).sort(sortSubjects);
+          const subjectRows = rows
+            .filter((r) => r.metric === m)
+            .map(withFreshAchieved)
+            .sort(sortSubjects);
           return (
             <div key={m}>
               <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">

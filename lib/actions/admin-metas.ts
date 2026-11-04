@@ -31,6 +31,7 @@ import { monthLabel, recentMonthKeys } from "@/lib/time/period";
 import {
   loadAdminGoalProgress,
   loadCloseRatesForMonth,
+  loadGoalAchievementsForMonth,
   type CloseRateRow,
   type GoalProgress,
 } from "@/lib/services/goal-progress";
@@ -249,6 +250,47 @@ export async function loadAdminMetas(): Promise<LoadAdminMetasResult> {
 
 // ── % de cierre de un mes cerrado (se pide al abrir el mes) ──────────────
 const monthKeySchema = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/);
+
+/**
+ * Logrado recalculado de un mes CERRADO, para que la barra deje de mostrar
+ * la foto congelada del día 1 y coincida con su propio "Ver pedidos".
+ *
+ * La clave es la MISMA que arma la pantalla (`sujeto:asesor:métrica`), así el
+ * renglón solo sustituye su número sin tener que re-emparejar nada.
+ */
+export type LoadMonthAchievementsResult =
+  | { ok: true; achieved: Record<string, number> }
+  | { ok: false; message: string };
+
+export function monthAchievementKey(
+  subject: GoalSubject,
+  advisorMembershipId: UUID | null,
+  metric: GoalMetric,
+): string {
+  return `${subject}:${advisorMembershipId ?? "-"}:${metric}`;
+}
+
+export async function loadMonthAchievementsAction(
+  raw: unknown,
+): Promise<LoadMonthAchievementsResult> {
+  const parsed = monthKeySchema.safeParse(raw);
+  if (!parsed.success) return { ok: false, message: "Mes inválido." };
+  const admin = await resolveAdminContext("admin-metas");
+  if (!admin.ok) return admin;
+  return withTenantContext(
+    admin.ctx.orgId,
+    async () => {
+      const rows = await loadGoalAchievementsForMonth(admin.ctx.orgId, parsed.data);
+      if (!rows) return { ok: false as const, message: "Mes inválido." };
+      const achieved: Record<string, number> = {};
+      for (const r of rows) {
+        achieved[monthAchievementKey(r.subject, r.advisorMembershipId, r.metric)] = r.achieved;
+      }
+      return { ok: true as const, achieved };
+    },
+    { source: "user_session" },
+  );
+}
 
 export async function loadCloseRatesForMonthAction(raw: unknown): Promise<LoadCloseRatesResult> {
   const parsed = monthKeySchema.safeParse(raw);

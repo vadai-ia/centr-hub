@@ -8,6 +8,7 @@ vi.mock("@/lib/services/dashboard-metrics", () => ({ computeGoalAchievement: vi.
 
 import {
   loadAdminGoalProgress,
+  loadGoalAchievementsForMonth,
   loadVendorGoalProgress,
 } from "@/lib/services/goal-progress";
 import { listGoals } from "@/lib/db/metas";
@@ -229,5 +230,59 @@ describe("meta de venta orgánica (0051)", () => {
       { kind: "advisor", membershipId: A },
       { kind: "advisor", membershipId: B },
     ]);
+  });
+});
+
+/**
+ * Un mes CERRADO se recalcula de los pedidos, no se lee del snapshot.
+ *
+ * El snapshot se congela el día 1 a primera hora y para entonces hay ventas
+ * del mes que todavía no terminan de pagarse. Medido en Centr: 68 pedidos
+ * liquidados después de cerrar su mes; solo en octubre dejaban al equipo
+ * $1.55M por debajo de lo real. Peor: "Ver pedidos" SIEMPRE recalculó, así
+ * que la pantalla se contradecía a sí misma.
+ */
+describe("loadGoalAchievementsForMonth (meses cerrados)", () => {
+  it("recalcula equipo, orgánica y cada vendedor del mes pedido", async () => {
+    mockedAch.mockImplementation(async (_p, scopes) =>
+      scopes.map((s) => {
+        if (s.kind === "team") return { quotes: 0, won: 86, amount: 6_693_980, quotesWon: 0 };
+        if (s.kind === "organic") return { quotes: 0, won: 0, amount: 162_350, quotesWon: 0 };
+        return s.membershipId === A
+          ? { quotes: 0, won: 38, amount: 2_086_969, quotesWon: 0 }
+          : { quotes: 0, won: 14, amount: 1_880_434, quotesWon: 0 };
+      }),
+    );
+
+    const rows = (await loadGoalAchievementsForMonth(ORG, "2026-10"))!;
+    const find = (subject: string, advisor: string | null, metric: string) =>
+      rows.find(
+        (r) => r.subject === subject && r.advisorMembershipId === advisor && r.metric === metric,
+      )?.achieved;
+
+    expect(find("team", null, "amount")).toBe(6_693_980);
+    expect(find("advisor", B, "amount")).toBe(1_880_434); // el que estaba subestimado
+    expect(find("advisor", A, "won")).toBe(38);
+    expect(mockedAch).toHaveBeenCalledWith(expect.anything(), [
+      { kind: "team" },
+      { kind: "organic" },
+      { kind: "advisor", membershipId: A },
+      { kind: "advisor", membershipId: B },
+    ]);
+  });
+
+  it("la venta orgánica solo trae monto", async () => {
+    // Pedirle "ganadas" daría un cero que no significa nada (0051).
+    mockedAch.mockImplementation(async (_p, scopes) =>
+      scopes.map(() => ({ quotes: 0, won: 7, amount: 100, quotesWon: 0 })),
+    );
+    const rows = (await loadGoalAchievementsForMonth(ORG, "2026-10"))!;
+    const organicas = rows.filter((r) => r.subject === "organic");
+    expect(organicas.map((r) => r.metric)).toEqual(["amount"]);
+  });
+
+  it("un mes inválido no consulta nada", async () => {
+    expect(await loadGoalAchievementsForMonth(ORG, "2026-13")).toBeNull();
+    expect(mockedAch).not.toHaveBeenCalled();
   });
 });

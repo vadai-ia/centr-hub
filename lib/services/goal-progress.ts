@@ -16,7 +16,12 @@ import {
   type GoalThresholds,
   type GoalZone,
 } from "@/lib/metas/semaphore";
-import { isEditableGoalMetric, type GoalMetric, type GoalSubject } from "@/lib/metas/schema";
+import {
+  isEditableGoalMetric,
+  metricsForSubject,
+  type GoalMetric,
+  type GoalSubject,
+} from "@/lib/metas/schema";
 import {
   currentMonthKey,
   resolveCurrentMonthPeriod,
@@ -244,6 +249,67 @@ export async function loadCloseRatesForMonth(
       closeRate,
     });
   });
+  return rows;
+}
+
+/** Logrado recalculado de un mes para un sujeto y una métrica. */
+export interface MonthAchievementRow {
+  subject: GoalSubject;
+  advisorMembershipId: UUID | null;
+  metric: GoalMetric;
+  achieved: number;
+}
+
+/**
+ * Logrado de un mes CERRADO, recalculado de los pedidos — no leído del
+ * snapshot.
+ *
+ * El snapshot (`goal_results`) se congela el día 1 a primera hora, y para
+ * entonces hay ventas del mes que todavía no terminan de pagarse: su
+ * `paid_at` cae dentro del mes pero se liquidan días después. Medido en
+ * Centr: **68 pedidos liquidados después de cerrar su mes**, y solo en
+ * octubre eso dejaba al equipo $1.55M por debajo de lo real (a Pepe le
+ * faltaban dos pedidos del día 30 por $1,186,950).
+ *
+ * Peor aún, la MISMA pantalla se contradecía: "Ver pedidos" siempre
+ * recalculó, así que la tabla no cuadraba con su propia barra. Es el mismo
+ * criterio que ya seguía el % de cierre (`loadCloseRatesForMonth`): una
+ * venta cobrada el 30 de octubre es de octubre aunque el pago entre el 3 de
+ * noviembre.
+ *
+ * La META sí se queda congelada: es el objetivo que estaba puesto al cerrar,
+ * y recalcularlo con el objetivo de hoy reescribiría el pasado.
+ */
+export async function loadGoalAchievementsForMonth(
+  organizationId: UUID,
+  monthKey: string,
+): Promise<MonthAchievementRow[] | null> {
+  const period: ResolvedPeriod | null = resolveMonthPeriod(monthKey);
+  if (!period) return null;
+
+  const vendors = await listRealVendorsForMapping(organizationId);
+  const scopes: GoalScope[] = [
+    { kind: "team" },
+    { kind: "organic" },
+    ...vendors.map((v) => ({ kind: "advisor" as const, membershipId: v.id as UUID })),
+  ];
+  const achievements = await computeGoalAchievement(period, scopes);
+
+  const rows: MonthAchievementRow[] = [];
+  const push = (
+    subject: GoalSubject,
+    advisorMembershipId: UUID | null,
+    tally: ScopeAchievement,
+  ): void => {
+    // La venta orgánica solo admite monto (0051): pedirle "ganadas" daría un
+    // cero que no significa nada.
+    for (const metric of metricsForSubject(subject)) {
+      rows.push({ subject, advisorMembershipId, metric, achieved: achievedFor(metric, tally) });
+    }
+  };
+  push("team", null, achievements[0] ?? ZERO);
+  push("organic", null, achievements[1] ?? ZERO);
+  vendors.forEach((v, i) => push("advisor", v.id as UUID, achievements[i + 2] ?? ZERO));
   return rows;
 }
 
