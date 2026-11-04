@@ -268,7 +268,7 @@ export interface MonthAchievementRow {
  * entonces hay ventas del mes que todavía no terminan de pagarse: su
  * `paid_at` cae dentro del mes pero se liquidan días después. Medido en
  * Centr: **68 pedidos liquidados después de cerrar su mes**, y solo en
- * octubre eso dejaba al equipo $1.55M por debajo de lo real (a Pepe le
+ * octubre eso dejaba al equipo $2.05M por debajo de lo real (a Pepe le
  * faltaban dos pedidos del día 30 por $1,186,950).
  *
  * Peor aún, la MISMA pantalla se contradecía: "Ver pedidos" siempre

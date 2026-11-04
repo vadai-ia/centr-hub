@@ -239,7 +239,7 @@ describe("meta de venta orgánica (0051)", () => {
  * El snapshot se congela el día 1 a primera hora y para entonces hay ventas
  * del mes que todavía no terminan de pagarse. Medido en Centr: 68 pedidos
  * liquidados después de cerrar su mes; solo en octubre dejaban al equipo
- * $1.55M por debajo de lo real. Peor: "Ver pedidos" SIEMPRE recalculó, así
+ * $2.05M por debajo de lo real. Peor: "Ver pedidos" SIEMPRE recalculó, así
  * que la pantalla se contradecía a sí misma.
  */
 describe("loadGoalAchievementsForMonth (meses cerrados)", () => {
