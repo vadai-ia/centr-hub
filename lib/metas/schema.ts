@@ -28,6 +28,22 @@ export function isEditableGoalMetric(metric: GoalMetric): boolean {
   return (EDITABLE_GOAL_METRICS as readonly GoalMetric[]).includes(metric);
 }
 
+/**
+ * Clave de una celda (sujeto + métrica) para cruzar el logrado recalculado de
+ * un mes cerrado contra la fila que ya pinta la pantalla.
+ *
+ * Vive en este módulo PURO y no junto a la action: un archivo `"use server"`
+ * solo puede exportar funciones `async`, y un helper síncrono ahí **rompe el
+ * build de producción** (no lo detecta `tsc`). Ver `ERRORES.md`.
+ */
+export function monthAchievementKey(
+  subject: GoalSubject,
+  advisorMembershipId: string | null,
+  metric: GoalMetric,
+): string {
+  return `${subject}:${advisorMembershipId ?? "-"}:${metric}`;
+}
+
 /** Etiqueta legible (español) de cada métrica. */
 export const GOAL_METRIC_LABELS: Record<GoalMetric, string> = {
   quotes: "Cotizaciones enviadas",

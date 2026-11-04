@@ -19,6 +19,7 @@ import {
   goalThresholdsInputSchema,
   isCountMetric,
   isEditableGoalMetric,
+  monthAchievementKey,
   type GoalMetric,
   type GoalSubject,
 } from "@/lib/metas/schema";
@@ -261,14 +262,6 @@ const monthKeySchema = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/);
 export type LoadMonthAchievementsResult =
   | { ok: true; achieved: Record<string, number> }
   | { ok: false; message: string };
-
-export function monthAchievementKey(
-  subject: GoalSubject,
-  advisorMembershipId: UUID | null,
-  metric: GoalMetric,
-): string {
-  return `${subject}:${advisorMembershipId ?? "-"}:${metric}`;
-}
 
 export async function loadMonthAchievementsAction(
   raw: unknown,

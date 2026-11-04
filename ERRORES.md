@@ -864,3 +864,7 @@ Toda entrada NUEVA sigue este mismo formato condensado — **solo la lección ac
 ### Traducir un mensaje solo arregla los avisos FUTUROS
 - **Causa raíz:** el texto del aviso se guarda en la fila de `notifications` al crearla, no se compone al pintarla. Cambiar la traducción deja intactos los cientos de avisos que ya existen — que son justo los que el usuario está viendo.
 - **Regla:** todo cambio de copy de un aviso lleva su correctivo que re-escribe lo ya guardado con la MISMA función (`maintenance:rewrite-failure-notifications`), leyendo el error crudo de `origin_reference`. Es idempotente, así que se puede correr tras cada cambio de traducción.
+
+### `tsc` verde no significa que el deploy entre: un export síncrono en `"use server"` rompe el BUILD
+- **Causa raíz:** en un archivo de server actions TODOS los exports deben ser funciones `async`. Al exportar un helper síncrono (`monthAchievementKey`) desde `lib/actions/*.ts`, `tsc --noEmit` y la suite pasaron en verde, pero el build de Next falló con *"Server actions must be async functions"*. Vercel se quedó con la versión ANTERIOR y el cambio nunca llegó a producción — el síntoma para quien lo pidió es "no veo nada diferente", indistinguible de un cambio que no se hizo.
+- **Regla:** un helper puro va a un módulo puro (`lib/metas/*`, `lib/services/*`), nunca junto a la action que lo usa. Y antes de decir que algo "ya está en producción", correr `npm run build` — es la única comprobación que ejecuta las reglas de Next; `tsc` y los tests no las ven.
