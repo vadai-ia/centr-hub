@@ -6,9 +6,11 @@ import type {
 } from "@supabase/supabase-js";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 import {
-  PIPELINE_POLLING_FALLBACK_MS,
   PIPELINE_REALTIME_RECONNECT_TIMEOUT_MS,
+  REALTIME_BURST_WINDOW_MS,
 } from "@/lib/constants";
+import { useBackgroundRefresh, isDocumentHidden } from "@/lib/realtime/use-background-refresh";
+import { planBurstFlush } from "@/lib/services/realtime-refresh-policy";
 import type { Funnel, UUID } from "@/lib/types/database";
 
 export type RealtimeStatus =
@@ -49,7 +51,10 @@ interface Args {
       assigned_advisor_id: UUID | null;
     }>,
   ) => void;
-  /** Disparado en cada tick del fallback polling. */
+  /**
+   * Recarga COMPLETA del tablero. La dispara la recarga de fondo adaptativa
+   * (ver `shouldBackgroundRefresh`) y una ráfaga grande de cambios.
+   */
   onPollingTick: () => void;
 }
 
@@ -66,8 +71,14 @@ interface Args {
  *   - Reintento automático con backoff. Tras `PIPELINE_REALTIME_RECONNECT_TIMEOUT_MS`
  *     sin éxito, marca estado `stale` para que el toolbar invite al
  *     reload manual.
- *   - Polling fallback cada `PIPELINE_POLLING_FALLBACK_MS` para
- *     compensar tanto la falta de RLS hook como cortes temporales.
+ *   - Recarga de fondo ADAPTATIVA (`useBackgroundRefresh`): nada con la
+ *     pestaña oculta; cada 30 s si Realtime cayó; cada 5 min de respaldo si
+ *     está conectado. Antes era cada 30 s incondicional y agotó el CPU de
+ *     Vercel (proyecto pausado).
+ *   - Pestaña oculta: los eventos NO llaman al servidor; dejan pendiente
+ *     una recarga para cuando vuelva.
+ *   - Ráfagas: los cambios se juntan `REALTIME_BURST_WINDOW_MS`; con muchas
+ *     tarjetas, una recarga completa en vez de N lecturas sueltas.
  */
 export function usePipelineRealtime({
   organizationId,
@@ -79,6 +90,11 @@ export function usePipelineRealtime({
   const [status, setStatus] = useState<RealtimeStatus>("connecting");
   const onEventRef = useRef(onEvent);
   const onPollingTickRef = useRef(onPollingTick);
+  const connectedRef = useRef(false);
+  const { markDirty, markRefreshed } = useBackgroundRefresh(
+    () => onPollingTickRef.current(),
+    connectedRef,
+  );
 
   useEffect(() => {
     onEventRef.current = onEvent;
@@ -90,6 +106,42 @@ export function usePipelineRealtime({
   useEffect(() => {
     const supabase = getSupabaseBrowserClient();
     setStatus("connecting");
+    connectedRef.current = false;
+
+    // Ráfaga en curso: último payload por opp (una opp que cambia 3 veces
+    // en un segundo se lee UNA vez).
+    type Payload = Parameters<Args["onEvent"]>[0];
+    const pending = new Map<UUID, Payload>();
+    let flushTimer: ReturnType<typeof setTimeout> | null = null;
+    function flush() {
+      flushTimer = null;
+      const batch = Array.from(pending.values());
+      pending.clear();
+      const plan = planBurstFlush(batch.length);
+      if (plan === "full_reload") {
+        markRefreshed();
+        onPollingTickRef.current();
+      } else if (plan === "per_item") {
+        for (const p of batch) onEventRef.current(p);
+      }
+    }
+    function enqueue(payload: Payload) {
+      // Un borrado se aplica en local, sin servidor: no se junta.
+      if (payload.eventType === "DELETE") {
+        onEventRef.current(payload);
+        return;
+      }
+      // Nadie mira la pestaña: no se paga ninguna lectura. Al volver, una
+      // sola recarga completa la pone al día.
+      if (isDocumentHidden()) {
+        markDirty();
+        return;
+      }
+      const id = ((payload.new ?? payload.old) as { id?: UUID })?.id;
+      if (!id) return;
+      pending.set(id, payload);
+      if (!flushTimer) flushTimer = setTimeout(flush, REALTIME_BURST_WINDOW_MS);
+    }
 
     // Filtro server-side. Supabase Realtime acepta una sola cláusula
     // `filter`, así que combinamos `organization_id=eq.X AND funnel=eq.Y`.
@@ -155,11 +207,12 @@ export function usePipelineRealtime({
             if (advisor.assigned_advisor_id !== null) return;
           }
 
-          onEventRef.current(payload);
+          enqueue(payload);
         },
       )
       .subscribe((subStatus) => {
         if (subStatus === "SUBSCRIBED") {
+          connectedRef.current = true;
           setStatus("connected");
           if (staleTimer) clearTimeout(staleTimer);
         } else if (
@@ -167,21 +220,20 @@ export function usePipelineRealtime({
           subStatus === "TIMED_OUT" ||
           subStatus === "CLOSED"
         ) {
+          connectedRef.current = false;
           setStatus("disconnected");
           armStaleTimer();
         }
       });
 
-    const pollingInterval = setInterval(() => {
-      onPollingTickRef.current();
-    }, PIPELINE_POLLING_FALLBACK_MS);
-
     return () => {
       if (staleTimer) clearTimeout(staleTimer);
-      clearInterval(pollingInterval);
+      if (flushTimer) clearTimeout(flushTimer);
+      pending.clear();
+      connectedRef.current = false;
       supabase.removeChannel(channel);
     };
-  }, [organizationId, funnel, effectiveAdvisorId]);
+  }, [organizationId, funnel, effectiveAdvisorId, markDirty, markRefreshed]);
 
   return status;
 }

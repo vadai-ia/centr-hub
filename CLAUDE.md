@@ -345,7 +345,19 @@ Una vez habilitado el hook + invalidadas las sesiones:
 ### Anti-patrón a evitar
 
 - **NO** modificar `current_organization_id()` para leer de `app_metadata.organization_id`. La función espera el claim en la raíz; cualquier cambio rompe la consistencia entre Barrera 1 (JWT) y Barrera 2 (setting de sesión server-side, que ya escribe a la raíz vía `set_config`). Si la lógica del hook necesita evolucionar, se cambia el hook, no la función de resolución.
-- **NO** retirar el polling fallback (`PIPELINE_POLLING_FALLBACK_MS`) hasta que M5-DT-03 se ejecute con validación empírica de que Realtime entrega eventos consistentemente. El hook habilita el camino feliz; el polling sigue como red de seguridad mientras tanto.
+- **NO** retirar del todo la recarga de fondo hasta validar empíricamente que Realtime entrega eventos consistentemente (M5-DT-03). Desde nov-2026 ya NO es incondicional: ver "Recarga de fondo adaptativa" abajo.
+
+## Recarga de fondo adaptativa (Pipeline y Mi Día)
+
+El Pipeline y Mi Día se recargaban **completos cada 30 s, siempre** —pestaña oculta o no, Realtime conectado o no—. Con pestañas abiertas todo el día eso agotó el Active CPU del plan Hobby de Vercel y **el proyecto quedó pausado** (todo respondía `402 DEPLOYMENT_DISABLED`, incluidos los webhooks). El 90% de las peticiones las disparaba la app sola.
+
+La regla ahora vive en `shouldBackgroundRefresh` ([lib/services/realtime-refresh-policy.ts](lib/services/realtime-refresh-policy.ts), puro) y la cablea `useBackgroundRefresh` ([lib/realtime/use-background-refresh.ts](lib/realtime/use-background-refresh.ts)):
+- **Pestaña oculta → nada.** Los eventos de Realtime tampoco llaman al servidor: marcan una recarga pendiente que se hace UNA vez al volver.
+- **Realtime conectado →** respaldo cada `REALTIME_SAFETY_POLL_MS` (5 min). Los cambios normales siguen llegando al instante; esto solo cubre un evento perdido en silencio.
+- **Realtime caído →** cada `PIPELINE_POLLING_FALLBACK_MS` (30 s), como antes.
+- **Ráfagas (Pipeline):** los cambios se juntan `REALTIME_BURST_WINDOW_MS`; desde `REALTIME_BURST_FULL_RELOAD_THRESHOLD` tarjetas se hace una recarga completa en vez de N lecturas sueltas.
+
+**Al agregar una pantalla con refresco automático, usar `useBackgroundRefresh` — nunca un `setInterval` incondicional que llame a una server action.** Cada tick es una función de Vercel facturada en CPU. Guard: `tests/realtime-refresh-policy.test.ts` (falla si los hooks vuelven a tener `setInterval`).
 
 ## Setup M9.2 — gestión de usuarios, invitaciones y vínculo de login
 

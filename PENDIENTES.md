@@ -51,7 +51,7 @@
   ```
   Si retorna filas → notificar al admin. Mover a M10 cuando se construya el dashboard de health interna. Estimar 1h.
 
-- **M5-DT-03 — Eliminar polling fallback tras M5-DT-01.** Una vez validado empíricamente que Realtime entrega eventos consistentemente, el polling de `usePipelineRealtime` consume bandwidth + DB sin valor agregado. Cambiar el polling a "solo cuando `status === 'disconnected' | 'stale'`" en lugar de incondicional. Estimar 1h.
+- **M5-DT-03 — Eliminar polling fallback tras M5-DT-01.** **PARCIAL (nov-2026):** el polling ya no es incondicional — se forzó porque agotó el CPU de Vercel (ver CLAUDE.md "Recarga de fondo adaptativa"). Hoy: nada con pestaña oculta, 30 s solo con Realtime caído, 5 min de respaldo con Realtime conectado (Pipeline y Mi Día). Pendiente: la validación empírica de delivery; con ella se puede subir o quitar el respaldo de 5 min.
 
 ## M6
 

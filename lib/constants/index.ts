@@ -135,6 +135,26 @@ export const PIPELINE_POLLING_FALLBACK_MS = 30_000 as const;
 export const PIPELINE_REALTIME_RECONNECT_TIMEOUT_MS = 30_000 as const;
 
 /**
+ * Recarga de respaldo ADAPTATIVA (Pipeline y Mi Día). Antes se recargaba el
+ * tablero completo cada 30 s siempre —pestaña oculta o no, Realtime
+ * conectado o no— y eso agotó el CPU del plan de Vercel (proyecto pausado).
+ * Ver `lib/services/realtime-refresh-policy.ts`.
+ *
+ * `REALTIME_SAFETY_POLL_MS` — con Realtime CONECTADO los cambios ya llegan
+ *   al instante; la recarga solo cubre un evento perdido en silencio. Es el
+ *   peor caso de retraso de ese evento, no el de los cambios normales.
+ * `REALTIME_POLL_CHECK_MS` — cada cuánto se evalúa la regla (barato: no
+ *   llama al servidor salvo que toque recargar).
+ * `REALTIME_BURST_WINDOW_MS` — ventana para juntar una ráfaga de cambios.
+ * `REALTIME_BURST_FULL_RELOAD_THRESHOLD` — a partir de cuántas tarjetas en
+ *   una ráfaga sale más barato UNA recarga completa que N lecturas sueltas.
+ */
+export const REALTIME_SAFETY_POLL_MS = 5 * 60_000;
+export const REALTIME_POLL_CHECK_MS = 15_000;
+export const REALTIME_BURST_WINDOW_MS = 1_000;
+export const REALTIME_BURST_FULL_RELOAD_THRESHOLD = 8;
+
+/**
  * Auto-ocultar cerradas (anti-ruido — Fix de pipeline).
  *
  * `DEFAULT_HIDE_CLOSED_AFTER_DAYS` — umbral global por defecto: una opp

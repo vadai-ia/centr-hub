@@ -5,10 +5,8 @@ import type {
   RealtimePostgresChangesPayload,
 } from "@supabase/supabase-js";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
-import {
-  PIPELINE_POLLING_FALLBACK_MS,
-  PIPELINE_REALTIME_RECONNECT_TIMEOUT_MS,
-} from "@/lib/constants";
+import { PIPELINE_REALTIME_RECONNECT_TIMEOUT_MS } from "@/lib/constants";
+import { useBackgroundRefresh, isDocumentHidden } from "@/lib/realtime/use-background-refresh";
 import type { UUID } from "@/lib/types/database";
 
 export type MiDiaRealtimeStatus = "connecting" | "connected" | "offline";
@@ -31,10 +29,11 @@ interface Args {
  * Misma disciplina que el realtime del pipeline (M5):
  *   - cleanup explícito al desmontar / cambiar de usuario;
  *   - stale timer → estado `offline` para el indicador sutil;
- *   - polling fallback SIEMPRE activo (camino feliz mientras el Auth
- *     Hook del claim `organization_id` no esté habilitado — ver CLAUDE.md
- *     "Hook de claim organization_id" y ERRORES.md). Cubre además cortes
- *     temporales y la entrega entre dispositivos.
+ *   - recarga de fondo ADAPTATIVA (`useBackgroundRefresh`): nada con la
+ *     pestaña oculta, cada 30 s si Realtime cayó, cada 5 min de respaldo si
+ *     está conectado. Antes era cada 30 s incondicional y agotó el CPU de
+ *     Vercel. Los eventos con la pestaña oculta dejan pendiente UNA recarga
+ *     para cuando vuelva.
  *
  * Los eventos no traen el modelo derivado de Mi Día, así que `onChange`
  * recarga el tablero completo (server action) en vez de mutar en sitio —
@@ -46,17 +45,30 @@ export function useMiDiaRealtime({ organizationId, userId, onChange }: Args): Mi
   useEffect(() => {
     onChangeRef.current = onChange;
   }, [onChange]);
+  const connectedRef = useRef(false);
+  const { markDirty, markRefreshed } = useBackgroundRefresh(
+    () => onChangeRef.current(),
+    connectedRef,
+  );
 
   useEffect(() => {
     if (!organizationId || !userId) return;
     const supabase = getSupabaseBrowserClient();
     setStatus("connecting");
+    connectedRef.current = false;
 
     // Coalescer ráfagas (varios eventos en cluster corto → un refresh).
     let coalesce: ReturnType<typeof setTimeout> | null = null;
     function notifyChange() {
+      if (isDocumentHidden()) {
+        markDirty();
+        return;
+      }
       if (coalesce) clearTimeout(coalesce);
-      coalesce = setTimeout(() => onChangeRef.current(), 250);
+      coalesce = setTimeout(() => {
+        markRefreshed();
+        onChangeRef.current();
+      }, 250);
     }
 
     function isThisOrg(payload: RealtimePostgresChangesPayload<{ organization_id?: UUID }>): boolean {
@@ -103,6 +115,7 @@ export function useMiDiaRealtime({ organizationId, userId, onChange }: Args): Mi
       )
       .subscribe((subStatus) => {
         if (subStatus === "SUBSCRIBED") {
+          connectedRef.current = true;
           setStatus("connected");
           if (staleTimer) clearTimeout(staleTimer);
         } else if (
@@ -110,23 +123,19 @@ export function useMiDiaRealtime({ organizationId, userId, onChange }: Args): Mi
           subStatus === "TIMED_OUT" ||
           subStatus === "CLOSED"
         ) {
+          connectedRef.current = false;
           setStatus("offline");
           armStaleTimer();
         }
       });
 
-    // Polling fallback — red de seguridad SIEMPRE activa.
-    const pollingInterval = setInterval(() => {
-      onChangeRef.current();
-    }, PIPELINE_POLLING_FALLBACK_MS);
-
     return () => {
       if (coalesce) clearTimeout(coalesce);
       if (staleTimer) clearTimeout(staleTimer);
-      clearInterval(pollingInterval);
+      connectedRef.current = false;
       supabase.removeChannel(channel);
     };
-  }, [organizationId, userId]);
+  }, [organizationId, userId, markDirty, markRefreshed]);
 
   return status;
 }
